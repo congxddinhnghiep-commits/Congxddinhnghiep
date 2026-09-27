@@ -1,5 +1,6 @@
 import { normalizeText } from './text.js';
 import type { ResourceType } from './types.js';
+import { transportAmount, type TransportLeg } from './transport.js';
 import { unitFactor } from './units.js';
 
 export type PeriodType = 'month' | 'quarter' | 'year';
@@ -35,6 +36,35 @@ export interface PriceBook {
   status: 'draft' | 'verified';
   note: string | null;
   title: string;
+  /** Province name at the time of issue (before the 2025 merger it may differ from `region`). */
+  jurisdictionAtIssue?: string | null;
+  /** Whether the quoted prices already include transport to site: yes / no / unknown. */
+  transportIncluded?: 'yes' | 'no' | 'unknown';
+  verificationStatus?: 'verified' | 'needs_review' | 'not_verified' | 'superseded';
+}
+
+export interface ProvinceMerger {
+  successor: string;
+  predecessors: string[];
+}
+
+/** Current province for a province name at issue (post-2025 merger); null when unknown. */
+export function successorOf(name: string, mergers: ProvinceMerger[]): string | null {
+  const n = normalizeText(name);
+  for (const m of mergers) if (m.predecessors.some((p) => normalizeText(p) === n) || normalizeText(m.successor) === n) return m.successor;
+  return null;
+}
+
+/**
+ * A book issued for a former province (jurisdiction at issue ≠ current region) may only be applied
+ * when the project's area is known to lie in that former province (sub-area matches) – never to the
+ * whole merged province by default.
+ */
+export function bookScopeFits(book: Pick<PriceBook, 'region' | 'subArea' | 'jurisdictionAtIssue'>, projectSubArea: string | null | undefined): boolean {
+  if (!book.jurisdictionAtIssue || normalizeText(book.jurisdictionAtIssue) === normalizeText(book.region)) return true;
+  if (!projectSubArea) return false;
+  const sa = normalizeText(projectSubArea);
+  return normalizeText(book.jurisdictionAtIssue) === sa || (!!book.subArea && normalizeText(book.subArea) === sa);
 }
 
 export interface PriceBookRow {
@@ -76,7 +106,7 @@ export function periodLabel(type: PeriodType, year: number, value: number | null
  * Propose books for a project: same region (and sub-area when both are set), period starting on or
  * before the price date; per book type the latest period first.
  */
-export function proposeBooks<T extends Pick<PriceBook, 'region' | 'subArea' | 'periodStart' | 'bookType' | 'status'>>(
+export function proposeBooks<T extends Pick<PriceBook, 'region' | 'subArea' | 'periodStart' | 'bookType' | 'status'> & Partial<Pick<PriceBook, 'jurisdictionAtIssue' | 'verificationStatus'>>>(
   books: T[],
   region: string | null,
   priceDate: string | null,
@@ -87,7 +117,9 @@ export function proposeBooks<T extends Pick<PriceBook, 'region' | 'subArea' | 'p
   const date = priceDate || new Date().toISOString().slice(0, 10);
   return books
     .filter((b) => normalizeText(b.region) === r)
-    .filter((b) => !b.subArea || !subArea || normalizeText(b.subArea) === normalizeText(subArea))
+    .filter((b) => b.verificationStatus !== 'superseded')
+    .filter((b) => bookScopeFits(b, subArea))
+    .filter((b) => !b.subArea || !subArea || normalizeText(b.subArea) === normalizeText(subArea) || (!!b.jurisdictionAtIssue && normalizeText(b.jurisdictionAtIssue) === normalizeText(subArea)))
     .filter((b) => b.periodStart <= date)
     .sort((a, b) => a.bookType.localeCompare(b.bookType) || b.periodStart.localeCompare(a.periodStart));
 }
@@ -116,6 +148,10 @@ export interface PriceSource {
   rowId?: number;
   /** Original quoted price before VAT removal / unit conversion. */
   quoted?: number;
+  /** Source price before transport to site. */
+  sourcePrice?: number;
+  /** Transport to site added (VND per unit), 0 when the source already includes it. */
+  transport?: number;
   notes?: string[];
 }
 
@@ -153,6 +189,40 @@ export function bookRowPrice(row: PriceBookRow, book: PriceBook, resourceUnit: s
  * (matching resource type, row sub-area = project sub-area or general) → base price (flagged).
  */
 export function resolvePrices(
+  resources: ResolvableResource[],
+  manual: Record<string, number>,
+  selections: BookSelection[],
+  subArea?: string | null,
+  legs: Record<string, TransportLeg[]> = {},
+): Record<string, ResolvedPrice> {
+  const out = resolveSourcePrices(resources, manual, selections, subArea);
+  // Transport to site – never added twice
+  for (const [code, list] of Object.entries(legs)) {
+    const r = out[code];
+    if (!r || !list.length) continue;
+    const t = transportAmount(list);
+    const book = r.source.bookId !== undefined ? selections.find((s) => s.book.id === r.source.bookId)?.book : undefined;
+    const included = r.source.kind === 'manual' ? true : r.source.kind === 'book' ? book?.transportIncluded === 'yes' : false;
+    r.source.sourcePrice = r.price;
+    r.source.notes = [...(r.source.notes ?? [])];
+    if (included) {
+      r.source.transport = 0;
+      r.source.notes.push(
+        r.source.kind === 'manual'
+          ? 'giá nhập tay coi là giá đến công trình – không cộng vận chuyển (tránh tính 2 lần)'
+          : 'nguồn giá đã gồm vận chuyển – không cộng cự ly vận chuyển (tránh tính 2 lần)',
+      );
+    } else {
+      r.source.transport = t;
+      r.price += t;
+      r.source.notes.push(`+ vận chuyển đến công trình ${Math.round(t).toLocaleString('vi-VN')} đ/đv`);
+      if (book?.transportIncluded === 'unknown' || (r.source.kind === 'book' && !book?.transportIncluded)) r.source.notes.push('chưa rõ nguồn giá đã gồm vận chuyển hay chưa');
+    }
+  }
+  return out;
+}
+
+function resolveSourcePrices(
   resources: ResolvableResource[],
   manual: Record<string, number>,
   selections: BookSelection[],

@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import multer from 'multer';
 import {
+  computeQuantityLines,
+  parseVariables,
+  QuantityError,
   BUILDING_TYPE_LABELS,
   evaluateFormula,
   FormulaError,
@@ -17,9 +20,10 @@ import { config, WEB_DIST } from './config.js';
 import type { DB } from './db.js';
 import { buildWorkbook } from './excel.js';
 import { downloadDriveFile } from './gdrive.js';
-import { applyImport, getParsed, parseBuffer, previewOf, storeParsed, type ImportTarget } from './importer.js';
+import { applyImport, getParsed, parseAndStore, previewOf, type ImportTarget } from './importer.js';
 import { analyze, importEstimate, listTemplates } from './estimate-import.js';
-import { PriceBookService, regions, seedPriceBookExample } from './pricebooks.js';
+import { PriceBookService, provinceMergers, regions, seedPriceBookExample } from './pricebooks.js';
+import { validateProject } from './validation.js';
 import { LegalService, legalDocuments } from './legal.js';
 import { HttpError, Repo } from './repo.js';
 
@@ -283,6 +287,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
     }),
   );
   api.get('/projects/:id/estimate', h((req) => repo.calculate(proj(req).id)));
+  api.get('/projects/:id/validation', h((req) => validateProject(repo, legal, priceBooks, proj(req).id)));
 
   // categories
   api.post('/projects/:id/categories', h((req) => repo.createCategory(proj(req).id, String(req.body?.name ?? ''))));
@@ -335,6 +340,75 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
     '/projects/:id/items/:itemId',
     h((req) => {
       repo.deleteItem(proj(req).id, id(req.params.itemId));
+    }),
+  );
+
+  // pricing method and quantity lines (Section F)
+  api.put(
+    '/projects/:id/items/:itemId/pricing',
+    h((req) => {
+      const p = proj(req);
+      const b = req.body ?? {};
+      const method = b.pricingMethod;
+      if (!['NORM_BASED', 'CUSTOM_GTT', 'MARKET_QUOTE'].includes(method)) throw new HttpError(400, 'Phương thức tính giá không hợp lệ');
+      const num = (v: unknown) => {
+        if (v === undefined || v === null || v === '') return 0;
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0) throw new HttpError(400, 'Đơn giá không hợp lệ');
+        return n;
+      };
+      const custom = b.custom ? { vl: num(b.custom.vl), nc: num(b.custom.nc), m: num(b.custom.m) } : null;
+      const q = b.quote ?? null;
+      if (method === 'MARKET_QUOTE') {
+        if (!q?.supplier) throw new HttpError(400, 'Báo giá cần tên nhà cung cấp');
+        if (q.vatStatus && !['before_vat', 'including_vat', 'not_stated'].includes(q.vatStatus)) throw new HttpError(400, 'Trạng thái VAT không hợp lệ');
+        checkDate(q.date);
+        checkDate(q.validUntil);
+      }
+      return repo.setPricing(p.id, id(req.params.itemId), {
+        pricingMethod: method,
+        custom,
+        priceSource: b.priceSource ? String(b.priceSource).trim() || null : null,
+        quote: q ? { supplier: q.supplier ?? null, number: q.number ?? null, date: q.date || null, validUntil: q.validUntil || null, vatStatus: q.vatStatus ?? 'not_stated', vatRate: q.vatRate !== undefined && q.vatRate !== null && q.vatRate !== '' ? Number(q.vatRate) : null } : null,
+      });
+    }),
+  );
+  const linesOf = (v: unknown) => {
+    if (!Array.isArray(v)) throw new HttpError(400, 'Danh sách dòng khối lượng không hợp lệ');
+    if (v.length > 500) throw new HttpError(400, 'Tối đa 500 dòng khối lượng');
+    return v.map((l: { description?: unknown; expression?: unknown; variables?: unknown; variablesText?: unknown; sign?: unknown; unit?: unknown }) => {
+      let variables: Record<string, number> = {};
+      try {
+        variables =
+          typeof l.variablesText === 'string'
+            ? parseVariables(l.variablesText)
+            : l.variables && typeof l.variables === 'object'
+              ? Object.fromEntries(Object.entries(l.variables as Record<string, unknown>).map(([k, x]) => [k, Number(x)]))
+              : {};
+      } catch (e) {
+        throw new HttpError(400, (e as Error).message);
+      }
+      return {
+        description: String(l.description ?? ''),
+        expression: String(l.expression ?? ''),
+        variables,
+        sign: (Number(l.sign) === -1 ? -1 : 1) as 1 | -1,
+        unit: l.unit ? String(l.unit) : null,
+      };
+    });
+  };
+  api.get('/projects/:id/items/:itemId/quantity-lines', h((req) => repo.quantityLines(repo.getItem(proj(req).id, id(req.params.itemId)).id)));
+  api.put('/projects/:id/items/:itemId/quantity-lines', h((req) => repo.saveQuantityLines(proj(req).id, id(req.params.itemId), linesOf(req.body?.lines))));
+  api.post(
+    '/quantity/evaluate',
+    h((req) => {
+      const lines = linesOf(req.body?.lines ?? [req.body]);
+      try {
+        return computeQuantityLines(lines, String(req.body?.itemUnit ?? ''));
+      } catch (e) {
+        if (e instanceof QuantityError) throw new HttpError(400, e.message);
+        throw e;
+      }
     }),
   );
 
@@ -515,7 +589,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
         }
         fileName = path.basename(p);
       } else throw new HttpError(400, 'Chưa chọn file');
-      const parsed = storeParsed(req.user!.id, fileName, await parseBuffer(buffer, fileName));
+      const parsed = await parseAndStore(req.user!.id, fileName, buffer);
       return previewOf(parsed, 0, target(req.body?.target));
     }),
   );
@@ -525,7 +599,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
       if (!config.google.clientId) throw new HttpError(400, 'Google Drive chưa được cấu hình (xem docs/google-drive-setup.md)');
       const b = req.body ?? {};
       const { buffer, fileName } = await downloadDriveFile(String(b.fileId), String(b.accessToken), String(b.mimeType ?? ''), String(b.name ?? ''));
-      const parsed = storeParsed(req.user!.id, fileName, await parseBuffer(buffer, fileName));
+      const parsed = await parseAndStore(req.user!.id, fileName, buffer);
       return previewOf(parsed, 0, target(b.target));
     }),
   );
@@ -590,7 +664,39 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
   api.post(
     '/price-books/:bid/status',
     requireAdmin,
-    h((req) => priceBooks.setStatus(bid(req), req.body?.status === 'verified' ? 'verified' : 'draft', req.user!.username)),
+    h((req) => {
+      const st = req.body?.status;
+      if (!['draft', 'verified', 'needs_review', 'not_verified', 'superseded'].includes(st)) throw new HttpError(400, 'Trạng thái không hợp lệ');
+      return priceBooks.setStatus(bid(req), st, req.user!.username);
+    }),
+  );
+  api.get('/price-books/:bid/records', h((req) => priceBooks.records(bid(req))));
+  api.get('/province-mergers', h(() => provinceMergers()));
+  api.get('/projects/:id/transport', h((req) => priceBooks.transportLegs(proj(req).id)));
+  api.put(
+    '/projects/:id/transport/:code',
+    h((req) => {
+      const p = proj(req);
+      const legs = Array.isArray(req.body?.legs) ? req.body.legs : null;
+      if (!legs) throw new HttpError(400, 'Danh sách chặng vận chuyển không hợp lệ');
+      const n = (v: unknown, d = 0) => (v === undefined || v === null || v === '' ? d : Number(v));
+      return priceBooks.saveTransportLegs(
+        p.id,
+        String(req.params.code),
+        legs.map((l: Record<string, unknown>) => ({
+          fromLocation: String(l.fromLocation ?? ''),
+          toLocation: String(l.toLocation ?? ''),
+          roadClass: l.roadClass ? String(l.roadClass) : null,
+          distance: n(l.distance),
+          freightRate: n(l.freightRate),
+          loadFactor: n(l.loadFactor, 1),
+          weightFactor: n(l.weightFactor, 1),
+          handling: n(l.handling),
+          toll: n(l.toll),
+          note: l.note ? String(l.note) : null,
+        })),
+      );
+    }),
   );
   api.post(
     '/price-books/:bid/import',

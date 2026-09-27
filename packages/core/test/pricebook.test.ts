@@ -135,3 +135,48 @@ describe('fuzzy resource matching', () => {
     expect(matchResource({ name: 'Xi măng PCB40', unit: 'm3' }, res)).toBeNull();
   });
 });
+
+import { bookScopeFits, successorOf, transportLegAmount, type TransportLeg } from '@dutoan/core';
+
+describe('transport to site (no double counting)', () => {
+  // Cát vàng: 25 km × 3.000 đ/t.km × 1,4 t/m3 × 1,1 + bốc dỡ 8.000 + trạm phí 2.000 = 115.500 + 10.000 = 125.500 đ/m3
+  const leg: TransportLeg = { fromLocation: 'Mỏ cát', toLocation: 'Công trường', distance: 25, freightRate: 3000, weightFactor: 1.4, loadFactor: 1.1, handling: 8000, toll: 2000 };
+  it('computes a leg amount', () => expect(transportLegAmount(leg)).toBeCloseTo(125500, 6));
+
+  it('adds transport to base / not-included sources only', () => {
+    const base = resolvePrices([CAT], {}, [], null, { 'V.CATV': [leg] })['V.CATV'];
+    expect(base.price).toBeCloseTo(350000 + 125500, 6);
+    expect(base.source.sourcePrice).toBe(350000);
+    expect(base.source.transport).toBeCloseTo(125500, 6);
+
+    const incl = book(7, { transportIncluded: 'yes' });
+    const r1 = resolvePrices([CAT], {}, [{ book: incl, rows: [row(71, 7, 'V.CATV', 480000, { unit: 'm3' })], resourceType: 'VL', priority: 1 }], null, { 'V.CATV': [leg] })['V.CATV'];
+    expect(r1.price).toBe(480000);
+    expect(r1.source.transport).toBe(0);
+    expect(r1.source.notes!.join()).toMatch(/đã gồm vận chuyển.*tránh tính 2 lần/);
+
+    const excl = book(8, { transportIncluded: 'no' });
+    const r2 = resolvePrices([CAT], {}, [{ book: excl, rows: [row(81, 8, 'V.CATV', 300000, { unit: 'm3' })], resourceType: 'VL', priority: 1 }], null, { 'V.CATV': [leg] })['V.CATV'];
+    expect(r2.price).toBeCloseTo(425500, 6);
+
+    const manual = resolvePrices([CAT], { 'V.CATV': 500000 }, [], null, { 'V.CATV': [leg] })['V.CATV'];
+    expect(manual.price).toBe(500000);
+    expect(manual.source.transport).toBe(0);
+  });
+});
+
+describe('province merger (2025) scope', () => {
+  const mergers = [{ successor: 'TP. Hồ Chí Minh', predecessors: ['TP. Hồ Chí Minh', 'Bình Dương', 'Bà Rịa – Vũng Tàu'] }];
+  it('maps former provinces to their successor', () => {
+    expect(successorOf('Binh Duong', mergers)).toBe('TP. Hồ Chí Minh');
+    expect(successorOf('Hà Nội', mergers)).toBeNull();
+  });
+  it('does not apply a former-province book to the whole merged province', () => {
+    const old = book(9, { jurisdictionAtIssue: 'Bình Dương', periodType: 'month', periodValue: 5, periodYear: 2025 });
+    expect(bookScopeFits(old, null)).toBe(false);
+    expect(bookScopeFits(old, 'Bình Dương')).toBe(true);
+    expect(proposeBooks([old], 'TP. Hồ Chí Minh', '2025-06-15')).toEqual([]);
+    expect(proposeBooks([old], 'TP. Hồ Chí Minh', '2025-06-15', 'Bình Dương').map((b) => b.id)).toEqual([9]);
+    expect(proposeBooks([book(10, { verificationStatus: 'superseded' })], 'TP. Hồ Chí Minh', '2026-06-15')).toEqual([]);
+  });
+});

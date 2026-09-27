@@ -144,4 +144,26 @@ const range = (s, e) => ({ s: XLSX.utils.decode_cell(s), e: XLSX.utils.decode_ce
   XLSX.utils.book_append_sheet(wb, ws, 'Gia VL');
   XLSX.writeFile(wb, path.join(out, 'bang-gia-thu-nghiem.xlsx'));
 }
+// 5) Legacy VNI-encoded estimate (text as stored by old VNI fonts), codes without dots, a GTT row,
+//    error values (#NAME?, #REF!) and a formula linking to another workbook.
+{
+  const rows = [
+    ['BAÛNG DÖÏ TOAÙN CHI TIEÁT'],
+    ['STT', 'Maõ hieäu', 'Noäi dung coâng vieäc', 'Ñôn vò', 'Khoái löôïng', 'Ñôn giaù'],
+    ['I', null, 'PHAÀN MOÙNG'],
+    [1, 'AF11111', 'Beâ toâng loùt moùng ñaù 4x6 M100', 'm3', 12.5, null],
+    [2, 'AF11213', 'Beâ toâng moùng M250', 'm3', 30, null],
+    [3, 'GTT', 'Choáng thaám saøn maùi (taïm tính)', 'm2', 120, 185000],
+    [4, 'AB11312', 'Ñaøo moùng baêng thuû coâng', 'm3', null, null],
+    [5, 'AK21124', 'Traùt töôøng trong', 'm2', 250, null],
+    [null, null, 'Coäng'],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['E7'] = { t: 'e', v: 0x1d, w: '#NAME?', f: 'KLDAO*2' }; // #NAME?
+  ws['F4'] = { t: 'e', v: 0x17, w: '#REF!', f: '#REF!*1' }; // #REF!
+  ws['F8'] = { t: 'n', v: 65000, f: "'[DonGia2025.xlsx]VL'!C12" }; // external workbook link
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Du toan');
+  XLSX.writeFile(wb, path.join(out, 'du-toan-vni-loi.xlsx'));
+}
 console.log('fixtures written to', out);

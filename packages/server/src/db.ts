@@ -163,6 +163,38 @@ CREATE TABLE IF NOT EXISTS project_price_books (
   PRIMARY KEY (project_id, book_id, resource_type)
 );
 
+CREATE TABLE IF NOT EXISTS quantity_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES estimate_items(id) ON DELETE CASCADE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  description TEXT NOT NULL DEFAULT '',
+  expression TEXT NOT NULL,
+  variables_json TEXT NOT NULL DEFAULT '{}',
+  sign INTEGER NOT NULL DEFAULT 1 CHECK (sign IN (1, -1)),
+  unit TEXT,
+  result REAL,
+  factor REAL,
+  source_reference TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_quantity_lines_item ON quantity_lines(item_id);
+
+CREATE TABLE IF NOT EXISTS project_transport_legs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  resource_code TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  from_location TEXT NOT NULL DEFAULT '',
+  to_location TEXT NOT NULL DEFAULT '',
+  road_class TEXT,
+  distance REAL NOT NULL DEFAULT 0,
+  freight_rate REAL NOT NULL DEFAULT 0,
+  load_factor REAL NOT NULL DEFAULT 1,
+  weight_factor REAL NOT NULL DEFAULT 1,
+  handling REAL NOT NULL DEFAULT 0,
+  toll REAL NOT NULL DEFAULT 0,
+  note TEXT
+);
+
 CREATE TABLE IF NOT EXISTS import_templates (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -209,6 +241,21 @@ export function migrate(db: DB): void {
     ['source_quantity', 'REAL'],
     ['source_unit', 'TEXT'],
     ['source_code', 'TEXT'],
+    // Section F
+    ['source_raw_text', 'TEXT'],
+    ['source_flags', 'TEXT'],
+    ['pricing_method', "TEXT NOT NULL DEFAULT 'NORM_BASED'"],
+    ['custom_vl', 'REAL'],
+    ['custom_nc', 'REAL'],
+    ['custom_m', 'REAL'],
+    ['price_source', 'TEXT'],
+    ['quote_supplier', 'TEXT'],
+    ['quote_no', 'TEXT'],
+    ['quote_date', 'TEXT'],
+    ['quote_valid_until', 'TEXT'],
+    ['quote_vat', 'TEXT'],
+    ['quote_vat_rate', 'REAL'],
+    ['quantity_source', "TEXT NOT NULL DEFAULT 'MANUAL'"],
   ];
   for (const [c, t] of itemCols) if (!icols.includes(c)) db.exec(`ALTER TABLE estimate_items ADD COLUMN ${c} ${t}`);
   db.exec(`UPDATE estimate_items SET code_status = 'manual' WHERE code_status = '' AND norm_code <> ''`);
@@ -216,6 +263,32 @@ export function migrate(db: DB): void {
   if (!pc.includes('status')) db.exec(`ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'`);
   if (!pc.includes('approved_by')) db.exec(`ALTER TABLE projects ADD COLUMN approved_by TEXT`);
   if (!pc.includes('approved_at')) db.exec(`ALTER TABLE projects ADD COLUMN approved_at TEXT`);
+  // Section F – data-contract fields for price books and rows
+  const bcols = columns(db, 'price_books');
+  const bookCols: [string, string][] = [
+    ['jurisdiction_at_issue', 'TEXT'],
+    ['source_file_url', 'TEXT'],
+    ['source_sha256', 'TEXT'],
+    ['verification_status', "TEXT NOT NULL DEFAULT 'not_verified'"],
+    ['transport_included', "TEXT NOT NULL DEFAULT 'unknown'"],
+    ['work_type', 'TEXT'],
+  ];
+  for (const [c, t] of bookCols) if (!bcols.includes(c)) db.exec(`ALTER TABLE price_books ADD COLUMN ${c} ${t}`);
+  db.exec(`UPDATE price_books SET verification_status = 'verified' WHERE status = 'verified' AND verification_status <> 'verified'`);
+  const rcols = columns(db, 'price_book_rows');
+  const rowCols: [string, string][] = [
+    ['description_original', 'TEXT'],
+    ['unit_original', 'TEXT'],
+    ['value_original', 'TEXT'],
+    ['vat_status', 'TEXT'],
+    ['source_locator', 'TEXT'],
+    ['commercial_terms', 'TEXT'],
+    ['normalization_formula', 'TEXT'],
+    ['verification_status', "TEXT NOT NULL DEFAULT 'needs_review'"],
+    ['notes', 'TEXT'],
+    ['work_type', 'TEXT'],
+  ];
+  for (const [c, t] of rowCols) if (!rcols.includes(c)) db.exec(`ALTER TABLE price_book_rows ADD COLUMN ${c} ${t}`);
   if (!pc.includes('region')) db.exec(`ALTER TABLE projects ADD COLUMN region TEXT`);
   if (!pc.includes('sub_area')) db.exec(`ALTER TABLE projects ADD COLUMN sub_area TEXT`);
 

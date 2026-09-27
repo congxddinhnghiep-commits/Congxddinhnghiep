@@ -65,6 +65,25 @@ export interface EstimateItem {
   codeConfidence?: number | null;
   /** Provenance of imported/assigned items – never overwritten. */
   source?: ItemSource | null;
+  /** NORM_BASED (default), CUSTOM_GTT (giá tạm tính / tự lập) or MARKET_QUOTE (báo giá). */
+  pricingMethod?: 'NORM_BASED' | 'CUSTOM_GTT' | 'MARKET_QUOTE';
+  /** Unit price components for CUSTOM_GTT / MARKET_QUOTE items (VND per item unit, as entered). */
+  custom?: { vl: number; nc: number; m: number } | null;
+  /** Mandatory origin of a custom / quoted price (document, file, calculation). */
+  priceSource?: string | null;
+  quote?: ItemQuote | null;
+  /** 'MANUAL' | 'FORMULA' | 'LINES' | 'IMPORTED' */
+  quantitySource?: string | null;
+}
+
+export interface ItemQuote {
+  supplier?: string | null;
+  number?: string | null;
+  date?: string | null;
+  validUntil?: string | null;
+  /** before_vat | including_vat | not_stated */
+  vatStatus?: 'before_vat' | 'including_vat' | 'not_stated' | null;
+  vatRate?: number | null;
 }
 
 export interface ItemSource {

@@ -1,4 +1,5 @@
 import {
+  canonicalNormCode,
   classifyRows,
   classifySheet,
   detectHeader,
@@ -83,6 +84,13 @@ function labelsAt(rows: (string | number | null)[][], merges: ParsedFile['sheets
 export interface AnalyzedRow extends ClassifiedRow {
   /** 1-based row number as shown in Excel. */
   excelRow: number;
+  /** Canonical norm code (AF11121 → AF.11121); raw code stays in `code`. */
+  normalizedCode?: string;
+  pricingMethod?: 'NORM_BASED' | 'CUSTOM_GTT' | null;
+  /** Original (legacy-encoded) description when it was converted to Unicode. */
+  rawName?: string | null;
+  /** FLAG_EXTERNAL_LINK_OR_BROKEN_FORMULA etc. */
+  flags?: string[];
   codeKnown?: boolean;
   suggestion?: { code: string; name: string; confidence: number; why: string } | null;
 }
@@ -143,11 +151,31 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
   const classified = classifyRows(sheet.rows, header);
   const dataset = o.projectId ? repo.datasetOf(o.projectId) : null;
   const index = dataset ? repo.normIndex(dataset) : null;
+  const issuesByRow = new Map<number, NonNullable<typeof sheet.issues>>();
+  for (const is of sheet.issues ?? []) issuesByRow.set(is.row, [...(issuesByRow.get(is.row) ?? []), is]);
+  const colLetter = (c: number) => (c < 26 ? String.fromCharCode(65 + c) : `C${c + 1}`);
   const rows: AnalyzedRow[] = classified.map((r) => {
     const out: AnalyzedRow = { ...r, excelRow: r.index + 1 };
-    if (kind === 'estimate' && r.type === 'item' && dataset && index) {
-      out.codeKnown = !!(r.code && repo.getNorm(r.code, dataset));
-      if (r.code && !out.codeKnown) out.warnings = [...r.warnings, `Mã "${r.code}" không có trong bộ định mức ${dataset}`];
+    const nameCol = header!.mapping.name;
+    out.rawName = nameCol !== undefined ? sheet.raw?.[`${r.index}:${nameCol}`] ?? null : null;
+    const issues = issuesByRow.get(r.index) ?? [];
+    if (issues.length) {
+      out.flags = [...new Set(issues.map((i) => i.flag))];
+      out.warnings = [
+        ...out.warnings,
+        ...issues.map((i) => (i.kind === 'external_link' ? `Ô ${colLetter(i.col)}${i.row + 1} liên kết workbook khác (${i.value})` : `Ô ${colLetter(i.col)}${i.row + 1} lỗi ${i.value}`)),
+      ];
+    }
+    const cc = canonicalNormCode(r.code);
+    out.normalizedCode = cc.normalized;
+    out.pricingMethod = cc.kind === 'custom' ? 'CUSTOM_GTT' : cc.kind === 'norm' ? 'NORM_BASED' : null;
+    if (kind === 'estimate' && r.type === 'item' && cc.kind === 'custom') {
+      out.codeKnown = false;
+      out.warnings = [...out.warnings, 'Mã GTT: tính theo giá tạm tính/tự lập (CUSTOM_GTT) – cần nguồn giá'];
+    } else if (kind === 'estimate' && r.type === 'item' && dataset && index) {
+      out.codeKnown = !!(cc.normalized && repo.getNorm(cc.normalized, dataset));
+      if (r.code && !out.codeKnown) out.warnings = [...out.warnings, `Mã "${r.code}" không có trong bộ định mức ${dataset}`];
+      else if (out.codeKnown && cc.normalized !== r.code.trim().toUpperCase()) out.warnings = [...out.warnings, `Mã chuẩn hóa ${r.code} → ${cc.normalized}`];
       if (!out.codeKnown) {
         const s = index.suggest(r.name, r.unit || null, 1)[0];
         out.suggestion = s ? { code: s.norm.code, name: s.norm.name, confidence: s.confidence, why: s.why } : null;
@@ -175,7 +203,18 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
     counts,
     fields: fields.map((k) => ({ key: k, label: IMPORT_FIELD_LABELS[k] })),
     rowTypeLabels: ROW_TYPE_LABELS,
-    warnings,
+    warnings: [
+      ...(f.fileIssues ?? []),
+      ...(sheet.encoding === 'vni' || sheet.encoding === 'tcvn3'
+        ? [`Sheet dùng bảng mã cũ ${sheet.encoding.toUpperCase()} – đã chuyển sang Unicode (${Object.keys(sheet.raw ?? {}).length} ô), bản gốc được lưu kèm.`]
+        : []),
+      ...((sheet.issues?.length ?? 0) > 0
+        ? [`${sheet.issues!.length} ô có lỗi công thức (#NAME?, #REF!…) hoặc liên kết workbook khác – không được dùng im lặng (FLAG_EXTERNAL_LINK_OR_BROKEN_FORMULA).`]
+        : []),
+      ...warnings,
+    ],
+    encoding: sheet.encoding ?? 'plain',
+    sha256: f.sha256 ?? null,
   };
 }
 
@@ -237,8 +276,10 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
         if (type === 'skip') skipped++;
         continue;
       }
-      const code = r.code.toUpperCase();
-      const known = !!(code && repo.getNorm(code, dataset));
+      const cc = canonicalNormCode(r.code);
+      const code = cc.normalized;
+      const isGtt = cc.kind === 'custom';
+      const known = !isGtt && !!(code && repo.getNorm(code, dataset));
       let formula: string | null = null;
       if (r.formula && isFormula(r.formula)) {
         try {
@@ -264,8 +305,21 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
           description: r.name || null,
           quantity: r.quantity,
           unit: r.unit || null,
-          code: code || null,
+          code: r.code || null,
         },
+        sourceRawText: r.rawName ?? null,
+        sourceFlags: r.flags ?? [],
+        quantitySource: 'IMPORTED',
+        pricing: isGtt
+          ? {
+              pricingMethod: 'CUSTOM_GTT',
+              custom: { vl: r.prices.vl ?? r.prices.unit ?? 0, nc: r.prices.nc ?? 0, m: r.prices.m ?? 0 },
+              priceSource:
+                r.prices.vl !== null || r.prices.nc !== null || r.prices.m !== null || r.prices.unit !== null
+                  ? `Đơn giá trong file ${f.fileName} / ${sheetName} / dòng ${r.excelRow} (chưa xác minh)`
+                  : null,
+            }
+          : undefined,
       });
       created.push(item.id);
       undo.unshift({ op: 'deleteItem', itemId: item.id });

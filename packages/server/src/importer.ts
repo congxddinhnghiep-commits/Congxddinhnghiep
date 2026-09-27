@@ -1,16 +1,33 @@
 import crypto from 'node:crypto';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import type { Merge } from '@dutoan/core';
+import { detectDominantEncoding, toUnicode, type Merge, type TextEncoding } from '@dutoan/core';
 import { evaluateFormula, isFormula, normalizeText, parseVnNumber, type ResourceType } from '@dutoan/core';
 import { HttpError, type Repo } from './repo.js';
 
 export type CellValue = string | number | null;
+export const FLAG_BROKEN = 'FLAG_EXTERNAL_LINK_OR_BROKEN_FORMULA';
+
+export interface CellIssue {
+  row: number;
+  col: number;
+  kind: 'broken_formula' | 'external_link';
+  value: string;
+  flag: typeof FLAG_BROKEN;
+}
+
 export interface ParsedSheet {
   name: string;
+  /** Cell values, legacy-encoded text converted to Unicode. */
   rows: CellValue[][];
   /** Merged ranges (0-based), used to read multi-row headers. */
   merges?: Merge[];
+  /** Detected text encoding of the sheet (VNI / TCVN3 are converted). */
+  encoding?: TextEncoding;
+  /** Original text of converted cells, keyed "row:col". */
+  raw?: Record<string, string>;
+  /** #NAME? / #REF! / … values and formulas pointing to other workbooks. */
+  issues?: CellIssue[];
 }
 export interface ParsedFile {
   id: string;
@@ -18,6 +35,10 @@ export interface ParsedFile {
   userId: number;
   sheets: ParsedSheet[];
   createdAt: number;
+  /** SHA-256 of the uploaded bytes (provenance). */
+  sha256?: string;
+  /** Workbook-level issues (e.g. external link parts). */
+  fileIssues?: string[];
 }
 
 export type ImportTarget = 'norms' | 'prices' | 'items';
@@ -65,39 +86,106 @@ function cellToValue(v: unknown): CellValue {
   return t === '' ? null : t;
 }
 
+const ERROR_RE = /^#(NAME\?|REF!|VALUE!|DIV\/0!|N\/A|NULL!|NUM!|SPILL!|CALC!)$/;
+
+/** Convert legacy-encoded (VNI / TCVN3) text cells of a sheet to Unicode, keeping the raw text. */
+function normaliseEncoding(sheet: ParsedSheet): ParsedSheet {
+  const texts: string[] = [];
+  for (const r of sheet.rows) for (const c of r) if (typeof c === 'string' && /[^\x00-\x7F]/.test(c)) texts.push(c);
+  const { encoding } = detectDominantEncoding(texts);
+  sheet.encoding = encoding;
+  sheet.raw = {};
+  if (encoding !== 'vni' && encoding !== 'tcvn3') return sheet;
+  sheet.rows.forEach((r, ri) =>
+    r.forEach((c, ci) => {
+      if (typeof c !== 'string' || !/[^\x00-\x7F]/.test(c)) return;
+      const u = toUnicode(c, encoding);
+      if (u !== c) {
+        sheet.raw![`${ri}:${ci}`] = c;
+        r[ci] = u;
+      }
+    }),
+  );
+  return sheet;
+}
+
+/** Flag error values and formulas that reference other workbooks – never used silently. */
+function scanIssues(sheet: ParsedSheet, ws?: XLSX.WorkSheet): void {
+  const issues: CellIssue[] = [];
+  sheet.rows.forEach((r, ri) =>
+    r.forEach((c, ci) => {
+      if (typeof c === 'string' && ERROR_RE.test(c.trim())) issues.push({ row: ri, col: ci, kind: 'broken_formula', value: c.trim(), flag: FLAG_BROKEN });
+    }),
+  );
+  if (ws) {
+    for (const addr of Object.keys(ws)) {
+      if (addr.startsWith('!')) continue;
+      const cell = ws[addr] as XLSX.CellObject;
+      if (cell.f && /\[[^\]]+\]|\.xls[xmb]?\]?!|^'?[a-z]:\\/i.test(cell.f)) {
+        const { r, c } = XLSX.utils.decode_cell(addr);
+        issues.push({ row: r, col: c, kind: 'external_link', value: `=${cell.f}`, flag: FLAG_BROKEN });
+      } else if (cell.f && /#REF!/.test(cell.f)) {
+        const { r, c } = XLSX.utils.decode_cell(addr);
+        if (!issues.some((x) => x.row === r && x.col === c)) issues.push({ row: r, col: c, kind: 'broken_formula', value: `=${cell.f}`, flag: FLAG_BROKEN });
+      }
+    }
+  }
+  sheet.issues = issues;
+}
+
 /**
- * Read .xlsx / .xlsm / .xls (SheetJS: cached formula values, merged ranges) and .csv / .txt (Papa Parse,
- * values kept as text so Vietnamese number formats can be interpreted later).
+ * Read .xlsx / .xlsm / .xls (SheetJS: cached formula values, merged ranges, error cells, external links)
+ * and .csv / .txt (Papa Parse, values kept as text so Vietnamese number formats can be interpreted later).
+ * Legacy VNI / TCVN3 text is converted to Unicode per sheet; the raw text is kept.
  */
-export async function parseBuffer(buf: Buffer, fileName: string): Promise<ParsedSheet[]> {
+export async function parseBuffer(buf: Buffer, fileName: string, fileIssues: string[] = []): Promise<ParsedSheet[]> {
   const lower = fileName.toLowerCase();
   if (lower.endsWith('.csv') || lower.endsWith('.txt')) {
     const text = buf.toString('utf8').replace(/^\uFEFF/, '');
     const res = Papa.parse<string[]>(text, { skipEmptyLines: false });
     const rows = res.data.map((r) => r.map((c) => (c.trim() === '' ? null : c.trim())));
     while (rows.length && rows[rows.length - 1].every((c) => c === null)) rows.pop();
-    return [{ name: 'CSV', rows, merges: [] }];
+    const sheet: ParsedSheet = { name: 'CSV', rows, merges: [] };
+    scanIssues(sheet);
+    return [normaliseEncoding(sheet)];
   }
   if (!/\.(xlsx|xlsm|xls)$/.test(lower)) throw new HttpError(400, 'Chỉ hỗ trợ file .xlsx, .xlsm, .xls và .csv.');
   let wb: XLSX.WorkBook;
   try {
-    wb = XLSX.read(buf, { type: 'buffer', cellDates: true, cellFormula: false, cellStyles: false, dense: false });
+    wb = XLSX.read(buf, { type: 'buffer', cellDates: true, cellFormula: true, cellStyles: false, dense: false, bookFiles: true });
   } catch {
     throw new HttpError(400, 'Không đọc được file Excel (file hỏng hoặc có mật khẩu).');
   }
+  const files = (wb as unknown as { keys?: string[] }).keys ?? [];
+  if (files.some((k) => /externalLinks?\//i.test(k))) fileIssues.push('File có liên kết tới workbook khác (external links) – giá trị liên kết có thể đã cũ.');
   return wb.SheetNames.map((name) => {
     const ws = wb.Sheets[name];
-    const raw = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: null, blankrows: true });
-    const rows = raw.map((r) => (Array.isArray(r) ? r.map(cellToValue) : []));
+    const ref = ws['!ref'];
+    const rows: CellValue[][] = [];
+    if (ref) {
+      const range = XLSX.utils.decode_range(ref);
+      for (let r = 0; r <= range.e.r; r++) {
+        const row: CellValue[] = [];
+        for (let c = 0; c <= range.e.c; c++) {
+          const cell = ws[XLSX.utils.encode_cell({ r, c })] as XLSX.CellObject | undefined;
+          if (!cell) row.push(null);
+          else if (cell.t === 'e') row.push(cell.w ?? XLSX.SSF.format('General', cell.v as number) ?? '#ERR');
+          else row.push(cellToValue(cell.v));
+        }
+        rows.push(row);
+      }
+    }
     const merges = (ws['!merges'] ?? []).map((m) => ({ s: { r: m.s.r, c: m.s.c }, e: { r: m.e.r, c: m.e.c } }));
-    return { name, rows, merges };
+    const sheet: ParsedSheet = { name, rows, merges };
+    scanIssues(sheet, ws);
+    return normaliseEncoding(sheet);
   });
 }
 
-export function storeParsed(userId: number, fileName: string, sheets: ParsedSheet[]): ParsedFile {
+export function storeParsed(userId: number, fileName: string, sheets: ParsedSheet[], extra: { sha256?: string; fileIssues?: string[] } = {}): ParsedFile {
   const now = Date.now();
   for (const [k, v] of store) if (now - v.createdAt > TTL) store.delete(k);
-  const f: ParsedFile = { id: crypto.randomUUID(), fileName, userId, sheets, createdAt: now };
+  const f: ParsedFile = { id: crypto.randomUUID(), fileName, userId, sheets, createdAt: now, ...extra };
   store.set(f.id, f);
   return f;
 }
@@ -340,4 +428,11 @@ export function applyImport(repo: Repo, f: ParsedFile, o: ApplyOptions): { messa
     }
   })();
   return { message: `Đã nhập ${count} công tác vào dự toán.`, count, skipped };
+}
+
+/** Parse an uploaded buffer and keep it in the short-lived store with its SHA-256. */
+export async function parseAndStore(userId: number, fileName: string, buf: Buffer): Promise<ParsedFile> {
+  const fileIssues: string[] = [];
+  const sheets = await parseBuffer(buf, fileName, fileIssues);
+  return storeParsed(userId, fileName, sheets, { sha256: crypto.createHash('sha256').update(buf).digest('hex'), fileIssues });
 }

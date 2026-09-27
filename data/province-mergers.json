@@ -1,0 +1,11 @@
+{
+  "_note": "Ánh xạ địa giới cấp tỉnh trước/sau 01/07/2025 theo Nghị quyết 202/2025/QH15, lấy từ .claude/skills/du-toan-xay-dung-data-vn/nguon-chinh-thuc.md (chỉ các trường hợp đã ghi trong tài liệu đó). Tên tỉnh hợp nhất không đủ để kết luận một giá áp dụng cho toàn địa bàn – luôn đối chiếu phụ lục và khu vực.",
+  "effectiveDate": "2025-07-01",
+  "source": "https://xaydungchinhsach.chinhphu.vn/quoc-hoi-thong-qua-nghi-quyet-sap-xep-don-vi-hanh-chinh-cap-tinh-119250612101356465.htm",
+  "mergers": [
+    { "successor": "TP. Hồ Chí Minh", "predecessors": ["TP. Hồ Chí Minh", "Bình Dương", "Bà Rịa – Vũng Tàu"] },
+    { "successor": "Đồng Nai", "predecessors": ["Đồng Nai", "Bình Phước"] },
+    { "successor": "Đồng Tháp", "predecessors": ["Đồng Tháp", "Tiền Giang"] },
+    { "successor": "TP. Cần Thơ", "predecessors": ["TP. Cần Thơ", "Hậu Giang", "Sóc Trăng"] }
+  ]
+}

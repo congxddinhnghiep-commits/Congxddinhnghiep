@@ -3,8 +3,10 @@ import {
   computeProjectCost,
   defaultLegalSetFor,
   legalSetDateWarning,
+  computeQuantityLines,
   NormIndex,
   normalizeText,
+  type QuantityLineInput,
   unitFactor,
   searchByCodeOrName,
   type BuildingType,
@@ -120,8 +122,22 @@ interface ItemRow {
   source_quantity: number | null;
   source_unit: string | null;
   source_code: string | null;
+  source_raw_text: string | null;
+  source_flags: string | null;
+  pricing_method: EstimateItem['pricingMethod'] | null;
+  custom_vl: number | null;
+  custom_nc: number | null;
+  custom_m: number | null;
+  price_source: string | null;
+  quote_supplier: string | null;
+  quote_no: string | null;
+  quote_date: string | null;
+  quote_valid_until: string | null;
+  quote_vat: 'before_vat' | 'including_vat' | 'not_stated' | null;
+  quote_vat_rate: number | null;
+  quantity_source: string | null;
 }
-const toItem = (r: ItemRow): EstimateItem => ({
+const toItem = (r: ItemRow): EstimateItem & { sourceRawText: string | null; sourceFlags: string[] } => ({
   id: r.id,
   categoryId: r.category_id,
   order: r.sort_order,
@@ -145,7 +161,36 @@ const toItem = (r: ItemRow): EstimateItem => ({
           code: r.source_code,
         }
       : null,
+  sourceRawText: r.source_raw_text,
+  sourceFlags: r.source_flags ? JSON.parse(r.source_flags) : [],
+  pricingMethod: r.pricing_method ?? 'NORM_BASED',
+  custom: r.pricing_method && r.pricing_method !== 'NORM_BASED' ? { vl: r.custom_vl ?? 0, nc: r.custom_nc ?? 0, m: r.custom_m ?? 0 } : null,
+  priceSource: r.price_source,
+  quote:
+    r.pricing_method === 'MARKET_QUOTE'
+      ? { supplier: r.quote_supplier, number: r.quote_no, date: r.quote_date, validUntil: r.quote_valid_until, vatStatus: r.quote_vat, vatRate: r.quote_vat_rate }
+      : null,
+  quantitySource: r.quantity_source ?? 'MANUAL',
 });
+
+export interface PricingInput {
+  pricingMethod: 'NORM_BASED' | 'CUSTOM_GTT' | 'MARKET_QUOTE';
+  custom?: { vl?: number; nc?: number; m?: number } | null;
+  priceSource?: string | null;
+  quote?: EstimateItem['quote'];
+}
+
+export interface QuantityLineRow {
+  id: number;
+  description: string;
+  expression: string;
+  variables: Record<string, number>;
+  sign: 1 | -1;
+  unit: string | null;
+  result: number | null;
+  factor: number | null;
+  sourceReference: string | null;
+}
 
 export type ItemSnapshot = Pick<EstimateItem, 'normCode' | 'name' | 'unit' | 'quantity' | 'quantityFormula' | 'codeStatus' | 'codeConfidence'> & {
   source: EstimateItem['source'];
@@ -375,6 +420,10 @@ export class Repo {
       order?: number;
       codeStatus?: EstimateItem['codeStatus'];
       source?: EstimateItem['source'];
+      sourceRawText?: string | null;
+      sourceFlags?: string[];
+      pricing?: PricingInput;
+      quantitySource?: string;
     },
   ): EstimateItem {
     this.getCategory(projectId, data.categoryId);
@@ -405,8 +454,94 @@ export class Repo {
         data.source?.unit ?? null,
         data.source?.code ?? null,
       );
+    const newId = Number(info.lastInsertRowid);
+    this.db
+      .prepare('UPDATE estimate_items SET source_raw_text = ?, source_flags = ?, quantity_source = ? WHERE id = ?')
+      .run(data.sourceRawText ?? null, data.sourceFlags?.length ? JSON.stringify(data.sourceFlags) : null, data.quantitySource ?? (data.quantityFormula ? 'FORMULA' : 'MANUAL'), newId);
+    if (data.pricing) this.setPricing(projectId, newId, data.pricing, false);
     this.touchProject(projectId);
-    return this.getItem(projectId, Number(info.lastInsertRowid));
+    return this.getItem(projectId, newId);
+  }
+
+  /** Pricing method of an item: norm-based, custom (GTT) or market quote; custom prices need a source. */
+  setPricing(projectId: number, itemId: number, p: PricingInput, touch = true): EstimateItem {
+    this.getItem(projectId, itemId);
+    const custom = p.pricingMethod === 'NORM_BASED' ? null : p.custom ?? {};
+    const q = p.pricingMethod === 'MARKET_QUOTE' ? p.quote ?? {} : null;
+    this.db
+      .prepare(
+        `UPDATE estimate_items SET pricing_method = ?, custom_vl = ?, custom_nc = ?, custom_m = ?, price_source = ?,
+         quote_supplier = ?, quote_no = ?, quote_date = ?, quote_valid_until = ?, quote_vat = ?, quote_vat_rate = ? WHERE id = ?`,
+      )
+      .run(
+        p.pricingMethod,
+        custom ? custom.vl ?? 0 : null,
+        custom ? custom.nc ?? 0 : null,
+        custom ? custom.m ?? 0 : null,
+        p.pricingMethod === 'NORM_BASED' ? null : p.priceSource ?? null,
+        q?.supplier ?? null,
+        q?.number ?? null,
+        q?.date ?? null,
+        q?.validUntil ?? null,
+        q?.vatStatus ?? null,
+        q?.vatRate ?? null,
+        itemId,
+      );
+    if (touch) this.touchProject(projectId);
+    return this.getItem(projectId, itemId);
+  }
+
+  // ---------------- quantity lines ----------------
+  quantityLines(itemId: number): QuantityLineRow[] {
+    return (
+      this.db.prepare('SELECT * FROM quantity_lines WHERE item_id = ? ORDER BY sort_order, id').all(itemId) as {
+        id: number;
+        description: string;
+        expression: string;
+        variables_json: string;
+        sign: 1 | -1;
+        unit: string | null;
+        result: number | null;
+        factor: number | null;
+        source_reference: string | null;
+      }[]
+    ).map((r) => ({
+      id: r.id,
+      description: r.description,
+      expression: r.expression,
+      variables: JSON.parse(r.variables_json),
+      sign: r.sign,
+      unit: r.unit,
+      result: r.result,
+      factor: r.factor,
+      sourceReference: r.source_reference,
+    }));
+  }
+
+  /** Replace the quantity lines of an item; the item quantity becomes their sum. */
+  saveQuantityLines(projectId: number, itemId: number, lines: QuantityLineInput[]) {
+    const item = this.getItem(projectId, itemId);
+    const calc = computeQuantityLines(lines, item.unit);
+    if (calc.errors) {
+      const first = calc.lines.find((l) => l.error)!;
+      throw new HttpError(400, `Dòng ${calc.lines.indexOf(first) + 1}: ${first.error}`);
+    }
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM quantity_lines WHERE item_id = ?').run(itemId);
+      const ins = this.db.prepare(
+        'INSERT INTO quantity_lines (item_id, sort_order, description, expression, variables_json, sign, unit, result, factor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      );
+      calc.lines.forEach((l, i) =>
+        ins.run(itemId, i + 1, l.description ?? '', l.expression, JSON.stringify(l.variables ?? {}), l.sign ?? 1, l.unit || null, l.result, l.factor),
+      );
+      if (lines.length) {
+        this.db.prepare(`UPDATE estimate_items SET quantity = ?, quantity_formula = NULL, quantity_source = 'LINES' WHERE id = ?`).run(calc.total, itemId);
+      } else {
+        this.db.prepare(`UPDATE estimate_items SET quantity_source = 'MANUAL' WHERE id = ? AND quantity_source = 'LINES'`).run(itemId);
+      }
+      this.touchProject(projectId);
+    })();
+    return { total: calc.total, lines: calc.lines, item: this.getItem(projectId, itemId) };
   }
 
   updateItem(projectId: number, id: number, data: Partial<EstimateItem>): EstimateItem {
@@ -474,7 +609,7 @@ export class Repo {
   /** Items that still need a norm code (no code, or code not in the project's norm dataset). */
   unassignedItems(projectId: number): EstimateItem[] {
     const ds = this.datasetOf(projectId);
-    return this.listItems(projectId).filter((i) => !i.normCode || !this.getNorm(i.normCode, ds));
+    return this.listItems(projectId).filter((i) => (i.pricingMethod ?? 'NORM_BASED') === 'NORM_BASED' && (!i.normCode || !this.getNorm(i.normCode, ds)));
   }
 
   suggestFor(projectId: number, item: EstimateItem, limit = 5) {

@@ -2,6 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   bookTitle,
+  canonicalUnit,
+  successorOf,
+  transportAmount,
+  type ProvinceMerger,
+  type TransportLeg,
   matchResource,
   normalizeText,
   periodRange,
@@ -45,12 +50,28 @@ interface BookRow {
   created_at: string;
   verified_by: string | null;
   verified_at: string | null;
+  jurisdiction_at_issue: string | null;
+  source_file_url: string | null;
+  source_sha256: string | null;
+  verification_status: 'verified' | 'needs_review' | 'not_verified' | 'superseded';
+  transport_included: 'yes' | 'no' | 'unknown';
+  work_type: string | null;
   row_count?: number;
   unmatched?: number;
 }
 
 const toBook = (r: BookRow) => {
-  const b: PriceBook & { createdBy: string; createdAt: string; verifiedBy: string | null; verifiedAt: string | null; rowCount: number; unmatched: number } = {
+  const b: PriceBook & {
+    createdBy: string;
+    createdAt: string;
+    verifiedBy: string | null;
+    verifiedAt: string | null;
+    rowCount: number;
+    unmatched: number;
+    sourceFileUrl: string | null;
+    sourceSha256: string | null;
+    workType: string | null;
+  } = {
     id: r.id,
     region: r.region,
     subArea: r.sub_area,
@@ -77,6 +98,12 @@ const toBook = (r: BookRow) => {
     verifiedAt: r.verified_at,
     rowCount: r.row_count ?? 0,
     unmatched: r.unmatched ?? 0,
+    jurisdictionAtIssue: r.jurisdiction_at_issue ?? r.region,
+    sourceFileUrl: r.source_file_url,
+    sourceSha256: r.source_sha256,
+    verificationStatus: r.verification_status,
+    transportIncluded: r.transport_included,
+    workType: r.work_type,
   };
   b.title = bookTitle(b);
   return b;
@@ -95,6 +122,16 @@ interface RowRow {
   source_row: number | null;
   match_status: 'matched' | 'unmatched' | 'manual' | 'ignored';
   match_note: string | null;
+  description_original: string | null;
+  unit_original: string | null;
+  value_original: string | null;
+  vat_status: string | null;
+  source_locator: string | null;
+  commercial_terms: string | null;
+  normalization_formula: string | null;
+  verification_status: string | null;
+  notes: string | null;
+  work_type: string | null;
 }
 const toRow = (r: RowRow) => ({
   id: r.id,
@@ -109,7 +146,23 @@ const toRow = (r: RowRow) => ({
   sourceRow: r.source_row,
   matchStatus: r.match_status,
   matchNote: r.match_note,
+  descriptionOriginal: r.description_original,
+  unitOriginal: r.unit_original,
+  valueOriginal: r.value_original,
+  vatStatus: r.vat_status,
+  sourceLocator: r.source_locator,
+  commercialTerms: r.commercial_terms,
+  verificationStatus: r.verification_status,
 });
+
+let mergerCache: { effectiveDate: string; source: string; mergers: ProvinceMerger[] } | null = null;
+export function provinceMergers() {
+  if (!mergerCache) mergerCache = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'province-mergers.json'), 'utf8'));
+  return mergerCache!;
+}
+
+const VAT_STATUS = { included: 'including_vat', excluded: 'before_vat', unknown: 'not_stated' } as const;
+const RECORD_TYPE = { VL: 'material_price', NC: 'labor_rate', M: 'machine_rate', TH: 'unit_price' } as const;
 
 let regionsCache: string[] | null = null;
 export function regions(): string[] {
@@ -133,6 +186,10 @@ export interface BookInput {
   sourceUrl?: string | null;
   sourceFile?: string | null;
   note?: string | null;
+  jurisdictionAtIssue?: string | null;
+  sourceFileUrl?: string | null;
+  transportIncluded?: 'yes' | 'no' | 'unknown';
+  workType?: string | null;
 }
 
 export class PriceBookService {
@@ -186,7 +243,21 @@ export class PriceBookService {
     const vatRate = i.vatRate !== undefined ? i.vatRate : cur?.vatRate ?? null;
     if (vat === 'included' && vatRate !== null && !(Number(vatRate) >= 0 && Number(vatRate) <= 20)) throw new HttpError(400, 'Thuế suất VAT không hợp lệ');
     const { start, end } = periodRange(periodType, periodYear, periodValue);
+    const atIssue = ((i.jurisdictionAtIssue !== undefined ? i.jurisdictionAtIssue : cur?.jurisdictionAtIssue) || region).trim();
+    if (normalizeText(atIssue) !== normalizeText(region)) {
+      const m = provinceMergers();
+      const succ = successorOf(atIssue, m.mergers);
+      if (!succ) throw new HttpError(400, `Không có thông tin sáp nhập cho địa bàn "${atIssue}" (data/province-mergers.json)`);
+      if (normalizeText(succ) !== normalizeText(region)) throw new HttpError(400, `Địa bàn "${atIssue}" sau 01/07/2025 thuộc ${succ}, không phải ${region}`);
+      if (start >= m.effectiveDate) throw new HttpError(400, `Kỳ giá từ ${m.effectiveDate} phải ghi theo địa giới mới (${succ})`);
+    }
+    const transportIncluded = i.transportIncluded ?? cur?.transportIncluded ?? 'unknown';
+    if (!['yes', 'no', 'unknown'].includes(transportIncluded)) throw new HttpError(400, 'Trạng thái vận chuyển không hợp lệ');
     return {
+      atIssue,
+      transportIncluded,
+      sourceFileUrl: (i.sourceFileUrl !== undefined ? i.sourceFileUrl : cur?.sourceFileUrl) || null,
+      workType: (i.workType !== undefined ? i.workType : cur?.workType) || null,
       region,
       subArea: (i.subArea !== undefined ? i.subArea : cur?.subArea) || null,
       issuer: (i.issuer ?? cur?.issuer ?? '').trim(),
@@ -212,10 +283,10 @@ export class PriceBookService {
     const info = this.db
       .prepare(
         `INSERT INTO price_books (region, sub_area, issuer, doc_number, doc_date, period_type, period_year, period_value, period_start, period_end,
-           book_type, vat, vat_rate, delivery, source_url, source_file, note, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           book_type, vat, vat_rate, delivery, source_url, source_file, note, created_by, jurisdiction_at_issue, source_file_url, transport_included, work_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(v.region, v.subArea, v.issuer, v.docNumber, v.docDate, v.periodType, v.periodYear, v.periodValue, v.start, v.end, v.bookType, v.vat, v.vatRate, v.delivery, v.sourceUrl, v.sourceFile, v.note, user);
+      .run(v.region, v.subArea, v.issuer, v.docNumber, v.docDate, v.periodType, v.periodYear, v.periodValue, v.start, v.end, v.bookType, v.vat, v.vatRate, v.delivery, v.sourceUrl, v.sourceFile, v.note, user, v.atIssue, v.sourceFileUrl, v.transportIncluded, v.workType);
     return this.get(Number(info.lastInsertRowid));
   }
 
@@ -226,9 +297,10 @@ export class PriceBookService {
       .prepare(
         `UPDATE price_books SET region = ?, sub_area = ?, issuer = ?, doc_number = ?, doc_date = ?, period_type = ?, period_year = ?, period_value = ?,
            period_start = ?, period_end = ?, book_type = ?, vat = ?, vat_rate = ?, delivery = ?, source_url = ?, source_file = ?, note = ?,
-           status = 'draft', verified_by = NULL, verified_at = NULL WHERE id = ?`,
+           jurisdiction_at_issue = ?, source_file_url = ?, transport_included = ?, work_type = ?,
+           status = 'draft', verification_status = 'needs_review', verified_by = NULL, verified_at = NULL WHERE id = ?`,
       )
-      .run(v.region, v.subArea, v.issuer, v.docNumber, v.docDate, v.periodType, v.periodYear, v.periodValue, v.start, v.end, v.bookType, v.vat, v.vatRate, v.delivery, v.sourceUrl, v.sourceFile, v.note, id);
+      .run(v.region, v.subArea, v.issuer, v.docNumber, v.docDate, v.periodType, v.periodYear, v.periodValue, v.start, v.end, v.bookType, v.vat, v.vatRate, v.delivery, v.sourceUrl, v.sourceFile, v.note, v.atIssue, v.sourceFileUrl, v.transportIncluded, v.workType, id);
     return this.get(id);
   }
 
@@ -237,13 +309,113 @@ export class PriceBookService {
     this.db.prepare('DELETE FROM price_books WHERE id = ?').run(id);
   }
 
-  setStatus(id: number, status: 'draft' | 'verified', user: string) {
+  /** verification_status per data-contract: verified / needs_review / not_verified / superseded. */
+  setStatus(id: number, status: 'draft' | 'verified' | 'needs_review' | 'not_verified' | 'superseded', user: string) {
     const b = this.get(id);
-    if (status === 'verified' && b.rowCount === 0) throw new HttpError(400, 'Bộ đơn giá chưa có dòng giá nào – không thể xác minh.');
-    this.db
-      .prepare(`UPDATE price_books SET status = ?, verified_by = ?, verified_at = ? WHERE id = ?`)
-      .run(status, status === 'verified' ? user : null, status === 'verified' ? new Date().toISOString() : null, id);
+    const vs = status === 'draft' ? 'needs_review' : status;
+    if (vs === 'verified' && b.rowCount === 0) throw new HttpError(400, 'Bộ đơn giá chưa có dòng giá nào – không thể xác minh.');
+    const verified = vs === 'verified';
+    this.db.transaction(() => {
+      this.db
+        .prepare(`UPDATE price_books SET status = ?, verification_status = ?, verified_by = ?, verified_at = ? WHERE id = ?`)
+        .run(verified ? 'verified' : 'draft', vs, verified ? user : null, verified ? new Date().toISOString() : null, id);
+      if (verified) this.db.prepare(`UPDATE price_book_rows SET verification_status = 'verified' WHERE book_id = ? AND match_status <> 'ignored'`).run(id);
+    })();
     return this.get(id);
+  }
+
+  /** Rows as data-contract records (du-toan-xay-dung-data-vn/data-contract.md). */
+  records(bookId: number) {
+    const b = this.get(bookId);
+    return this.rows(bookId).map((r) => ({
+      record_id: `PB${b.id}-R${r.id}`,
+      record_type: RECORD_TYPE[b.bookType],
+      jurisdiction_current: b.region,
+      jurisdiction_at_issue: b.jurisdictionAtIssue ?? b.region,
+      area_code_or_name: r.subArea ?? b.subArea ?? null,
+      work_type: b.workType ?? null,
+      item_code: r.rawCode ?? r.resourceCode ?? null,
+      description_original: r.descriptionOriginal ?? [r.name, r.spec].filter(Boolean).join(' – '),
+      description_normalized: [r.name, r.spec].filter(Boolean).join(' – '),
+      unit_original: r.unitOriginal ?? r.unit,
+      unit_normalized: canonicalUnit(r.unit) || null,
+      value_original: r.valueOriginal ?? String(r.price),
+      currency: 'VND',
+      vat_status: r.vatStatus ?? VAT_STATUS[b.vat],
+      period_from: b.periodStart,
+      period_to: b.periodEnd,
+      publication_no: b.docNumber || null,
+      publication_date: b.docDate,
+      issuing_body: b.issuer || null,
+      source_page_url: b.sourceUrl,
+      source_file_url: b.sourceFileUrl ?? b.sourceUrl,
+      source_file_name: b.sourceFile,
+      source_sha256: b.sourceSha256,
+      source_locator: r.sourceLocator ?? (r.sourceRow ? `dòng ${r.sourceRow}` : null),
+      commercial_terms: r.commercialTerms ?? b.delivery,
+      normalization_formula: null,
+      verification_status: r.matchStatus === 'ignored' ? 'not_verified' : r.verificationStatus ?? 'needs_review',
+      verified_at: b.verifiedAt,
+      verified_by: b.verifiedBy,
+      notes: [r.matchNote, r.resourceCode ? `→ tài nguyên ${r.resourceCode}` : 'chưa khớp tài nguyên'].filter(Boolean).join('; '),
+    }));
+  }
+
+  // ---------------- transport to site ----------------
+  transportLegs(projectId: number): Record<string, (TransportLeg & { amount: number })[]> {
+    const rows = this.db.prepare('SELECT * FROM project_transport_legs WHERE project_id = ? ORDER BY resource_code, sort_order, id').all(projectId) as {
+      id: number;
+      resource_code: string;
+      from_location: string;
+      to_location: string;
+      road_class: string | null;
+      distance: number;
+      freight_rate: number;
+      load_factor: number;
+      weight_factor: number;
+      handling: number;
+      toll: number;
+      note: string | null;
+    }[];
+    const out: Record<string, (TransportLeg & { amount: number })[]> = {};
+    for (const r of rows) {
+      const leg: TransportLeg = {
+        id: r.id,
+        fromLocation: r.from_location,
+        toLocation: r.to_location,
+        roadClass: r.road_class,
+        distance: r.distance,
+        freightRate: r.freight_rate,
+        loadFactor: r.load_factor,
+        weightFactor: r.weight_factor,
+        handling: r.handling,
+        toll: r.toll,
+        note: r.note,
+      };
+      (out[r.resource_code] ??= []).push({ ...leg, amount: transportAmount([leg]) });
+    }
+    return out;
+  }
+
+  saveTransportLegs(projectId: number, code: string, legs: TransportLeg[]) {
+    if (!this.repo.getResource(code)) throw new HttpError(404, 'Không tìm thấy tài nguyên');
+    for (const l of legs) {
+      for (const k of ['distance', 'freightRate', 'loadFactor', 'weightFactor', 'handling', 'toll'] as const) {
+        if (!Number.isFinite(l[k]) || l[k] < 0) throw new HttpError(400, `Giá trị không hợp lệ: ${k}`);
+      }
+    }
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM project_transport_legs WHERE project_id = ? AND resource_code = ?').run(projectId, code);
+      const ins = this.db.prepare(
+        `INSERT INTO project_transport_legs (project_id, resource_code, sort_order, from_location, to_location, road_class, distance, freight_rate,
+           load_factor, weight_factor, handling, toll, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      legs.forEach((l, i) =>
+        ins.run(projectId, code, i + 1, l.fromLocation ?? '', l.toLocation ?? '', l.roadClass ?? null, l.distance, l.freightRate, l.loadFactor, l.weightFactor, l.handling, l.toll, l.note ?? null),
+      );
+      this.repo.touchProject(projectId);
+    })();
+    return this.transportLegs(projectId)[code] ?? [];
   }
 
   /** Import rows from an analysed sheet (price-list mode) and match them to library resources. */
@@ -255,9 +427,12 @@ export class PriceBookService {
     const resources = this.repo.listResources().filter((r) => book.bookType === 'TH' || r.type === book.bookType);
     const byCode = new Map(resources.map((r) => [r.code.toUpperCase(), r]));
     const ins = this.db.prepare(
-      `INSERT INTO price_book_rows (book_id, resource_code, raw_code, name, spec, unit, price, sub_area, source_row, match_status, match_note)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO price_book_rows (book_id, resource_code, raw_code, name, spec, unit, price, sub_area, source_row, match_status, match_note,
+         description_original, unit_original, value_original, vat_status, source_locator, commercial_terms, verification_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'needs_review')`,
     );
+    const sheet = f.sheets[a.sheetIndex];
+    const priceCol = a.header.mapping.price!;
     let matched = 0;
     let unmatched = 0;
     this.db.transaction(() => {
@@ -276,9 +451,34 @@ export class PriceBookService {
         }
         if (res) matched++;
         else unmatched++;
-        ins.run(bookId, res?.code ?? null, code || null, r.name || code, r.spec || null, r.unit, r.price, r.subArea || null, r.excelRow, res ? 'matched' : 'unmatched', note || null);
+        const rawName = r.rawName ?? r.name;
+        const valueCell = sheet.rows[r.index]?.[priceCol];
+        ins.run(
+          bookId,
+          res?.code ?? null,
+          code || null,
+          r.name || code,
+          r.spec || null,
+          r.unit,
+          r.price,
+          r.subArea || null,
+          r.excelRow,
+          res ? 'matched' : 'unmatched',
+          note || null,
+          [rawName, r.spec].filter(Boolean).join(' – '),
+          sheet.raw?.[`${r.index}:${a.header!.mapping.unit}`] ?? r.unit,
+          valueCell === null || valueCell === undefined ? null : String(valueCell),
+          VAT_STATUS[book.vat],
+          `${sheet.name}!dòng ${r.excelRow}`,
+          book.delivery,
+        );
       }
-      this.db.prepare(`UPDATE price_books SET status = 'draft', verified_by = NULL, verified_at = NULL, source_file = COALESCE(source_file, ?) WHERE id = ?`).run(f.fileName, bookId);
+      this.db
+        .prepare(
+          `UPDATE price_books SET status = 'draft', verification_status = 'needs_review', verified_by = NULL, verified_at = NULL,
+             source_file = ?, source_sha256 = ? WHERE id = ?`,
+        )
+        .run(f.fileName, f.sha256 ?? null, bookId);
       if (o.saveTemplate && a.fingerprint) saveTemplate(this.db, 'pricebook', o.saveTemplate, a.fingerprint, a.header!.headerRows, a.header!.mapping, user);
     })();
     return { imported: matched + unmatched, matched, unmatched, message: `Đã nhập ${matched + unmatched} dòng giá: ${matched} khớp tài nguyên, ${unmatched} cần xem lại.` };
@@ -296,7 +496,7 @@ export class PriceBookService {
     } else {
       this.db.prepare(`UPDATE price_book_rows SET resource_code = NULL, match_status = 'unmatched', match_note = NULL WHERE id = ?`).run(rowId);
     }
-    this.db.prepare(`UPDATE price_books SET status = 'draft', verified_by = NULL, verified_at = NULL WHERE id = ?`).run(bookId);
+    this.db.prepare(`UPDATE price_books SET status = 'draft', verification_status = 'needs_review', verified_by = NULL, verified_at = NULL WHERE id = ?`).run(bookId);
     return this.rows(bookId).find((r) => r.id === rowId);
   }
 
@@ -327,8 +527,21 @@ export class PriceBookService {
 
   proposals(projectId: number) {
     const p = this.repo.getProject(projectId)!;
-    const list = proposeBooks(this.list(), p.region, p.priceDate, p.subArea);
-    return { region: p.region, subArea: p.subArea, priceDate: p.priceDate, books: list };
+    const all = this.list();
+    const list = proposeBooks(all, p.region, p.priceDate, p.subArea);
+    const excluded = all
+      .filter((b) => p.region && normalizeText(b.region) === normalizeText(p.region) && !list.includes(b))
+      .map((b) => ({
+        id: b.id,
+        title: b.title,
+        reason:
+          b.verificationStatus === 'superseded'
+            ? 'đã bị thay thế'
+            : b.jurisdictionAtIssue && normalizeText(b.jurisdictionAtIssue) !== normalizeText(b.region)
+              ? `ban hành cho địa giới cũ "${b.jurisdictionAtIssue}" – chỉ áp dụng khi khu vực công trình thuộc địa bàn đó`
+              : b.periodStart > (p.priceDate ?? '') ? 'kỳ giá sau ngày lập giá' : 'khác khu vực',
+      }));
+    return { region: p.region, subArea: p.subArea, priceDate: p.priceDate, books: list, excluded };
   }
 
   selectionsFor(sel: { bookId: number; resourceType: ResourceType; priority: number }[]): BookSelection[] {
@@ -349,7 +562,7 @@ export class PriceBookService {
   /** Effective price and source of every library resource for a project. */
   resolve(projectId: number, sel = this.selection(projectId)): Record<string, ResolvedPrice> {
     const p = this.repo.getProject(projectId)!;
-    return resolvePrices(this.repo.listResources(), this.repo.projectPrices(projectId), this.selectionsFor(sel), p.subArea);
+    return resolvePrices(this.repo.listResources(), this.repo.projectPrices(projectId), this.selectionsFor(sel), p.subArea, this.transportLegs(projectId));
   }
 
   /** Price differences for the resources used by the project when switching to another selection. */

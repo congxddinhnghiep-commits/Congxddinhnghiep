@@ -104,6 +104,19 @@ export function computeUnitCost(
   return u;
 }
 
+/**
+ * Unit cost of a CUSTOM_GTT / MARKET_QUOTE item. A quote stated including VAT is converted to the
+ * pre-VAT price (the summary adds VAT once).
+ */
+export function customUnitCost(it: Pick<EstimateItem, 'custom' | 'pricingMethod' | 'quote'>): UnitCost {
+  const c = it.custom ?? { vl: 0, nc: 0, m: 0 };
+  let k = 1;
+  if (it.pricingMethod === 'MARKET_QUOTE' && it.quote?.vatStatus === 'including_vat') k = 1 / (1 + (it.quote.vatRate ?? 10) / 100);
+  const u = { vl: (c.vl || 0) * k, nc: (c.nc || 0) * k, m: (c.m || 0) * k, total: 0 };
+  u.total = u.vl + u.nc + u.m;
+  return u;
+}
+
 export function computeEstimate(input: EstimateInput): EstimateResult {
   const resources = new Map(input.resources.map((r) => [r.code, r]));
   const byNorm = new Map<string, NormResource[]>();
@@ -123,6 +136,13 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
         .filter((it) => it.categoryId === cat.id)
         .sort((a, b) => a.order - b.order || a.id - b.id)
         .map((it): ItemResult => {
+          if (it.pricingMethod && it.pricingMethod !== 'NORM_BASED') {
+            const unitCost = customUnitCost(it);
+            const q = it.quantity || 0;
+            const amount: UnitCost = { vl: unitCost.vl * q, nc: unitCost.nc * q, m: unitCost.m * q, total: unitCost.total * q };
+            add(catTotal, amount);
+            return { ...it, unitCost, amount, analysis: [], missingNorm: false };
+          }
           const nrs = byNorm.get(it.normCode) ?? [];
           const unitCost = computeUnitCost(nrs, resources, input.projectPrices);
           const q = it.quantity || 0;
