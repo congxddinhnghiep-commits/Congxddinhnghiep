@@ -1,0 +1,95 @@
+{
+  "principle": "Never hard-code a single legacy percentage. Every coefficient/rate must come from a versioned CostRuleSet selected by date, location, project type and discipline.",
+  "quantity_engine": {
+    "supported_operators": [
+      "+",
+      "-",
+      "*",
+      "/",
+      "()"
+    ],
+    "supported_patterns": [
+      "L*W*H*N",
+      "(L+W)*2*H*N",
+      "SUM(detail_lines)",
+      "base_quantity*percent",
+      "negative deductions/openings",
+      "unit conversion mm->m, kg->t, m2->100m2, m3->100m3"
+    ],
+    "examples_from_sources": [
+      "6.6*14.2*3.8 = 356.136",
+      "12.1*6.2*0.1 + 1.8*5.6*0.1",
+      "13*5.4*0.1 - 9*0.6*0.6*0.1",
+      "E*F*G*quantity/1,000,000,000 for mm³ to m³"
+    ]
+  },
+  "norm_engine": {
+    "item_resource_consumption": "item_quantity * norm_consumption * adjustment_coefficient",
+    "resource_amount": "sum(item_resource_consumption)",
+    "resource_cost": "resource_amount * effective_resource_price",
+    "item_material_cost": "sum(resource_cost where resource_type=MATERIAL)",
+    "item_labor_cost": "sum(resource_cost where resource_type=LABOR)",
+    "item_machine_cost": "sum(resource_cost where resource_type=MACHINE)"
+  },
+  "cost_engine": {
+    "variables": {
+      "VL": "Material cost",
+      "NC": "Labor cost",
+      "M": "Machine cost",
+      "TT_or_Tk": "Other direct cost",
+      "T": "Direct cost",
+      "C": "General cost",
+      "TL": "Pre-tax taxable income",
+      "G_or_Z": "Pre-tax construction value",
+      "VAT": "Value added tax",
+      "Gs_or_Gxl": "After-tax construction value",
+      "Glt": "Temporary works / site facilities where applicable",
+      "Gdt": "Estimated construction cost / final rule output"
+    },
+    "observed_legacy_formula_variants": [
+      "TT = 1.5% * (VL + NC + M)",
+      "Tk = 2% * (VL + NC + M)",
+      "T = VL + NC + M + TT/Tk",
+      "C = 6% * T",
+      "C = T * 5.5% * 1.05",
+      "TL = 5.5% * (T + C)",
+      "TL = 6% * (T + C)",
+      "G/Z = T + C + TL",
+      "VAT = 10% * G/Z",
+      "Gs/Gxl = G/Z + VAT",
+      "Glt = 1% * Gs",
+      "Gdt = Gs + Glt"
+    ]
+  },
+  "normalization": {
+    "norm_code": [
+      "Trim whitespace and non-code suffixes.",
+      "Preserve raw code.",
+      "Canonicalize variants such as AF11121 and AF.11121 to a configured canonical form.",
+      "Treat GTT and other custom codes as custom-priced items unless mapped by user.",
+      "Do not infer work name only from prefix."
+    ],
+    "text_encoding": [
+      "Detect Unicode vs legacy VNI/TCVN3-like text.",
+      "Store original_raw_text and normalized_unicode_text.",
+      "Never overwrite raw source text during import."
+    ],
+    "unit": [
+      "Normalize synonyms/case: M3/m3, M2/m2, Tấn/Taán, Công/C«ng, Cái/Caùi, Bộ/Boä.",
+      "Keep conversion factor explicitly.",
+      "Reject implicit conversions when dimension differs."
+    ]
+  },
+  "validation": [
+    "Each estimate item must have work name, unit and quantity unless it is a heading/subtotal.",
+    "Normalized norm code must map to exactly one active norm version or be flagged unresolved.",
+    "For norm-based items, resource breakdown must reconcile to item material/labor/machine unit price within tolerance.",
+    "Quantity equals sum(quantity lines) within tolerance.",
+    "Amount equals quantity * unit price for composite-price rows.",
+    "Parent summaries equal sum(children).",
+    "No current calculation may silently use an expired rule set.",
+    "External workbook links or #NAME? / #REF! values must be flagged.",
+    "Negative quantity lines are allowed only as documented deductions.",
+    "Price source, date and location are required for auditable resource prices."
+  ]
+}

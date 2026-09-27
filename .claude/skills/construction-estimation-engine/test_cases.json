@@ -1,0 +1,65 @@
+{
+  "test_cases": [
+    {
+      "id": "QTY-001",
+      "input": "6.6*14.2*3.8",
+      "expected": 356.136,
+      "unit": "m3",
+      "purpose": "basic dimensional quantity"
+    },
+    {
+      "id": "QTY-002",
+      "input": "13*5.4*0.1 - 9*0.6*0.6*0.1",
+      "expected": 6.696,
+      "unit": "m3",
+      "purpose": "opening/deduction"
+    },
+    {
+      "id": "NORM-001",
+      "quantity": 8.51,
+      "norm_consumption": 256.25,
+      "coefficient": 1,
+      "expected": 2180.6875,
+      "resource": "cement",
+      "purpose": "norm resource expansion"
+    },
+    {
+      "id": "COST-001",
+      "variables": {
+        "VL": 0,
+        "NC": 61906,
+        "M": 0
+      },
+      "rule": "TT=1.5%*(VL+NC+M)",
+      "expected_TT_rounded_source": 929,
+      "purpose": "legacy direct-other-cost example"
+    },
+    {
+      "id": "COST-002",
+      "variables": {
+        "T": 62835
+      },
+      "rule": "C=6%*T",
+      "expected_C_rounded_source": 3770,
+      "purpose": "legacy general-cost example"
+    },
+    {
+      "id": "IMPORT-001",
+      "raw_code": "AF11121",
+      "expected_normalized": "AF.11121",
+      "purpose": "code normalization"
+    },
+    {
+      "id": "IMPORT-002",
+      "raw_code": "GTT",
+      "expected_pricing_method": "CUSTOM_GTT",
+      "purpose": "custom price code"
+    },
+    {
+      "id": "VALID-001",
+      "input_error": "#NAME?",
+      "expected": "FLAG_EXTERNAL_LINK_OR_BROKEN_FORMULA",
+      "purpose": "broken formula handling"
+    }
+  ]
+}

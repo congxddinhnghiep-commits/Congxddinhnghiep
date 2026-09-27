@@ -1,0 +1,64 @@
+﻿code,work_name,occurrences,source_quality
+AB11382,"Ñaøo ñaát thi coâng beå xöû lyù moãi beân coâng theâm 0,5m",1,Parsed cell values from XLSX via workbook engine
+AB13113,Ñaép ñaát coâng trình,1,Parsed cell values from XLSX via workbook engine
+AB13411,Ñaép caùt neàn ñöôøng daøy 10cm  ñoä chaët K95,3,Parsed cell values from XLSX via workbook engine
+AB13411,Ñaép caùt neàn ñöôøng daøy 15cm  ñoä chaët K95,3,Parsed cell values from XLSX via workbook engine
+AB31113,"Ñaøo neàn ñöôøng baèng maùy ñaøo 0,4m3 ñoå leân ph",1,Parsed cell values from XLSX via workbook engine
+AB31113,"Ñaøo neàn ñöôøng baèng maùy ñaøo 0,4m3 ñoå leân phöông tieän vaän chuyeån, ñaát caáp III",1,Parsed cell values from XLSX via workbook engine
+AB34320,"San ñaù, baõi thaûi, baõi tröõ, baõi gia taûi baèn",1,Parsed cell values from XLSX via workbook engine
+AB34320,"San ñaù, baõi thaûi, baõi tröõ, baõi gia taûi baèng maùy uûi 180cv",1,Parsed cell values from XLSX via workbook engine
+AB41113,Vaän chuyeån ñaát baèng oâtoâ töï ñoå 5T trong pha,1,Parsed cell values from XLSX via workbook engine
+AB41113,"Vaän chuyeån ñaát baèng oâtoâ töï ñoå 5T trong phaïm vi <= 300m, ñaát caáp III",1,Parsed cell values from XLSX via workbook engine
+AB41413,VC ñaát thöøa ñoå ñi baèng oâtoâ 5 taán töï ñoå ph,1,Parsed cell values from XLSX via workbook engine
+AB41413,"VC ñaát thöøa ñoå ñi baèng oâtoâ 5 taán töï ñoå phaïm vi <=1km, ñaát caáp 3",1,Parsed cell values from XLSX via workbook engine
+AB42332,Vaän chuyeån ñaát dö,1,Parsed cell values from XLSX via workbook engine
+AD25121,Lu leøn laïi khuoân ñöôøng,2,Parsed cell values from XLSX via workbook engine
+AE63114,Xaây töôøng gaïch oáng 8x8x19 chieàu daày <=10cm h<=4m M75,2,Parsed cell values from XLSX via workbook engine
+AF11111,Beton loùt  ñaù 4x6 M100 cho neàn,4,Parsed cell values from XLSX via workbook engine
+AF11121,Beton loùt moùng roäng > 250cm ñaù 4x6 M100,1,Parsed cell values from XLSX via workbook engine
+AF11262,Beton moùng roäng > 250cm ñaù 4x6 M150,2,Parsed cell values from XLSX via workbook engine
+AF11313,Beton neàn ñaù 1x2 M200 cho neàn,6,Parsed cell values from XLSX via workbook engine
+AF12213,Beton coät,4,Parsed cell values from XLSX via workbook engine
+AF12313,Beton ñaø kieàng ñaù 1x2 M250,2,Parsed cell values from XLSX via workbook engine
+AF12314,"Beton xaø daàm, giaèng nhaø ñaù 1x2 M250",2,Parsed cell values from XLSX via workbook engine
+AF12314,Beton ñaø kieàng ñaù 1x2 M250,2,Parsed cell values from XLSX via workbook engine
+AF12513,"Beton lanh toâ, lanh toâ lieàn maùi haét, maùng nöôùc, taám ñan, oâ vaêng ñaù 1x2 M200",2,Parsed cell values from XLSX via workbook engine
+AF12513,Beâ toâng saøn maùi,2,Parsed cell values from XLSX via workbook engine
+AF26114,Beton moùng roäng > 250cm ñaù 1x2 M250,2,Parsed cell values from XLSX via workbook engine
+AF26114,Beton saøn maùi ñaù 1x2 M250,2,Parsed cell values from XLSX via workbook engine
+AF26114,"Beton töôøng ,M250,ñaù 1x2",2,Parsed cell values from XLSX via workbook engine
+AF61311,Coát theùp ñk <= D10 (D6),1,Parsed cell values from XLSX via workbook engine
+AF61311,"Coát theùp ñk <= D10 (D6,8)",1,Parsed cell values from XLSX via workbook engine
+AF61321,"Coát theùp ñk <= D18 (D12 ,14,16))",2,Parsed cell values from XLSX via workbook engine
+AF61711,Coát theùp neàn ñöôøng,2,Parsed cell values from XLSX via workbook engine
+AF81111,Vaùn khuoân moùng,2,Parsed cell values from XLSX via workbook engine
+AF81122,Vaùn khuoân coät,2,Parsed cell values from XLSX via workbook engine
+AF81141,Vaùn khuoân ñaø kieàng,2,Parsed cell values from XLSX via workbook engine
+AF81151,Vaùn khuoân saøn maùi,2,Parsed cell values from XLSX via workbook engine
+AF81151,Vaùn khuoân saøn naép,2,Parsed cell values from XLSX via workbook engine
+AF81152,"Vaùn khuoân lanh toâ, lanh toâ lieàn maùi haét, maùng nöôùc, taám ñan",2,Parsed cell values from XLSX via workbook engine
+AF81162,Vaùn khuoân  cho  ñöôøng,6,Parsed cell values from XLSX via workbook engine
+AF81311,Vaùn khuoân töôøng thaúng,2,Parsed cell values from XLSX via workbook engine
+AK21124,"Traùt töôøng ngoaøi chieàu daøy traùt 1,5cm vöõa M75",2,Parsed cell values from XLSX via workbook engine
+AK23114,Traùt xaø daàm vöõa M75,2,Parsed cell values from XLSX via workbook engine
+AK23214,Traùt traàn vöõa M75,2,Parsed cell values from XLSX via workbook engine
+AK25114,"Traùt seânoâ, maùi haét, lam ngang daøy 1cm M75",2,Parsed cell values from XLSX via workbook engine
+AK41124,Laùng neàn saøn daøy 3cm vöõa M75,4,Parsed cell values from XLSX via workbook engine
+AK41215,Laùng neàn saøn coù ñaùnh maàu daøy 2cm vöõa M100,1,Parsed cell values from XLSX via workbook engine
+AK42114,"Laùng seânoâ, maùi haét, maùng nöôùc daøy 1cm M75",2,Parsed cell values from XLSX via workbook engine
+AK51220,"Laùt neàn, saøn gaïch ceramic 300x300 vöõa M75",2,Parsed cell values from XLSX via workbook engine
+AK56110,"Laùt saân, neàn ñöôøng baèng ñaù cheû 10x10 x10 cm",3,Parsed cell values from XLSX via workbook engine
+AK56110,"Laùt saân, neàn ñöôøng baèng ñaù da",3,Parsed cell values from XLSX via workbook engine
+AK56110,Laùt ñaù cheû caïnh vuoâng baõi xe,3,Parsed cell values from XLSX via workbook engine
+AK82110,Baû matít vaøo töôøng,1,Parsed cell values from XLSX via workbook engine
+AK82120,"Baû matít vaøo coät, daàm, traàn",1,Parsed cell values from XLSX via workbook engine
+AK83421,Sôn Epoxy,2,Parsed cell values from XLSX via workbook engine
+AK84112,"Sôn daàm, traàn, coät, töôøng trong nhaø ñaõ baû baèng sôn Super 1 nöôùc loùt + 2 nöôùc phuû",2,Parsed cell values from XLSX via workbook engine
+AK84114,Sôn töôøng ngoaøi nhaø ñaõ baû baèng sôn Super 1 nöôùc loùt + 2 nöôùc phuû,2,Parsed cell values from XLSX via workbook engine
+BB19106,oáng thoùat nöôùc uPVC D60,2,Parsed cell values from XLSX via workbook engine
+BB29124,co uPVC D60,2,Parsed cell values from XLSX via workbook engine
+GTT,Baät saét D10,1,Parsed cell values from XLSX via workbook engine
+GTT,Laép joint maïch ngöøng thi coâng (giaù bao goàm caû nhaân coâng vaø laép ñaët ),1,Parsed cell values from XLSX via workbook engine
+GTT,Quaû caàu chaén raùt Inox vaø oáng toân d58,1,Parsed cell values from XLSX via workbook engine
+GTT,Saûn xuaát vaø laép döïng cöûa kính khung nhoâm,1,Parsed cell values from XLSX via workbook engine
+GTT,phuï gia choáng thaám Plastocrete N troän trong beâ toâng (TC 0.45lit /100kg XM ),1,Parsed cell values from XLSX via workbook engine

@@ -1,0 +1,227 @@
+{
+  "version": "0.1.0",
+  "purpose": "Canonical domain model for a construction cost-estimating application derived from supplied estimate workbooks.",
+  "entities": {
+    "Project": [
+      "id",
+      "name",
+      "project_type",
+      "location",
+      "estimate_date",
+      "currency",
+      "price_region",
+      "regulation_profile_id",
+      "notes"
+    ],
+    "WorkPackage": [
+      "id",
+      "project_id",
+      "parent_id",
+      "code",
+      "name",
+      "discipline",
+      "sort_order"
+    ],
+    "EstimateItem": [
+      "id",
+      "work_package_id",
+      "sequence",
+      "norm_code_raw",
+      "norm_code_normalized",
+      "work_name",
+      "unit",
+      "quantity",
+      "quantity_source",
+      "pricing_method",
+      "is_custom_price",
+      "notes"
+    ],
+    "QuantityLine": [
+      "id",
+      "estimate_item_id",
+      "description",
+      "expression",
+      "variables",
+      "result",
+      "unit",
+      "sign",
+      "source_reference"
+    ],
+    "Norm": [
+      "id",
+      "norm_code",
+      "name",
+      "unit",
+      "norm_set",
+      "effective_from",
+      "effective_to",
+      "discipline",
+      "source"
+    ],
+    "NormResource": [
+      "id",
+      "norm_id",
+      "resource_id",
+      "resource_type",
+      "consumption",
+      "coefficient",
+      "waste_rate",
+      "note"
+    ],
+    "Resource": [
+      "id",
+      "resource_code",
+      "name",
+      "resource_type",
+      "unit",
+      "specification",
+      "manufacturer",
+      "origin"
+    ],
+    "ResourcePrice": [
+      "id",
+      "resource_id",
+      "price",
+      "price_type",
+      "location",
+      "effective_date",
+      "source",
+      "transport_included",
+      "tax_included"
+    ],
+    "TransportLeg": [
+      "id",
+      "resource_price_id",
+      "from_location",
+      "to_location",
+      "road_class",
+      "distance",
+      "freight_rate",
+      "load_factor",
+      "weight_factor",
+      "handling_factor",
+      "toll",
+      "amount"
+    ],
+    "LaborRate": [
+      "id",
+      "labor_grade",
+      "unit",
+      "base_rate",
+      "adjustment_coefficient",
+      "location",
+      "effective_date",
+      "source"
+    ],
+    "MachineRate": [
+      "id",
+      "machine_code",
+      "name",
+      "unit",
+      "base_rate",
+      "fuel_type",
+      "fuel_price",
+      "labor_component",
+      "adjustment_coefficient",
+      "effective_date",
+      "source"
+    ],
+    "CostRuleSet": [
+      "id",
+      "name",
+      "effective_from",
+      "effective_to",
+      "project_type",
+      "discipline",
+      "location",
+      "tax_profile",
+      "rules"
+    ],
+    "CostAdjustment": [
+      "id",
+      "scope_type",
+      "scope_id",
+      "cost_component",
+      "method",
+      "value",
+      "formula",
+      "reason",
+      "source"
+    ],
+    "CostBreakdown": [
+      "estimate_item_id",
+      "material_cost",
+      "labor_cost",
+      "machine_cost",
+      "other_direct_cost",
+      "direct_cost",
+      "general_cost",
+      "pre_tax_income",
+      "pre_tax_value",
+      "vat",
+      "after_tax_value",
+      "temporary_works",
+      "total_cost"
+    ],
+    "SummaryNode": [
+      "id",
+      "parent_id",
+      "name",
+      "level",
+      "material",
+      "labor",
+      "machine",
+      "subtotal",
+      "tax",
+      "total"
+    ],
+    "AuditTrail": [
+      "id",
+      "entity_type",
+      "entity_id",
+      "action",
+      "before",
+      "after",
+      "timestamp",
+      "actor",
+      "source_file",
+      "source_cell"
+    ]
+  },
+  "enums": {
+    "resource_type": [
+      "MATERIAL",
+      "LABOR",
+      "MACHINE",
+      "SUBCONTRACT",
+      "OTHER"
+    ],
+    "pricing_method": [
+      "NORM_BASED",
+      "COMPOSITE_UNIT_PRICE",
+      "MARKET_QUOTE",
+      "CUSTOM_GTT",
+      "LUMP_SUM"
+    ],
+    "quantity_source": [
+      "MANUAL",
+      "FORMULA",
+      "DRAWING_TAKEOFF",
+      "IMPORTED"
+    ],
+    "discipline": [
+      "CIVIL",
+      "ARCHITECTURE",
+      "STRUCTURE",
+      "ROAD",
+      "WATER",
+      "DRAINAGE",
+      "ELECTRICAL",
+      "MEP",
+      "FIRE_PROTECTION",
+      "LANDSCAPE",
+      "INDUSTRIAL",
+      "OTHER"
+    ]
+  }
+}
