@@ -41,6 +41,8 @@ export interface Category {
   id: number;
   name: string;
   order: number;
+  /** TT rate override (%) for this hạng mục, e.g. công tác XD trong đường hầm (TT 36/2026 Bảng 3.5). */
+  ttRate?: number | null;
 }
 
 export interface EstimateItem {

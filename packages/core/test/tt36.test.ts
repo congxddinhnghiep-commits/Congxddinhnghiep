@@ -45,8 +45,10 @@ describe('TT 36/2026 – Bảng 3.8, ví dụ tính tay', () => {
     expect(r.GXDNT).toBeCloseTo(13_761_673.2, 3);
     expect(r.total).toBeCloseTo(1_264_822_873.2, 3);
     expect(r.lines.map((l) => l.code)).toEqual(['VL', 'NC', 'M', 'T', 'C', 'TT', 'GT', 'TL', 'GXDTT', 'GTGT', 'GXD', 'GXDNT']);
-    expect(r.lines.find((l) => l.code === 'C')!.source).toMatch(/Bảng 3\.3 .*Công trình dân dụng, T ≤ 40 tỷ \[TẠM/);
-    expect(r.warnings[0]).toMatch(/TẠM \(provisional\)/);
+    // Update 2 (A1/A1b): tables verified; Bảng 3.3 bracket base = chi phí XD trước thuế (here the estimate's own GXDTT)
+    expect(r.lines.find((l) => l.code === 'C')!.source).toMatch(/Bảng 3\.3 .*Công trình dân dụng, chi phí XD trước thuế trong TMĐT ≤ 40 tỷ \[đã xác minh\]/);
+    expect(r.warnings).toContain('Chưa nhập chi phí XD trong TMĐT được duyệt – đang dùng giá trị dự toán để tra khoảng.');
+    expect(r.bracketBase).toEqual({ value: r.GXDTT, from: 'estimate' });
   });
 
   it('công trình giao thông theo tuyến, có làm đêm (Knc, Km)', () => {
@@ -136,7 +138,7 @@ describe('dự phòng (TT 36/2026)', () => {
     expect(r.total).toBeCloseTo(1110.8e6, 4);
   });
   it('trượt giá theo tỷ lệ cố định', () => {
-    const s = { ...defaultTt36Settings(), contingencyQtyRate: 0, contingencyPriceRate: 3 };
+    const s = { ...defaultTt36Settings(), contingencyQtyRate: 0, contingencyPriceMode: 'percent' as const, contingencyPriceRate: 3 };
     expect(computeTotalEstimateTt36(200e6, s).dp2).toBeCloseTo(6e6, 4);
   });
 });
@@ -160,5 +162,101 @@ describe('bộ pháp lý', () => {
     expect(cs.Gxd).toBeCloseTo(126.35946e6, 4);
     expect(cs.nhaTam).toBe(0);
     expect(r.warnings[0]).toMatch(/lịch sử/);
+  });
+});
+
+describe('Update 2 – cơ sở tra khoảng, dòng cha, ghi đè TT, dự phòng 2.8/2.9', () => {
+  it('Bảng 3.3 / 3.7 tra theo chi phí XD trước thuế trong TMĐT (tỷ đồng), tỷ lệ áp vào T / GXDTT', () => {
+    /*
+     * Như ví dụ dân dụng (T = 1 tỷ) nhưng TMĐT duyệt GXDTT = 50 tỷ → Bảng 3.3 khoảng ≤ 60 tỷ: 7,1%; Bảng 3.7 ≤ 100 tỷ: 1,0%
+     * C = 1 tỷ × 7,1% = 71.000.000; TT = 25.000.000; GT = 96.000.000
+     * TL = 1.096.000.000 × 5,5% = 60.280.000; GXDTT = 1.156.280.000
+     * GXDNT = 1.156.280.000 × 1,0% × 1,08 = 12.487.824
+     */
+    const s = { ...defaultTt36Settings('dan_dung'), gxdttTmdt: 50 };
+    const r = computeTt36({ vl: 600e6, nc: 250e6, m: 150e6 }, s, TT36, 8);
+    expect(r.rates.c).toBe(7.1);
+    expect(r.rates.nt).toBe(1.0);
+    expect(r.GXDTT).toBeCloseTo(1_156_280_000, 3);
+    expect(r.GXDNT).toBeCloseTo(12_487_824, 3);
+    expect(r.bracketBase).toEqual({ value: 50e9, from: 'tmdt' });
+    expect(r.warnings.join(' ')).not.toMatch(/Chưa nhập chi phí XD trong TMĐT/);
+  });
+
+  it('không có TMĐT: lặp theo GXDTT của dự toán cho tới khi khoảng ổn định', () => {
+    /*
+     * VL = 39 tỷ → T = 39 tỷ. Lần 1 (khoảng theo T ≤ 40): C 7,3% → GXDTT = 45,17721 tỷ > 40 tỷ
+     * Lần 2 (khoảng ≤ 60): C = 39 × 7,1% = 2,769; TT = 0,975; GT = 3,744; TL = 42,744 × 5,5% = 2,35092
+     * GXDTT = 45,09492 tỷ → vẫn ≤ 60 → ổn định. Nhà tạm (còn lại, ≤ 100 tỷ) 1,0%.
+     */
+    const r = computeTt36({ vl: 39e9, nc: 0, m: 0 }, defaultTt36Settings('dan_dung'), TT36, 8);
+    expect(r.rates.c).toBe(7.1);
+    expect(r.GXDTT).toBeCloseTo(45.09492e9, 1);
+    expect(r.rates.nt).toBe(1.0);
+    expect(r.bracketBase.from).toBe('estimate');
+  });
+
+  it('Bảng 3.4 tra theo chi phí nhân công, không phụ thuộc TMĐT', () => {
+    const s = { ...defaultTt36Settings('cong_nghiep'), cMode: 'NC' as const, ncWorkType: 'lap_dat', gxdttTmdt: 900 };
+    const r = computeTt36({ vl: 5e9, nc: 20e9, m: 1e9 }, s, TT36, 8);
+    expect(r.rates.c).toBe(62); // NC = 20 tỷ → khoảng ≤ 50 tỷ
+  });
+
+  it('tỷ lệ TT riêng cho hạng mục (công tác XD trong đường hầm)', () => {
+    // Hạng mục A: T = 600 tr (2,5%); hạng mục B trong hầm: T = 400 tr (6,5%) → TT = 15 + 26 = 41 tr
+    const cats = [
+      { id: 1, name: 'Cửa hầm', direct: { vl: 600e6, nc: 0, m: 0 } },
+      { id: 2, name: 'Thân hầm', direct: { vl: 400e6, nc: 0, m: 0 }, ttRate: 6.5 },
+    ];
+    const r = computeTt36({ vl: 1000e6, nc: 0, m: 0 }, { ...defaultTt36Settings('dan_dung'), gxdttTmdt: 10 }, TT36, 8, { categories: cats });
+    const tt = r.lines.find((l) => l.code === 'TT')!;
+    expect(tt.value).toBeCloseTo(41e6, 4);
+    expect(tt.formula).toMatch(/"Thân hầm" 6,5%/);
+    expect(tt.expr).toMatch(/^\{T\}\*\{rate\}\/100\+/);
+  });
+
+  it('dòng cha cho tu bổ di tích (Bảng 3.5, 3.6) là ghi chú, không phải cảnh báo', () => {
+    const r = computeTt36({ vl: 1e9, nc: 0, m: 0 }, { ...defaultTt36Settings(), workCategory: 'tu_bo_di_tich', gxdttTmdt: 10 }, TT36, 8);
+    expect(r.rates.c).toBe(11.6);
+    expect(r.rates.tt).toBe(2.5);
+    expect(r.rates.tl).toBe(5.5);
+    expect(r.notes).toHaveLength(2);
+    expect(r.warnings.join(' ')).not.toMatch(/dòng/);
+  });
+
+  it('nội suy chỉ khi bật, kèm cảnh báo không có căn cứ', () => {
+    const set: LegalSet = structuredClone(TT36);
+    set.tables['3.3'].interpolation = 'linear';
+    const r = computeTt36({ vl: 1e9, nc: 0, m: 0 }, { ...defaultTt36Settings(), gxdttTmdt: 50 }, set, 8);
+    expect(r.rates.c).toBeCloseTo(7.2, 10);
+    expect(r.warnings.join(' ')).toMatch(/không có căn cứ trong TT 36/);
+  });
+
+  it('GDP2 theo công thức 2.9 – ví dụ trong UPDATE-2 (10 tỷ, 2 năm 60/40, I_bq = 1,03, ΔI = 0,005)', () => {
+    // GDP2 = 6 × (1,035 − 1) + 4 × (1,035² − 1) = 0,21 + 0,2849 = 0,4949 tỷ; GDP1 = 10 × 5% = 0,5 tỷ
+    const s = {
+      ...defaultTt36Settings(),
+      contingencyQtyRate: 5,
+      contingencyPriceMode: 'formula' as const,
+      contingencyPeriods: 2,
+      contingencySchedule: [60, 40],
+      priceIndexAvg: 1.03,
+      priceIndexDelta: 0.005,
+    };
+    const r = computeTotalEstimateTt36(10e9, s);
+    expect(r.dp1).toBeCloseTo(0.5e9, 2);
+    expect(r.dp2).toBeCloseTo(0.4949e9, 2);
+    expect(r.total).toBeCloseTo(10.9949e9, 2);
+    const l = r.lines.find((x) => x.code === 'Gdp2')!;
+    expect(l.source).toMatch(/công thức 2\.9/);
+    expect(r.lines.find((x) => x.code === 'Gdp1')!.source).toMatch(/công thức 2\.8/);
+  });
+
+  it('phân bổ không hợp lệ → chia đều; kps > 5% bị cảnh báo', () => {
+    const s = { ...defaultTt36Settings(), contingencyQtyRate: 6, contingencyPeriods: 4, contingencyPeriodUnit: 'quy' as const, contingencySchedule: [50, 50], priceIndexAvg: 1.01, priceIndexDelta: 0 };
+    const r = computeTotalEstimateTt36(4e9, s);
+    // 1 tỷ mỗi quý: Σ (1,01^t − 1) = 0,01 + 0,0201 + 0,030301 + 0,04060401 = 0,10100501 tỷ
+    expect(r.dp2).toBeCloseTo(0.10100501e9, 1);
+    expect(r.warnings.join(' ')).toMatch(/vượt mức tối đa 5%/);
   });
 });

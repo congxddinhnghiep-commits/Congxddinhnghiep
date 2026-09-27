@@ -40,6 +40,7 @@ export interface ProjectRow {
   cost_settings: string | null;
   legal_set: LegalSetId | null;
   price_date: string | null;
+  gxdtt_tmdt: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -58,6 +59,8 @@ export interface Project {
   legalSet: LegalSetId;
   /** ISO price date used to pick the default legal set. */
   priceDate: string | null;
+  /** Chi phí XD trước thuế của công trình trong TMĐT được duyệt (tỷ đồng) – bracket base for Bảng 3.3/3.7. */
+  gxdttTmdt: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -74,6 +77,7 @@ export const toProject = (r: ProjectRow): Project => ({
   costSettings: r.cost_settings ? JSON.parse(r.cost_settings) : null,
   legalSet: r.legal_set ?? 'TT11_2021',
   priceDate: r.price_date,
+  gxdttTmdt: r.gxdtt_tmdt,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -152,8 +156,8 @@ export class Repo {
   createProject(ownerId: number, data: Partial<Project>): Project {
     const info = this.db
       .prepare(
-        `INSERT INTO projects (owner_id, name, owner_name, location, building_type, price_base_date, vat_rate, legal_set, price_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO projects (owner_id, name, owner_name, location, building_type, price_base_date, vat_rate, legal_set, price_date, gxdtt_tmdt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         ownerId,
@@ -165,6 +169,7 @@ export class Repo {
         data.vatRate ?? 8,
         data.legalSet ?? defaultLegalSetFor(data.priceDate),
         data.priceDate || null,
+        data.gxdttTmdt ?? null,
       );
     return this.getProject(Number(info.lastInsertRowid))!;
   }
@@ -175,7 +180,7 @@ export class Repo {
     this.db
       .prepare(
         `UPDATE projects SET name = ?, owner_name = ?, location = ?, building_type = ?, price_base_date = ?,
-         vat_rate = ?, cost_settings = ?, legal_set = ?, price_date = ?, updated_at = datetime('now') WHERE id = ?`,
+         vat_rate = ?, cost_settings = ?, legal_set = ?, price_date = ?, gxdtt_tmdt = ?, updated_at = datetime('now') WHERE id = ?`,
       )
       .run(
         next.name,
@@ -187,6 +192,7 @@ export class Repo {
         next.costSettings ? JSON.stringify(next.costSettings) : null,
         next.legalSet,
         next.priceDate || null,
+        next.gxdttTmdt ?? null,
         id,
       );
     return this.getProject(id)!;
@@ -224,12 +230,13 @@ export class Repo {
   // ---------------- categories ----------------
   listCategories(projectId: number): Category[] {
     return (
-      this.db.prepare('SELECT id, name, sort_order FROM categories WHERE project_id = ? ORDER BY sort_order, id').all(projectId) as {
+      this.db.prepare('SELECT id, name, sort_order, tt_rate FROM categories WHERE project_id = ? ORDER BY sort_order, id').all(projectId) as {
         id: number;
         name: string;
         sort_order: number;
+        tt_rate: number | null;
       }[]
-    ).map((r) => ({ id: r.id, name: r.name, order: r.sort_order }));
+    ).map((r) => ({ id: r.id, name: r.name, order: r.sort_order, ttRate: r.tt_rate }));
   }
 
   getCategory(projectId: number, id: number): Category {
@@ -247,9 +254,11 @@ export class Repo {
     return { id: Number(info.lastInsertRowid), name, order: order ?? max + 1 };
   }
 
-  updateCategory(projectId: number, id: number, data: { name?: string; order?: number }): void {
+  updateCategory(projectId: number, id: number, data: { name?: string; order?: number; ttRate?: number | null }): void {
     const c = this.getCategory(projectId, id);
-    this.db.prepare('UPDATE categories SET name = ?, sort_order = ? WHERE id = ?').run(data.name ?? c.name, data.order ?? c.order, id);
+    this.db
+      .prepare('UPDATE categories SET name = ?, sort_order = ?, tt_rate = ? WHERE id = ?')
+      .run(data.name ?? c.name, data.order ?? c.order, data.ttRate !== undefined ? data.ttRate : c.ttRate ?? null, id);
     this.touchProject(projectId);
   }
 
@@ -446,7 +455,10 @@ export class Repo {
       .filter((r): r is ResourceRow => !!r)
       .map(toResource);
     const estimate = computeEstimate({ categories, items, normResources, resources, projectPrices: this.projectPrices(projectId) });
-    const cost = computeProjectCost(legalSet, estimate.total, project.costSettings, project.buildingType, project.vatRate);
+    const cost = computeProjectCost(legalSet, estimate.total, project.costSettings, project.buildingType, project.vatRate, {
+      gxdttTmdt: project.gxdttTmdt,
+      categories: estimate.categories.map((c) => ({ id: c.id, name: c.name, direct: c.total, ttRate: c.ttRate })),
+    });
     const dateWarning = legalSetDateWarning(project.legalSet, project.priceDate);
     return {
       project,
@@ -458,6 +470,7 @@ export class Repo {
       costSummary: cost.costSummary,
       totalEstimate: cost.totalEstimate,
       warnings: dateWarning ? [dateWarning, ...cost.warnings] : cost.warnings,
+      notes: cost.notes ?? [],
     };
   }
 }

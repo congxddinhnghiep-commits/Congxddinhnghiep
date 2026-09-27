@@ -50,9 +50,12 @@
       "issued": "2026-06-26",
       "effective": "2026-07-01",
       "status": "active",
-      "role": "Phương pháp lập dự toán; Phụ lục III Bảng 3.3–3.8. Bãi bỏ TT 11/2021, TT 14/2023 và Điều 1 + PL III + PL V TT 60/2025 (Điều 16.2)",
+      "role": "Phương pháp lập dự toán; Phụ lục II (dự phòng, công thức 2.8, 2.9), Phụ lục III Bảng 3.3–3.8. Bãi bỏ TT 11/2021, TT 14/2023 và Điều 1 + PL III + PL V TT 60/2025 (Điều 16.2)",
       "url": "https://vanban.chinhphu.vn/?pageid=27160&docid=218629",
-      "amendedBy": ["CV-9947-2026", "QD-1538-2026"],
+      "amendedBy": [
+        "CV-9947-2026",
+        "QD-1538-2026"
+      ],
       "verified": true
     },
     {
@@ -77,21 +80,23 @@
       "issued": "2026-06-26",
       "effective": "2026-07-01",
       "status": "active",
-      "role": "Định mức dự toán; nhân công theo nhóm. Thay thế TT 12/2021, TT 09/2024, TT 08/2025 và phần định mức TT 60/2025",
+      "role": "Định mức dự toán; nhân công theo nhóm. Phụ lục I–VIII được thay bằng bản kèm CV 9947/BXD-VPB. Thay thế TT 12/2021, TT 09/2024, TT 08/2025 và phần định mức TT 60/2025",
       "url": "https://vanban.chinhphu.vn/?classid=0&docid=218632&pageid=27160",
-      "amendedBy": ["CV-9947-2026"],
+      "amendedBy": [
+        "CV-9947-2026"
+      ],
       "verified": true
     },
     {
       "id": "CV-9947-2026",
-      "number": "9947/BXD-VP",
+      "number": "9947/BXD-VPB",
       "type": "Công văn",
-      "title": "Thay thế phụ lục kèm theo TT 36/2026/TT-BXD và TT 38/2026/TT-BXD",
+      "title": "Thay thế Phụ lục V của TT 36/2026/TT-BXD và Phụ lục I–VIII của TT 38/2026/TT-BXD",
       "issuer": "Bộ Xây dựng",
       "issued": "2026-06-29",
       "effective": null,
       "status": "active",
-      "role": "Phụ lục thay thế – phải dùng bản phụ lục thay thế khi đối chiếu bảng tỷ lệ",
+      "role": "Chỉ thay Phụ lục V (TT 36) và Phụ lục I–VIII (TT 38). Phụ lục II, III của TT 36 KHÔNG bị thay thế.",
       "url": "https://vpubnd.daklak.gov.vn/Documents/Detail/11373",
       "verified": true
     },

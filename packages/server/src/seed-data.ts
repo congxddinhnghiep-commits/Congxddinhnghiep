@@ -2,9 +2,11 @@
  * SAMPLE norms/resources/prices for demonstration only (is_sample = 1).
  * Two datasets are seeded from the same illustrative consumptions:
  *  - TT12_2021 (historical): labour by cấp bậc thợ (e.g. "Nhân công bậc 3,5/7");
- *  - TT38_2026 (current):    labour by nhóm nhân công (e.g. "Nhân công nhóm 3").
- * The grade → group assignment below is ILLUSTRATIVE, not taken from TT 38/2026. Codes follow the
- * style of the norm books but consumptions and prices are approximate — replace with official data.
+ *  - TT38_2026 (current):    labour by nhóm nhân công.
+ * NOTHING here comes from TT 38/2026: its appendices were re-issued with CV 9947/BXD-VPB and official
+ * norm values (including the labour group of each work item) must be imported from those files.
+ * The grade → group mapping is an arbitrary illustration so the sample dataset has group-style labour.
+ * Codes follow the style of the norm books; consumptions and prices are approximate sample values.
  */
 import type { ResourceType } from '@dutoan/core';
 
@@ -36,9 +38,9 @@ export const SAMPLE_RESOURCES: R[] = [
   ['N.3.0', 'Nhân công bậc 3,0/7 - Nhóm I', 'công', 'NC', 245000],
   ['N.3.5', 'Nhân công bậc 3,5/7 - Nhóm I', 'công', 'NC', 262000],
   ['N.4.0', 'Nhân công bậc 4,0/7 - Nhóm I', 'công', 'NC', 280000],
-  ['N.NHOM2', 'Nhân công nhóm 2', 'công', 'NC', 255000],
-  ['N.NHOM3', 'Nhân công nhóm 3', 'công', 'NC', 272000],
-  ['N.NHOM4', 'Nhân công nhóm 4', 'công', 'NC', 290000],
+  ['N.NHOM2', 'Nhân công nhóm 2 (mẫu minh họa)', 'công', 'NC', 255000],
+  ['N.NHOM3', 'Nhân công nhóm 3 (mẫu minh họa)', 'công', 'NC', 272000],
+  ['N.NHOM4', 'Nhân công nhóm 4 (mẫu minh họa)', 'công', 'NC', 290000],
   ['M.TRONBT250', 'Máy trộn bê tông 250 lít', 'ca', 'M', 320000],
   ['M.TRONVUA150', 'Máy trộn vữa 150 lít', 'ca', 'M', 280000],
   ['M.DAMDUI', 'Máy đầm dùi 1,5kW', 'ca', 'M', 250000],

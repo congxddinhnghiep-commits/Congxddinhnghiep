@@ -62,6 +62,7 @@ export function CostSummaryTab({ data }: { data: EstimateResponse }) {
             <th>Khoản mục</th>
             <th>Cách tính</th>
             <th className="num">Giá trị (đ)</th>
+            <th>Nguồn / căn cứ</th>
           </tr>
         </thead>
         <tbody>
@@ -71,6 +72,7 @@ export function CostSummaryTab({ data }: { data: EstimateResponse }) {
               <td>{l.name}</td>
               <td className="formula">{l.formula}</td>
               <td className="num">{money(l.value)}</td>
+              <td className="source">{l.source}</td>
             </tr>
           ))}
         </tbody>

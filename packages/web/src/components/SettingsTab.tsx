@@ -29,7 +29,10 @@ type NumKey =
   | 'nightPremium'
   | 'machineLaborShare'
   | 'priceIndexRate'
-  | 'durationYears';
+  | 'durationYears'
+  | 'contingencyPeriods'
+  | 'priceIndexAvg'
+  | 'priceIndexDelta';
 
 const TT11_RATES: [NumKey, string][] = [
   ['cRate', 'Chi phí chung C (%)'],
@@ -49,7 +52,7 @@ const COST_INPUTS: [NumKey, string][] = [
   ['qlda', 'Chi phí quản lý dự án (đ)'],
   ['tuVan', 'Chi phí tư vấn đầu tư xây dựng (đ)'],
   ['other', 'Chi phí khác (đ)'],
-  ['contingencyQtyRate', 'Dự phòng khối lượng, công việc phát sinh (%)'],
+  ['contingencyQtyRate', 'Dự phòng khối lượng, công việc phát sinh kps (%, ≤ 5%)'],
 ];
 
 export function SettingsTab({ data, config, onSaved }: { data: EstimateResponse; config: AppConfig; onSaved: () => void }) {
@@ -61,7 +64,11 @@ export function SettingsTab({ data, config, onSaved }: { data: EstimateResponse;
     buildingType: p.buildingType,
     priceBaseDate: p.priceBaseDate,
     priceDate: p.priceDate ?? '',
+    gxdttTmdt: p.gxdttTmdt === null ? '' : String(p.gxdttTmdt).replace('.', ','),
   });
+  const [ttOverrides, setTtOverrides] = useState<Record<number, string>>(
+    Object.fromEntries(data.categories.map((c) => [c.id, c.ttRate === null || c.ttRate === undefined ? '' : String(c.ttRate).replace('.', ',')])),
+  );
   const [vat, setVat] = useState(p.vatRate);
   const [s, setS] = useState<ProjectCostSettings>(data.settings);
   const [text, setText] = useState<Record<string, string>>({});
@@ -87,8 +94,16 @@ export function SettingsTab({ data, config, onSaved }: { data: EstimateResponse;
   const save = async () => {
     setMsg('');
     try {
-      await api.updateProject(p.id, { ...info, priceDate: info.priceDate || null });
+      if (isTt36 && (s.contingencyQtyRate ?? 0) > 5) throw new Error('kps không vượt quá 5% (TT 36/2026, công thức 2.8).');
+      const tmdt = info.gxdttTmdt.trim() === '' ? null : parseInputNumber(info.gxdttTmdt);
+      if (info.gxdttTmdt.trim() !== '' && tmdt === null) throw new Error('Chi phí XD trong TMĐT không hợp lệ');
+      await api.updateProject(p.id, { ...info, gxdttTmdt: tmdt, priceDate: info.priceDate || null });
       await api.saveSettings(p.id, s, vat);
+      for (const c of data.categories) {
+        const raw = ttOverrides[c.id] ?? '';
+        const v = raw.trim() === '' ? null : parseInputNumber(raw);
+        if ((c.ttRate ?? null) !== v) await api.updateCategory(p.id, c.id, { ttRate: v });
+      }
       setMsg('Đã lưu cài đặt.');
       onSaved();
     } catch (e) {
@@ -202,6 +217,17 @@ export function SettingsTab({ data, config, onSaved }: { data: EstimateResponse;
       {isTt36 ? (
         <section>
           <h3>Hệ số chi phí theo TT 36/2026 (Bảng 3.8)</h3>
+          <label>
+            Chi phí XD trước thuế của công trình trong TMĐT được duyệt (tỷ đồng) – dùng tra khoảng Bảng 3.3, 3.7
+            <input className="num" placeholder="Để trống: dùng giá trị dự toán" value={info.gxdttTmdt} onChange={(e) => setInfo({ ...info, gxdttTmdt: e.target.value })} />
+          </label>
+          {data.costSummary.bracketBase && (
+            <p className="hint">
+              Đang tra khoảng theo: <b>{(data.costSummary.bracketBase.value / 1e9).toLocaleString('vi-VN', { maximumFractionDigits: 3 })} tỷ đồng</b> (
+              {data.costSummary.bracketBase.from === 'tmdt' ? 'TMĐT được duyệt' : 'giá trị dự toán – chưa nhập TMĐT'}). Nếu dự án có nhiều công trình, mỗi
+              công trình lập thành một công trình riêng trong phần mềm với giá trị TMĐT của chính nó.
+            </p>
+          )}
           <label className="check">
             <input type="checkbox" checked={!!s.autoRates} onChange={(e) => setS({ ...s, autoRates: e.target.checked })} /> Tự động tra Bảng 3.3–3.7 theo
             loại công trình và quy mô chi phí
@@ -255,6 +281,16 @@ export function SettingsTab({ data, config, onSaved }: { data: EstimateResponse;
               <label key={k}>
                 {label}
                 {num(k, !!s.autoRates)}
+              </label>
+            ))}
+          </div>
+          <h3>Tỷ lệ TT riêng theo hạng mục</h3>
+          <p className="hint">Bảng 3.5: tỷ lệ 6,5% áp dụng cho công tác xây dựng trong đường hầm. Để trống = dùng tỷ lệ chung của công trình.</p>
+          <div className="form">
+            {data.categories.map((c) => (
+              <label key={c.id}>
+                {c.name} (%)
+                <input className="num" placeholder="chung" value={ttOverrides[c.id] ?? ''} onChange={(e) => setTtOverrides({ ...ttOverrides, [c.id]: e.target.value })} />
               </label>
             ))}
           </div>
@@ -325,23 +361,17 @@ export function SettingsTab({ data, config, onSaved }: { data: EstimateResponse;
           {isTt36 && (
             <label>
               Cách tính dự phòng trượt giá
-              <select value={s.contingencyPriceMode ?? 'percent'} onChange={(e) => setS({ ...s, contingencyPriceMode: e.target.value as 'percent' | 'index' })}>
-                <option value="percent">Theo tỷ lệ % nhập</option>
-                <option value="index">Theo thời gian thực hiện và chỉ số giá xây dựng</option>
+              <select
+                value={s.contingencyPriceMode === 'percent' ? 'percent' : 'formula'}
+                onChange={(e) => setS({ ...s, contingencyPriceMode: e.target.value as 'percent' | 'formula' })}
+              >
+                <option value="formula">Công thức 2.9 TT 36/2026 (thời gian XD, chỉ số giá)</option>
+                <option value="percent">Tỷ lệ % nhập tay (không theo công thức 2.9)</option>
               </select>
             </label>
           )}
-          {isTt36 && s.contingencyPriceMode === 'index' ? (
-            <>
-              <label>
-                Thời gian thực hiện (năm)
-                {num('durationYears')}
-              </label>
-              <label>
-                Chỉ số giá xây dựng bình quân (%/năm)
-                {num('priceIndexRate')}
-              </label>
-            </>
+          {isTt36 && s.contingencyPriceMode !== 'percent' ? (
+            <ContingencySchedule s={s} setS={setS} num={num} />
           ) : (
             <label>
               Dự phòng trượt giá (%)
@@ -358,5 +388,72 @@ export function SettingsTab({ data, config, onSaved }: { data: EstimateResponse;
         </button>
       </div>
     </div>
+  );
+}
+
+/** Inputs of công thức 2.9: GDP2 = Σ G_TDP,t × [(I_bq + ΔI)^t − 1]. */
+function ContingencySchedule({
+  s,
+  setS,
+  num,
+}: {
+  s: ProjectCostSettings;
+  setS: (s: ProjectCostSettings) => void;
+  num: (k: NumKey) => JSX.Element;
+}) {
+  const periods = Math.max(1, Math.round(s.contingencyPeriods ?? 1));
+  const sched = s.contingencySchedule && s.contingencySchedule.length === periods ? s.contingencySchedule : Array.from({ length: periods }, () => 100 / periods);
+  const sum = sched.reduce((a, b) => a + b, 0);
+  const unit = s.contingencyPeriodUnit === 'quy' ? 'Quý' : 'Năm';
+  return (
+    <>
+      <div className="row2">
+        <label>
+          Thời gian xây dựng T (số kỳ)
+          {num('contingencyPeriods')}
+        </label>
+        <label>
+          Đơn vị kỳ
+          <select value={s.contingencyPeriodUnit ?? 'nam'} onChange={(e) => setS({ ...s, contingencyPeriodUnit: e.target.value as 'nam' | 'quy' })}>
+            <option value="nam">Năm</option>
+            <option value="quy">Quý</option>
+          </select>
+        </label>
+      </div>
+      <div className="row2">
+        <label>
+          I_bq – chỉ số giá XD bình quân (VD 1,03)
+          {num('priceIndexAvg')}
+        </label>
+        <label>
+          ΔI – mức biến động bình quân (VD 0,005)
+          {num('priceIndexDelta')}
+        </label>
+      </div>
+      <div className="schedule">
+        <span className="hint">Phân bổ G_TDP theo kỳ (%):</span>
+        {sched.map((v, i) => (
+          <label key={i}>
+            {unit} {i + 1}
+            <input
+              className="num"
+              value={String(+v.toFixed(4)).replace('.', ',')}
+              onChange={(e) => {
+                const n = Number(e.target.value.replace(',', '.'));
+                if (!Number.isFinite(n)) return;
+                const next = [...sched];
+                next[i] = n;
+                setS({ ...s, contingencySchedule: next });
+              }}
+            />
+          </label>
+        ))}
+        <button type="button" className="small" onClick={() => setS({ ...s, contingencySchedule: Array.from({ length: periods }, () => 100 / periods) })}>
+          Chia đều
+        </button>
+        {Math.abs(sum - 100) > 0.01 && <span className="error">Tổng phân bổ = {sum.toFixed(2)}% (phải bằng 100%)</span>}
+      </div>
+      <p className="hint">GDP2 = Σ G_TDP,t × [(I_bq + ΔI)^t − 1] – TT 36/2026/TT-BXD, Phụ lục II, công thức 2.9.</p>
+    </>
   );
 }

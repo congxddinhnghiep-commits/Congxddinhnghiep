@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS projects (
   cost_settings TEXT,
   legal_set TEXT NOT NULL DEFAULT 'TT36_2026',
   price_date TEXT,
+  gxdtt_tmdt REAL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -35,7 +36,8 @@ CREATE TABLE IF NOT EXISTS categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  sort_order INTEGER NOT NULL DEFAULT 0
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  tt_rate REAL
 );
 
 CREATE TABLE IF NOT EXISTS estimate_items (
@@ -129,6 +131,9 @@ export function migrate(db: DB): void {
     db.exec(`UPDATE projects SET legal_set = 'TT11_2021' WHERE legal_set IS NULL`);
   }
   if (!pcols.includes('price_date')) db.exec(`ALTER TABLE projects ADD COLUMN price_date TEXT`);
+  // Update 2
+  if (!columns(db, 'projects').includes('gxdtt_tmdt')) db.exec(`ALTER TABLE projects ADD COLUMN gxdtt_tmdt REAL`);
+  if (!columns(db, 'categories').includes('tt_rate')) db.exec(`ALTER TABLE categories ADD COLUMN tt_rate REAL`);
 
   if (!columns(db, 'norms').includes('dataset')) {
     db.pragma('foreign_keys = OFF');

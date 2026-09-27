@@ -34,8 +34,10 @@ export function seedSampleData(db: DB): void {
     ['TT12_2021', sampleNorms(LABOUR_TT12)],
   ];
   db.transaction(() => {
+    const renameSample = db.prepare('UPDATE resources SET name = ?, name_search = ? WHERE code = ? AND is_sample = 1 AND name <> ?');
     for (const [code, name, unit, type, price] of SAMPLE_RESOURCES) {
       insRes.run(code, name, unit, type, price, normalizeText(`${code} ${name}`));
+      renameSample.run(name, normalizeText(`${code} ${name}`), code, name);
     }
     for (const [dataset, norms] of datasets) {
       const count = (db.prepare('SELECT COUNT(*) AS n FROM norms WHERE dataset = ?').get(dataset) as { n: number }).n;

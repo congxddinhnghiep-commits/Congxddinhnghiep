@@ -88,13 +88,16 @@ describe('legal sets via API', () => {
     user = await login(app, 'kysu', 'KySu2026!!', 'KySuMoi2026');
   });
 
-  it('lists the legal register with provisional TT36 tables', async () => {
+  it('lists the legal register with verified TT36 tables (Update 2, A1)', async () => {
     const r = await request(app).get('/api/legal').set(A());
     expect(r.body.documents.find((d: { id: string }) => d.id === 'TT-36-2026').effective).toBe('2026-07-01');
     const tt36 = r.body.sets.find((s: { id: string }) => s.id === 'TT36_2026');
     expect(Object.keys(tt36.tables)).toEqual(['3.3', '3.4', '3.5', '3.6', '3.7']);
-    expect(tt36.tables['3.3'].status).toBe('provisional');
+    expect(tt36.tables['3.3'].status).toBe('verified');
+    expect(tt36.tables['3.3'].verifiedBy).toBe('Claude (automated transcription, 2 passes)');
+    expect(tt36.tables['3.3'].basis).toBe('GXDTT_TMDT');
     expect(tt36.tables['3.3'].source).toMatch(/Bảng 3\.3/);
+    expect(r.body.documents.find((d: { id: string }) => d.id === 'CV-9947-2026').number).toBe('9947/BXD-VPB');
   });
 
   it('picks the legal set from the price date and uses the matching norm dataset', async () => {
@@ -114,7 +117,7 @@ describe('legal sets via API', () => {
     const e2 = await request(app).get(`/api/projects/${newP.body.id}/estimate`).set(A());
     expect(e2.body.resourceSummary.map((r: { code: string }) => r.code)).toContain('N.NHOM3');
     expect(e2.body.costSummary.lines.map((l: { code: string }) => l.code)).toContain('GXDNT');
-    expect(e2.body.provisionalRates).toBe(true);
+    expect(e2.body.provisionalRates).toBe(false);
   });
 
   it('never switches the legal set without explicit confirmation', async () => {
@@ -145,8 +148,10 @@ describe('legal sets via API', () => {
   });
 
   it('only admins can mark rate tables verified', async () => {
-    const denied = await request(app).put('/api/legal/TT36_2026/tables/3.3').set({ Authorization: `Bearer ${user}` }).send({ status: 'verified' });
+    const denied = await request(app).put('/api/legal/TT36_2026/tables/3.3').set({ Authorization: `Bearer ${user}` }).send({ status: 'provisional' });
     expect(denied.status).toBe(403);
+    const reset = await request(app).put('/api/legal/TT36_2026/tables/3.3').set(A()).send({ status: 'provisional' });
+    expect(reset.body.status).toBe('provisional');
     const ok = await request(app).put('/api/legal/TT36_2026/tables/3.3').set(A()).send({ status: 'verified' });
     expect(ok.body.status).toBe('verified');
     expect(ok.body.verifiedBy).toBe('admin');
@@ -177,5 +182,30 @@ describe('legal sets via API', () => {
     expect(all).toMatch(/=E\d+\*D\d+\/100\*\(1\+D\d+\/100\)/);
     // NC line = DTCT total × Knc
     expect(all).toMatch(/=DTCT!K\d+\*D\d+/);
+  });
+
+  it('Update 2: TMĐT bracket base, kps ≤ 5%, per-hạng mục TT rate', async () => {
+    const p = (await request(app).post('/api/projects').set(A()).send({ name: 'Hầm', priceDate: '2026-09-01', gxdttTmdt: 50 })).body;
+    expect(p.gxdttTmdt).toBe(50);
+    const cat = (await request(app).get(`/api/projects/${p.id}/estimate`).set(A())).body.categories[0].id;
+    await request(app).post(`/api/projects/${p.id}/items`).set(A()).send({ categoryId: cat, normCode: 'AF.12214', quantity: 20 });
+    let est = (await request(app).get(`/api/projects/${p.id}/estimate`).set(A())).body;
+    expect(est.costSummary.bracketBase).toEqual({ value: 50e9, from: 'tmdt' });
+    expect(est.costSummary.rates.c).toBe(7.1);
+
+    const bad = await request(app).put(`/api/projects/${p.id}/settings`).set(A()).send({ costSettings: { contingencyQtyRate: 6 } });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toMatch(/5%/);
+    const sched = await request(app).put(`/api/projects/${p.id}/settings`).set(A()).send({ costSettings: { contingencySchedule: [60, 30] } });
+    expect(sched.status).toBe(400);
+
+    const T = est.costSummary.T;
+    await request(app).put(`/api/projects/${p.id}/categories/${cat}`).set(A()).send({ ttRate: 6.5 });
+    est = (await request(app).get(`/api/projects/${p.id}/estimate`).set(A())).body;
+    expect(est.costSummary.lines.find((l: { code: string }) => l.code === 'TT').value).toBeCloseTo((T * 6.5) / 100, 4);
+
+    await request(app).put(`/api/projects/${p.id}`).set(A()).send({ gxdttTmdt: null });
+    est = (await request(app).get(`/api/projects/${p.id}/estimate`).set(A())).body;
+    expect(est.warnings).toContain('Chưa nhập chi phí XD trong TMĐT được duyệt – đang dùng giá trị dự toán để tra khoảng.');
   });
 });

@@ -1,5 +1,13 @@
 import ExcelJS from 'exceljs';
-import { amountInWords, BUILDING_TYPE_LABELS, evaluateFormula, RESOURCE_TYPE_LABELS } from '@dutoan/core';
+import {
+  amountInWords,
+  BUILDING_TYPE_LABELS,
+  contingencyInputs,
+  defaultTt36Settings,
+  evaluateFormula,
+  RESOURCE_TYPE_LABELS,
+  type Tt36Settings,
+} from '@dutoan/core';
 import type { LegalDocument } from '@dutoan/core';
 import type { Calculation } from './repo.js';
 
@@ -297,7 +305,7 @@ export async function buildWorkbook(calc: Calculation, author: string, legalDocs
     info(wsTH, r0++, `– ${d.type} ${d.number}: ${d.title}${dates ? ` (${dates})` : ''}${d.url ? ` – ${d.url}` : ''}${d.verified ? '' : ' [chưa xác minh]'}`, 7);
   }
   if (calc.provisionalRates) {
-    info(wsTH, r0, 'CẢNH BÁO: bảng tỷ lệ đang ở trạng thái TẠM (provisional) – chưa đối chiếu bản PDF đã ký / phụ lục thay thế (CV 9947/BXD-VP).', 7);
+    info(wsTH, r0, 'CẢNH BÁO: bảng tỷ lệ đang ở trạng thái TẠM (provisional) – chưa đối chiếu với bản PDF đã ký.', 7);
     wsTH.getCell(r0++, 1).font = { name: FONT, size: 11, bold: true, color: { argb: 'FFB42318' } };
   }
   const headRow = r0 + 1;
@@ -346,7 +354,7 @@ export async function buildWorkbook(calc: Calculation, author: string, legalDocs
   r += 2;
   info(wsTH, r, `Bằng chữ: ${amountInWords(cs.total ?? cs.Gxd)}.`, 7);
   info(wsTH, r + 1, `Nguồn tỷ lệ: ${calc.ratesSource}`, 7);
-  calc.warnings.forEach((w, i) => info(wsTH, r + 2 + i, `Lưu ý: ${w}`, 7));
+  [...calc.warnings.map((w) => `Lưu ý: ${w}`), ...calc.notes.map((n) => `Ghi chú: ${n}`)].forEach((w, i) => info(wsTH, r + 2 + i, w, 7));
 
   // ------------------------------------------------------------------ CLVT
   setupSheet(wsCL, [6, 14, 40, 9, 14, 14, 14, 14, 18], false);
@@ -382,31 +390,42 @@ export async function buildWorkbook(calc: Calculation, author: string, legalDocs
   );
 
   // ------------------------------------------------------------------ TDT
-  setupSheet(wsTDT, [6, 46, 44, 11, 20], false);
-  title(wsTDT, 1, 'BẢNG TỔNG HỢP DỰ TOÁN', 5);
-  info(wsTDT, 2, projectInfo[0], 5);
-  info(wsTDT, 3, `Căn cứ: ${calc.legalSet.label}`, 5);
-  header(wsTDT, 4, ['STT', 'Khoản mục chi phí', 'Cách tính', 'Tỷ lệ (%)', 'Giá trị (đ)']);
+  setupSheet(wsTDT, [6, 42, 46, 11, 20, 44], true);
+  title(wsTDT, 1, 'BẢNG TỔNG HỢP DỰ TOÁN', 6);
+  info(wsTDT, 2, projectInfo[0], 6);
+  info(wsTDT, 3, `Căn cứ: ${calc.legalSet.label}`, 6);
+  header(wsTDT, 4, ['STT', 'Khoản mục chi phí', 'Cách tính', 'Tỷ lệ (%)', 'Giá trị (đ)', 'Nguồn / căn cứ']);
   const s = calc.settings;
   const byCode = Object.fromEntries(calc.totalEstimate.lines.map((l) => [l.code, l]));
   const V = 'SUM(E5:E9)';
-  const indexMode = s.contingencyPriceMode === 'index';
-  const years = Math.max(1, Math.round(s.durationYears ?? 1));
-  const dp2Formula = indexMode
-    ? Array.from({ length: years }, (_, i) => `(${V}/${years})*((1+${s.priceIndexRate ?? 0}/100)^${i + 1}-1)`).join('+')
-    : `${V}*D11/100`;
-  const tdtRows: [string, string, string | number, Cell][] = [
-    [byCode.Gxd.name, byCode.Gxd.formula, '', { formula: `TH!E${thTotalRow}`, result: byCode.Gxd.value }],
-    [byCode.Gtb.name, 'Nhập', '', byCode.Gtb.value],
-    [byCode.Gqlda.name, 'Nhập', '', byCode.Gqlda.value],
-    [byCode.Gtv.name, 'Nhập', '', byCode.Gtv.value],
-    [byCode.Gk.name, 'Nhập', '', byCode.Gk.value],
-    [byCode.Gdp1.name, byCode.Gdp1.formula, s.contingencyQtyRate ?? 0, { formula: `${V}*D10/100`, result: byCode.Gdp1.value }],
-    [byCode.Gdp2.name, byCode.Gdp2.formula, indexMode ? '' : s.contingencyPriceRate ?? 0, { formula: dp2Formula, result: byCode.Gdp2.value }],
+  let dp2Formula = `${V}*D11/100`;
+  let dp2Rate: string | number = s.contingencyPriceRate ?? 0;
+  if (calc.legalSet.id === 'TT36_2026') {
+    const ci = contingencyInputs({ ...defaultTt36Settings(), ...s } as Tt36Settings);
+    if (ci.mode === 'formula') {
+      dp2Rate = '';
+      dp2Formula = ci.shares.map((share, i) => `${V}*${share}/100*(${ci.index}^${i + 1}-1)`).join('+');
+    }
+  }
+  const tdtRows: [string, string, string | number, Cell, string][] = [
+    [byCode.Gxd.name, byCode.Gxd.formula, '', { formula: `TH!E${thTotalRow}`, result: byCode.Gxd.value }, byCode.Gxd.source ?? ''],
+    [byCode.Gtb.name, 'Nhập', '', byCode.Gtb.value, byCode.Gtb.source ?? ''],
+    [byCode.Gqlda.name, 'Nhập', '', byCode.Gqlda.value, byCode.Gqlda.source ?? ''],
+    [byCode.Gtv.name, 'Nhập', '', byCode.Gtv.value, byCode.Gtv.source ?? ''],
+    [byCode.Gk.name, 'Nhập', '', byCode.Gk.value, byCode.Gk.source ?? ''],
+    [byCode.Gdp1.name, byCode.Gdp1.formula, s.contingencyQtyRate ?? 0, { formula: `${V}*D10/100`, result: byCode.Gdp1.value }, byCode.Gdp1.source ?? ''],
+    [byCode.Gdp2.name, byCode.Gdp2.formula, dp2Rate, { formula: dp2Formula, result: byCode.Gdp2.value }, byCode.Gdp2.source ?? ''],
   ];
-  tdtRows.forEach((v, i) => row(wsTDT, 5 + i, [i + 1, v[0], v[1], v[2], v[3]], { numFmts: { 4: '0.00', 5: MONEY } }));
-  row(wsTDT, 12, ['', 'TỔNG DỰ TOÁN', '', '', { formula: 'SUM(E5:E11)', result: calc.totalEstimate.total }], { bold: true, numFmts: { 5: MONEY } });
-  info(wsTDT, 14, `Bằng chữ: ${amountInWords(calc.totalEstimate.total)}.`, 5);
+  tdtRows.forEach((v, i) => {
+    const rr = row(wsTDT, 5 + i, [i + 1, v[0], v[1], v[2], v[3], v[4]], { numFmts: { 4: '0.00', 5: MONEY } });
+    rr.getCell(6).font = { name: FONT, size: 9, italic: true };
+    rr.getCell(3).alignment = { wrapText: true, vertical: 'middle' };
+  });
+  row(wsTDT, 12, ['', 'TỔNG DỰ TOÁN', byCode.TDT.formula, '', { formula: 'SUM(E5:E11)', result: calc.totalEstimate.total }, ''], {
+    bold: true,
+    numFmts: { 5: MONEY },
+  });
+  info(wsTDT, 14, `Bằng chữ: ${amountInWords(calc.totalEstimate.total)}.`, 6);
 
   return wb;
 }

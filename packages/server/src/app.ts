@@ -150,6 +150,12 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
   // projects
   const proj = (req: Request) => repo.requireProject(id(req.params.id), req.user!.id, req.user!.role === 'admin');
   api.get('/projects', h((req) => repo.listProjects(req.user!.id, req.user!.role === 'admin')));
+  const tmdt = (v: unknown): number | null => {
+    if (v === null || v === '') return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) throw new HttpError(400, 'Chi phí XD trong TMĐT không hợp lệ (tỷ đồng)');
+    return n || null;
+  };
   const checkDate = (d: unknown) => {
     if (d !== undefined && d !== null && d !== '' && !(typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))) {
       throw new HttpError(400, 'Ngày lập giá không hợp lệ (yyyy-mm-dd)');
@@ -162,6 +168,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
       if (b.buildingType && !BUILDING_TYPES.includes(b.buildingType)) throw new HttpError(400, 'Loại công trình không hợp lệ');
       if (b.legalSet !== undefined && !legal.isLegalSet(b.legalSet)) throw new HttpError(400, 'Bộ pháp lý không hợp lệ');
       checkDate(b.priceDate);
+      if (b.gxdttTmdt !== undefined) b.gxdttTmdt = tmdt(b.gxdttTmdt);
       const p = repo.createProject(req.user!.id, b);
       repo.createCategory(p.id, 'Hạng mục chung');
       return p;
@@ -184,6 +191,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
       return repo.updateProject(p.id, {
         legalSet: b.legalSet ?? p.legalSet,
         priceDate: b.priceDate !== undefined ? b.priceDate || null : p.priceDate,
+        gxdttTmdt: b.gxdttTmdt !== undefined ? tmdt(b.gxdttTmdt) : p.gxdttTmdt,
         name: b.name ?? p.name,
         ownerName: b.ownerName ?? p.ownerName,
         location: b.location ?? p.location,
@@ -208,6 +216,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
       const numeric: (keyof ProjectCostSettings)[] = [
         'cRate', 'ltRate', 'ttRate', 'gtkRate', 'tlRate', 'ntRate', 'equipment', 'qlda', 'tuVan', 'other',
         'contingencyQtyRate', 'contingencyPriceRate', 'nightShare', 'nightPremium', 'machineLaborShare', 'priceIndexRate', 'durationYears',
+        'contingencyPeriods', 'priceIndexAvg', 'priceIndexDelta',
       ];
       const clean: ProjectCostSettings = { autoRates: !!b.autoRates, cBase: b.cBase === 'NC' ? 'NC' : 'T' };
       // TT 36/2026 options
@@ -227,7 +236,25 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
           clean.tlCategory = b.tlCategory;
         }
         if (b.linearWorks !== undefined) clean.linearWorks = !!b.linearWorks;
-        if (b.contingencyPriceMode !== undefined) clean.contingencyPriceMode = b.contingencyPriceMode === 'index' ? 'index' : 'percent';
+        if (b.contingencyPriceMode !== undefined) {
+          if (!['formula', 'percent', 'index'].includes(b.contingencyPriceMode)) throw new HttpError(400, 'Cách tính dự phòng trượt giá không hợp lệ');
+          clean.contingencyPriceMode = b.contingencyPriceMode;
+        }
+        if (b.contingencyPeriodUnit !== undefined) clean.contingencyPeriodUnit = b.contingencyPeriodUnit === 'quy' ? 'quy' : 'nam';
+        if (b.contingencySchedule !== undefined) {
+          if (!Array.isArray(b.contingencySchedule) || b.contingencySchedule.some((x) => !Number.isFinite(Number(x)) || Number(x) < 0)) {
+            throw new HttpError(400, 'Phân bổ giá trị theo thời gian không hợp lệ');
+          }
+          const sched = b.contingencySchedule.map(Number);
+          if (sched.length && Math.abs(sched.reduce((a, x) => a + x, 0) - 100) > 0.01) throw new HttpError(400, 'Tổng phân bổ theo thời gian phải bằng 100%');
+          clean.contingencySchedule = sched;
+        }
+        if (b.contingencyQtyRate !== undefined && Number(b.contingencyQtyRate) > 5) {
+          throw new HttpError(400, 'Tỷ lệ dự phòng khối lượng phát sinh kps không vượt quá 5% (TT 36/2026, công thức 2.8)');
+        }
+        if (b.contingencyPeriods !== undefined && !(Number(b.contingencyPeriods) >= 1 && Number(b.contingencyPeriods) <= 200)) {
+          throw new HttpError(400, 'Thời gian xây dựng (số kỳ) không hợp lệ');
+        }
       }
       for (const k of numeric) {
         if (b[k] === undefined) continue;
@@ -247,7 +274,13 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
   api.put(
     '/projects/:id/categories/:catId',
     h((req) => {
-      repo.updateCategory(proj(req).id, id(req.params.catId), { name: req.body?.name, order: req.body?.order });
+      const b = req.body ?? {};
+      let ttRate: number | null | undefined;
+      if (b.ttRate !== undefined) {
+        ttRate = b.ttRate === null || b.ttRate === '' ? null : Number(b.ttRate);
+        if (ttRate !== null && !(Number.isFinite(ttRate) && ttRate >= 0 && ttRate <= 100)) throw new HttpError(400, 'Tỷ lệ TT không hợp lệ');
+      }
+      repo.updateCategory(proj(req).id, id(req.params.catId), { name: b.name, order: b.order, ttRate });
     }),
   );
   api.delete(

@@ -6,92 +6,400 @@
   "effectiveFrom": "2026-07-01",
   "effectiveTo": null,
   "normDataset": "TT38_2026",
-  "documents": ["LXD-135-2025", "ND-206-2026", "TT-36-2026", "TT-37-2026", "TT-38-2026", "CV-9947-2026", "QD-1538-2026"],
-  "note": "Bảng tỷ lệ trích tự động từ PDF chính thức TT 36/2026 Phụ lục III (docs/LEGAL-UPDATE-2026.md). PHẢI đối chiếu với bản PDF đã ký và phụ lục thay thế theo CV 9947/BXD-VP trước khi đánh dấu 'đã xác minh'.",
+  "documents": [
+    "LXD-135-2025",
+    "ND-206-2026",
+    "TT-36-2026",
+    "TT-37-2026",
+    "TT-38-2026",
+    "CV-9947-2026",
+    "QD-1538-2026"
+  ],
+  "note": "Bảng 3.3–3.7 lấy từ TT 36/2026/TT-BXD Phụ lục III (không bị thay thế bởi CV 9947/BXD-VPB – công văn này chỉ thay Phụ lục V của TT 36 và Phụ lục I–VIII của TT 38), đính chính theo QĐ 1538/QĐ-BXD. Đã đối chiếu 2 lần với bản chép nguyên văn (docs/UPDATE-2.md, mục A1). Bảng 3.3 và 3.7 tra khoảng theo chi phí xây dựng trước thuế của công trình trong TMĐT được duyệt; Bảng 3.4 theo chi phí nhân công. TT 36 không quy định nội suy – chỉ tra theo khoảng.",
   "tables": {
     "3.3": {
       "id": "3.3",
       "title": "Định mức chi phí chung tính trên chi phí trực tiếp",
-      "source": "TT 36/2026/TT-BXD, Phụ lục III, Bảng 3.3 (phụ lục thay thế theo CV 9947/BXD-VP)",
-      "basis": "T",
-      "brackets": [40000000000, 60000000000, 100000000000, 300000000000, 500000000000, 750000000000, 1000000000000],
-      "bracketLabels": ["≤ 40 tỷ", "≤ 60 tỷ", "≤ 100 tỷ", "≤ 300 tỷ", "≤ 500 tỷ", "≤ 750 tỷ", "≤ 1.000 tỷ", "> 1.000 tỷ"],
+      "source": "TT 36/2026/TT-BXD, Phụ lục III, Bảng 3.3 (đính chính QĐ 1538/QĐ-BXD)",
+      "basis": "GXDTT_TMDT",
+      "brackets": [
+        40000000000,
+        60000000000,
+        100000000000,
+        300000000000,
+        500000000000,
+        750000000000,
+        1000000000000
+      ],
+      "bracketLabels": [
+        "≤ 40 tỷ",
+        "≤ 60 tỷ",
+        "≤ 100 tỷ",
+        "≤ 300 tỷ",
+        "≤ 500 tỷ",
+        "≤ 750 tỷ",
+        "≤ 1.000 tỷ",
+        "> 1.000 tỷ"
+      ],
       "interpolation": "none",
-      "status": "provisional",
+      "status": "verified",
       "rows": [
-        { "key": "dan_dung", "label": "Công trình dân dụng", "values": [7.3, 7.1, 6.7, 6.5, 6.2, 6.1, 6.0, 5.8] },
-        { "key": "tu_bo_di_tich", "label": "Tu bổ, phục hồi di tích", "values": [11.6, 11.1, 10.3, 10.1, 9.9, 9.8, 9.6, 9.4] },
-        { "key": "cong_nghiep", "label": "Công trình công nghiệp", "values": [6.2, 6.0, 5.6, 5.3, 5.1, 5.0, 4.9, 4.6] },
-        { "key": "cong_nghiep_ham", "label": "Công nghiệp – hầm thủy điện, hầm lò", "values": [7.3, 7.2, 7.1, 6.9, 6.7, 6.6, 6.5, 6.4] },
-        { "key": "giao_thong", "label": "Công trình giao thông", "values": [6.2, 6.0, 5.6, 5.3, 5.1, 5.0, 4.9, 4.6] },
-        { "key": "giao_thong_ham", "label": "Giao thông – công trình hầm", "values": [7.3, 7.2, 7.1, 6.9, 6.7, 6.6, 6.5, 6.4] },
-        { "key": "nn_mt", "label": "Công trình nông nghiệp và môi trường", "values": [6.1, 5.9, 5.5, 5.3, 5.1, 5.0, 4.8, 4.6] },
-        { "key": "nn_ham", "label": "Nông nghiệp – công trình hầm", "values": [7.3, 7.2, 7.1, 6.9, 6.7, 6.6, 6.5, 6.4] },
-        { "key": "ha_tang", "label": "Công trình hạ tầng kỹ thuật", "values": [5.5, 5.3, 5.0, 4.8, 4.5, 4.4, 4.3, 4.0] }
-      ]
+        {
+          "key": "dan_dung",
+          "label": "Công trình dân dụng",
+          "values": [
+            7.3,
+            7.1,
+            6.7,
+            6.5,
+            6.2,
+            6.1,
+            6.0,
+            5.8
+          ]
+        },
+        {
+          "key": "tu_bo_di_tich",
+          "label": "Tu bổ, phục hồi di tích",
+          "values": [
+            11.6,
+            11.1,
+            10.3,
+            10.1,
+            9.9,
+            9.8,
+            9.6,
+            9.4
+          ]
+        },
+        {
+          "key": "cong_nghiep",
+          "label": "Công trình công nghiệp",
+          "values": [
+            6.2,
+            6.0,
+            5.6,
+            5.3,
+            5.1,
+            5.0,
+            4.9,
+            4.6
+          ]
+        },
+        {
+          "key": "cong_nghiep_ham",
+          "label": "Công nghiệp – hầm thủy điện, hầm lò",
+          "values": [
+            7.3,
+            7.2,
+            7.1,
+            6.9,
+            6.7,
+            6.6,
+            6.5,
+            6.4
+          ]
+        },
+        {
+          "key": "giao_thong",
+          "label": "Công trình giao thông",
+          "values": [
+            6.2,
+            6.0,
+            5.6,
+            5.3,
+            5.1,
+            5.0,
+            4.9,
+            4.6
+          ]
+        },
+        {
+          "key": "giao_thong_ham",
+          "label": "Giao thông – công trình hầm",
+          "values": [
+            7.3,
+            7.2,
+            7.1,
+            6.9,
+            6.7,
+            6.6,
+            6.5,
+            6.4
+          ]
+        },
+        {
+          "key": "nn_mt",
+          "label": "Công trình nông nghiệp và môi trường",
+          "values": [
+            6.1,
+            5.9,
+            5.5,
+            5.3,
+            5.1,
+            5.0,
+            4.8,
+            4.6
+          ]
+        },
+        {
+          "key": "nn_ham",
+          "label": "Nông nghiệp – công trình hầm",
+          "values": [
+            7.3,
+            7.2,
+            7.1,
+            6.9,
+            6.7,
+            6.6,
+            6.5,
+            6.4
+          ]
+        },
+        {
+          "key": "ha_tang",
+          "label": "Công trình hạ tầng kỹ thuật",
+          "values": [
+            5.5,
+            5.3,
+            5.0,
+            4.8,
+            4.5,
+            4.4,
+            4.3,
+            4.0
+          ]
+        }
+      ],
+      "verifiedBy": "Claude (automated transcription, 2 passes)",
+      "verifiedAt": "2026-09-27",
+      "appliedTo": "T"
     },
     "3.4": {
       "id": "3.4",
       "title": "Định mức chi phí chung tính trên chi phí nhân công",
-      "source": "TT 36/2026/TT-BXD, Phụ lục III, Bảng 3.4 (đính chính theo QĐ 1538/QĐ-BXD)",
+      "source": "TT 36/2026/TT-BXD, Phụ lục III, Bảng 3.4 (đính chính QĐ 1538/QĐ-BXD)",
       "basis": "NC",
-      "brackets": [15000000000, 50000000000, 100000000000],
-      "bracketLabels": ["≤ 15 tỷ", "≤ 50 tỷ", "≤ 100 tỷ", "> 100 tỷ"],
+      "brackets": [
+        15000000000,
+        50000000000,
+        100000000000
+      ],
+      "bracketLabels": [
+        "≤ 15 tỷ",
+        "≤ 50 tỷ",
+        "≤ 100 tỷ",
+        "> 100 tỷ"
+      ],
       "interpolation": "none",
-      "status": "provisional",
+      "status": "verified",
       "rows": [
-        { "key": "sua_chua_duong", "label": "Sửa chữa đường bộ, đường sắt, báo hiệu hàng hải…", "values": [66, 63, 60, 56] },
-        { "key": "nn_thu_cong", "label": "Công trình nông nghiệp thủ công", "values": [51, 48, 45, 42] },
-        { "key": "lap_dat", "label": "Lắp đặt thiết bị công nghệ, đường dây điện, trạm biến áp", "values": [65, 62, 59, 55] }
-      ]
+        {
+          "key": "sua_chua_duong",
+          "label": "Sửa chữa đường bộ, đường sắt, hệ thống báo hiệu hàng hải",
+          "values": [
+            66,
+            63,
+            60,
+            56
+          ]
+        },
+        {
+          "key": "nn_thu_cong",
+          "label": "Công trình nông nghiệp và môi trường thực hiện hoàn toàn bằng thủ công",
+          "values": [
+            51,
+            48,
+            45,
+            42
+          ]
+        },
+        {
+          "key": "lap_dat",
+          "label": "Lắp đặt thiết bị công nghệ; xây lắp đường dây tải điện và trạm biến áp",
+          "values": [
+            65,
+            62,
+            59,
+            55
+          ]
+        }
+      ],
+      "verifiedBy": "Claude (automated transcription, 2 passes)",
+      "verifiedAt": "2026-09-27",
+      "appliedTo": "NC"
     },
     "3.5": {
       "id": "3.5",
       "title": "Chi phí một số công việc không xác định được khối lượng từ thiết kế",
-      "source": "TT 36/2026/TT-BXD, Phụ lục III, Bảng 3.5",
+      "source": "TT 36/2026/TT-BXD, Phụ lục III, Bảng 3.5 (đính chính QĐ 1538/QĐ-BXD)",
       "basis": "T",
       "interpolation": "none",
-      "status": "provisional",
+      "status": "verified",
       "rows": [
-        { "key": "dan_dung", "label": "Công trình dân dụng", "values": [2.5] },
-        { "key": "cong_nghiep", "label": "Công trình công nghiệp", "values": [2.0] },
-        { "key": "cong_nghiep_ham", "label": "Công nghiệp – hầm thủy điện, hầm lò", "values": [6.5] },
-        { "key": "giao_thong", "label": "Công trình giao thông", "values": [2.0] },
-        { "key": "giao_thong_ham", "label": "Giao thông – công trình hầm", "values": [6.5] },
-        { "key": "nn_mt", "label": "Công trình nông nghiệp và môi trường", "values": [2.0] },
-        { "key": "nn_ham", "label": "Nông nghiệp – công trình hầm", "values": [6.5] },
-        { "key": "ha_tang", "label": "Công trình hạ tầng kỹ thuật", "values": [2.0] }
-      ]
+        {
+          "key": "dan_dung",
+          "label": "Công trình dân dụng",
+          "values": [
+            2.5
+          ]
+        },
+        {
+          "key": "cong_nghiep",
+          "label": "Công trình công nghiệp",
+          "values": [
+            2.0
+          ]
+        },
+        {
+          "key": "cong_nghiep_ham",
+          "label": "Công nghiệp – riêng công tác XD trong đường hầm thủy điện, hầm lò",
+          "values": [
+            6.5
+          ]
+        },
+        {
+          "key": "giao_thong",
+          "label": "Công trình giao thông",
+          "values": [
+            2.0
+          ]
+        },
+        {
+          "key": "giao_thong_ham",
+          "label": "Giao thông – riêng công tác XD trong đường hầm giao thông",
+          "values": [
+            6.5
+          ]
+        },
+        {
+          "key": "nn_mt",
+          "label": "Công trình nông nghiệp và môi trường",
+          "values": [
+            2.0
+          ]
+        },
+        {
+          "key": "nn_ham",
+          "label": "Nông nghiệp và môi trường – riêng công tác XD trong đường hầm",
+          "values": [
+            6.5
+          ]
+        },
+        {
+          "key": "ha_tang",
+          "label": "Công trình hạ tầng kỹ thuật",
+          "values": [
+            2.0
+          ]
+        }
+      ],
+      "verifiedBy": "Claude (automated transcription, 2 passes)",
+      "verifiedAt": "2026-09-27",
+      "appliedTo": "T"
     },
     "3.6": {
       "id": "3.6",
       "title": "Thu nhập chịu thuế tính trước",
-      "source": "TT 36/2026/TT-BXD, Phụ lục III, Bảng 3.6",
+      "source": "TT 36/2026/TT-BXD, Phụ lục III, Bảng 3.6 (đính chính QĐ 1538/QĐ-BXD)",
       "basis": "T+GT",
       "interpolation": "none",
-      "status": "provisional",
+      "status": "verified",
       "rows": [
-        { "key": "dan_dung", "label": "Công trình dân dụng", "values": [5.5] },
-        { "key": "cong_nghiep", "label": "Công trình công nghiệp", "values": [6.0] },
-        { "key": "giao_thong", "label": "Công trình giao thông", "values": [6.0] },
-        { "key": "nn_mt", "label": "Công trình nông nghiệp và môi trường", "values": [5.5] },
-        { "key": "ha_tang", "label": "Công trình hạ tầng kỹ thuật", "values": [5.5] },
-        { "key": "lap_dat", "label": "Lắp đặt thiết bị công nghệ, đường dây điện", "values": [6.0] }
-      ]
+        {
+          "key": "dan_dung",
+          "label": "Công trình dân dụng",
+          "values": [
+            5.5
+          ]
+        },
+        {
+          "key": "cong_nghiep",
+          "label": "Công trình công nghiệp",
+          "values": [
+            6.0
+          ]
+        },
+        {
+          "key": "giao_thong",
+          "label": "Công trình giao thông",
+          "values": [
+            6.0
+          ]
+        },
+        {
+          "key": "nn_mt",
+          "label": "Công trình nông nghiệp và môi trường",
+          "values": [
+            5.5
+          ]
+        },
+        {
+          "key": "ha_tang",
+          "label": "Công trình hạ tầng kỹ thuật",
+          "values": [
+            5.5
+          ]
+        },
+        {
+          "key": "lap_dat",
+          "label": "Lắp đặt thiết bị công nghệ; đường dây & trạm biến áp; thí nghiệm hiệu chỉnh điện",
+          "values": [
+            6.0
+          ]
+        }
+      ],
+      "verifiedBy": "Claude (automated transcription, 2 passes)",
+      "verifiedAt": "2026-09-27",
+      "appliedTo": "T+GT"
     },
     "3.7": {
       "id": "3.7",
       "title": "Chi phí nhà tạm để ở và điều hành thi công",
-      "source": "TT 36/2026/TT-BXD, Phụ lục III, Bảng 3.7",
-      "basis": "GXDTT",
-      "brackets": [15000000000, 100000000000, 500000000000, 1000000000000],
-      "bracketLabels": ["≤ 15 tỷ", "≤ 100 tỷ", "≤ 500 tỷ", "≤ 1.000 tỷ", "> 1.000 tỷ"],
+      "source": "TT 36/2026/TT-BXD, Phụ lục III, Bảng 3.7 (đính chính QĐ 1538/QĐ-BXD)",
+      "basis": "GXDTT_TMDT",
+      "brackets": [
+        15000000000,
+        100000000000,
+        500000000000,
+        1000000000000
+      ],
+      "bracketLabels": [
+        "≤ 15 tỷ",
+        "≤ 100 tỷ",
+        "≤ 500 tỷ",
+        "≤ 1.000 tỷ",
+        "> 1.000 tỷ"
+      ],
       "interpolation": "none",
-      "status": "provisional",
+      "status": "verified",
       "rows": [
-        { "key": "theo_tuyen", "label": "Công trình theo tuyến", "values": [2.2, 2.0, 1.9, 1.8, 1.7] },
-        { "key": "con_lai", "label": "Công trình còn lại", "values": [1.1, 1.0, 0.95, 0.9, 0.85] }
-      ]
+        {
+          "key": "theo_tuyen",
+          "label": "Công trình theo tuyến",
+          "values": [
+            2.2,
+            2.0,
+            1.9,
+            1.8,
+            1.7
+          ]
+        },
+        {
+          "key": "con_lai",
+          "label": "Công trình còn lại",
+          "values": [
+            1.1,
+            1.0,
+            0.95,
+            0.9,
+            0.85
+          ]
+        }
+      ],
+      "verifiedBy": "Claude (automated transcription, 2 passes)",
+      "verifiedAt": "2026-09-27",
+      "appliedTo": "GXDTT"
     }
   }
 }

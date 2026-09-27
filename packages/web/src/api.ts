@@ -38,6 +38,7 @@ export interface Project {
   costSettings: ProjectCostSettings | null;
   legalSet: LegalSetId;
   priceDate: string | null;
+  gxdttTmdt: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -51,9 +52,16 @@ export interface EstimateResponse {
   provisionalRates: boolean;
   settings: ProjectCostSettings;
   ratesSource: string;
-  costSummary: CostSummary & { warnings?: string[]; Knc?: number; Km?: number };
+  costSummary: CostSummary & {
+    warnings?: string[];
+    Knc?: number;
+    Km?: number;
+    bracketBase?: { value: number; from: 'tmdt' | 'estimate' };
+    rates?: { c: number; tt: number; tl: number; nt: number };
+  };
   totalEstimate: { lines: TotalEstimateLine[]; total: number };
   warnings: string[];
+  notes: string[];
 }
 
 export interface LegalRegister {
@@ -161,7 +169,7 @@ export const api = {
   estimate: (id: number) => request<EstimateResponse>('GET', `/projects/${id}/estimate`),
 
   createCategory: (pid: number, name: string) => request<{ id: number }>('POST', `/projects/${pid}/categories`, { name }),
-  updateCategory: (pid: number, cid: number, data: { name?: string; order?: number }) => request('PUT', `/projects/${pid}/categories/${cid}`, data),
+  updateCategory: (pid: number, cid: number, data: { name?: string; order?: number; ttRate?: number | null }) => request('PUT', `/projects/${pid}/categories/${cid}`, data),
   deleteCategory: (pid: number, cid: number) => request('DELETE', `/projects/${pid}/categories/${cid}`),
 
   createItem: (pid: number, data: Record<string, unknown>) => request('POST', `/projects/${pid}/items`, data),

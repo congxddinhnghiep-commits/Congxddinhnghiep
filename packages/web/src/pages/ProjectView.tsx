@@ -86,10 +86,15 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
           )}
         </div>
         {error && <div className="error">{error}</div>}
-        {data.warnings.length > 0 && (
+        {(data.warnings.length > 0 || data.notes.length > 0) && (
           <div className={`banner-legal ${data.provisionalRates ? 'provisional' : ''}`} role="status">
             {data.warnings.map((w, i) => (
               <div key={i}>⚠ {w}</div>
+            ))}
+            {data.notes.map((n, i) => (
+              <div key={`n${i}`} className="note">
+                ℹ {n}
+              </div>
             ))}
             {data.provisionalRates && (
               <div>

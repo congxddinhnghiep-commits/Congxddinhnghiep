@@ -93,7 +93,7 @@ function TableCard({ set, table, user, onChanged }: { set: LegalSet; table: Rate
                 checked={table.interpolation === 'linear'}
                 onChange={(e) => patch({ interpolation: e.target.checked ? 'linear' : 'none' })}
               />{' '}
-              Nội suy giữa các khoảng (chỉ bật khi văn bản yêu cầu)
+              Nội suy giữa các khoảng (không có căn cứ trong TT 36/2026 – chỉ tra theo khoảng)
             </label>
           )}
         </div>

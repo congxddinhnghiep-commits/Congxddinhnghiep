@@ -263,6 +263,8 @@ export interface TotalEstimateLine {
   name: string;
   formula: string;
   value: number;
+  /** Legal source / origin of the amount. */
+  source?: string;
 }
 
 /** Tổng dự toán: Gxd + thiết bị + QLDA + tư vấn + chi phí khác + dự phòng. */

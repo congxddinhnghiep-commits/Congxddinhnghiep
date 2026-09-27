@@ -22,7 +22,9 @@ export interface RateTable {
   title: string;
   source: string;
   /** Base the bracket is looked up on (and the rate applied to). */
-  basis: 'T' | 'NC' | 'GXDTT' | 'T+GT';
+  basis: 'T' | 'NC' | 'GXDTT' | 'T+GT' | 'GXDTT_TMDT';
+  /** Amount the rate is applied to (may differ from the bracket base). */
+  appliedTo?: string;
   /** Upper bounds (VND, inclusive) of each bracket; the last bracket is open-ended. */
   brackets?: number[];
   bracketLabels?: string[];
@@ -137,9 +139,12 @@ export const TT36_WORK_CATEGORIES: Record<string, string> = {
   ha_tang: 'Hạ tầng kỹ thuật',
 };
 
-/** Default row of Bảng 3.5 / 3.6 for each work category (tables have fewer rows than Bảng 3.3). */
-const TT_ROW: Record<string, string> = { tu_bo_di_tich: 'dan_dung' };
-const TL_ROW: Record<string, string> = {
+/**
+ * Parent row rule (docs/UPDATE-2.md A2): Bảng 3.5 has no row for tu bổ di tích → use "dân dụng";
+ * Bảng 3.6 has no sub-rows for hầm / di tích → use the parent loại công trình.
+ */
+const TT_PARENT: Record<string, string> = { tu_bo_di_tich: 'dan_dung' };
+const TL_PARENT: Record<string, string> = {
   tu_bo_di_tich: 'dan_dung',
   cong_nghiep_ham: 'cong_nghiep',
   giao_thong_ham: 'giao_thong',
@@ -154,6 +159,9 @@ export const BUILDING_TO_TT36: Record<BuildingType, string> = {
   ha_tang: 'ha_tang',
 };
 
+/** Maximum rate for dự phòng khối lượng/công việc phát sinh (TT 36/2026 PL II, công thức 2.8). */
+export const MAX_KPS = 5;
+
 export interface Tt36Settings {
   autoRates: boolean;
   /** Row of Bảng 3.3 / 3.5. */
@@ -166,6 +174,11 @@ export interface Tt36Settings {
   tlCategory?: string;
   /** Công trình theo tuyến → Bảng 3.7 row "theo_tuyen". */
   linearWorks: boolean;
+  /**
+   * Chi phí xây dựng trước thuế của công trình trong TMĐT được duyệt (tỷ đồng) – base for the
+   * brackets of Bảng 3.3 and 3.7. Empty → the estimate's own GXDTT is used (iterated) with a warning.
+   */
+  gxdttTmdt?: number | null;
   /** Manual rates (%), used when autoRates = false. */
   cRate: number;
   ttRate: number;
@@ -181,14 +194,26 @@ export interface Tt36Settings {
   qlda: number;
   tuVan: number;
   other: number;
-  /** Dự phòng khối lượng/công việc phát sinh (%). */
+  /** kps – dự phòng khối lượng/công việc phát sinh (%), ≤ 5%. */
   contingencyQtyRate: number;
-  /** Dự phòng trượt giá: fixed % or computed from duration and chỉ số giá xây dựng liên hoàn. */
-  contingencyPriceMode: 'percent' | 'index';
+  /**
+   * 'formula' = công thức 2.9 TT 36/2026; 'percent' = tỷ lệ nhập tay (không theo công thức 2.9);
+   * 'index' = legacy (Update 1) setting, read as 'formula' with I_bq = 1 + priceIndexRate/100.
+   */
+  contingencyPriceMode: 'formula' | 'percent' | 'index';
   contingencyPriceRate: number;
-  /** Mean yearly construction price index change (%/năm) and duration (years). */
-  priceIndexRate: number;
-  durationYears: number;
+  /** Number of periods T and their unit. */
+  contingencyPeriods: number;
+  contingencyPeriodUnit: 'nam' | 'quy';
+  /** Share (%) of G_TDP executed in each period t; empty/invalid → equal split. */
+  contingencySchedule?: number[];
+  /** I_bq – chỉ số giá XD bình quân dùng tính dự phòng (e.g. 1,03). */
+  priceIndexAvg: number;
+  /** ΔI – mức biến động bình quân của chỉ số giá XD (e.g. 0,005). */
+  priceIndexDelta: number;
+  /** Legacy (Update 1). */
+  priceIndexRate?: number;
+  durationYears?: number;
 }
 
 export function defaultTt36Settings(buildingType: BuildingType = 'dan_dung'): Tt36Settings {
@@ -198,6 +223,7 @@ export function defaultTt36Settings(buildingType: BuildingType = 'dan_dung'): Tt
     cMode: 'T',
     ncWorkType: 'lap_dat',
     linearWorks: buildingType === 'giao_thong',
+    gxdttTmdt: null,
     cRate: 0,
     ttRate: 0,
     tlRate: 0,
@@ -210,10 +236,13 @@ export function defaultTt36Settings(buildingType: BuildingType = 'dan_dung'): Tt
     tuVan: 0,
     other: 0,
     contingencyQtyRate: 5,
-    contingencyPriceMode: 'percent',
+    contingencyPriceMode: 'formula',
     contingencyPriceRate: 0,
-    priceIndexRate: 0,
-    durationYears: 1,
+    contingencyPeriods: 1,
+    contingencyPeriodUnit: 'nam',
+    contingencySchedule: [],
+    priceIndexAvg: 1,
+    priceIndexDelta: 0,
   };
 }
 
@@ -225,6 +254,14 @@ export function km(s: Pick<Tt36Settings, 'nightShare' | 'nightPremium' | 'machin
   return 1 + (s.machineLaborShare / 100) * (knc(s) - 1);
 }
 
+/** Direct cost of one hạng mục, with an optional TT rate override (e.g. công tác trong đường hầm). */
+export interface CategoryCost {
+  id: number;
+  name: string;
+  direct: CostTriple;
+  ttRate?: number | null;
+}
+
 export interface Tt36Result extends CostSummary {
   Knc: number;
   Km: number;
@@ -233,180 +270,274 @@ export interface Tt36Result extends CostSummary {
   GXDNT: number;
   /** Resolved rates actually applied (%). */
   rates: { c: number; tt: number; tl: number; nt: number };
+  /** Amount (VND) used to look up the brackets of Bảng 3.3 / 3.7 and where it came from. */
+  bracketBase: { value: number; from: 'tmdt' | 'estimate' };
   warnings: string[];
+  /** Informational notes (rules applied), not problems. */
+  notes: string[];
 }
 
-/** Chi phí xây dựng per Bảng 3.8 TT 36/2026 (as corrected by QĐ 1538/QĐ-BXD). `direct` is before Knc/Km. */
-export function computeTt36(direct: CostTriple, s: Tt36Settings, set: LegalSet, vatRate: number): Tt36Result {
+interface Tt36Pass {
+  lines: CostLine[];
+  T: number;
+  GT: number;
+  TL: number;
+  GXDTT: number;
+  GTGT: number;
+  GXD: number;
+  GXDNT: number;
+  rates: { c: number; tt: number; tl: number; nt: number };
+  /** Bracket index used for Bảng 3.3 (-1 when not used) and 3.7. */
+  brackets: [number, number];
+}
+
+function bracketOf(table: RateTable, base: number): number {
+  const b = table.brackets ?? [];
+  const i = b.findIndex((ub) => base <= ub);
+  return i === -1 ? b.length : i;
+}
+
+/**
+ * Chi phí xây dựng per Bảng 3.8 TT 36/2026 (as corrected by QĐ 1538/QĐ-BXD). `direct` is before Knc/Km.
+ * Bảng 3.3 / 3.7 brackets are looked up by the công trình's chi phí XD trước thuế in the approved TMĐT
+ * (settings.gxdttTmdt, tỷ đồng); without it, the estimate's own GXDTT is used and iterated until stable.
+ */
+export function computeTt36(
+  direct: CostTriple,
+  s: Tt36Settings,
+  set: LegalSet,
+  vatRate: number,
+  opts: { categories?: CategoryCost[] } = {},
+): Tt36Result {
   const t = set.tables;
   const warnings: string[] = [];
+  const notes: string[] = [];
   const Knc = knc(s);
   const Km = km(s);
   const VL = direct.vl;
   const NC = direct.nc * Knc;
   const M = direct.m * Km;
   const T = VL + NC + M;
-
   const auto = s.autoRates;
   const manual = (rate: number) => ({ rate, source: 'Tỷ lệ do người dùng nhập (không lấy theo bảng)' });
 
-  // C – chi phí chung
-  let c: { rate: number; source: string };
-  if (s.cMode === 'NC') {
-    if (auto) {
-      const l = lookupRate(t['3.4'], s.ncWorkType, NC);
-      c = { rate: l.rate, source: describe(l, 'NC') };
-    } else c = manual(s.cRate);
-  } else if (auto) {
-    const l = lookupRate(t['3.3'], s.workCategory, T);
-    c = { rate: l.rate, source: describe(l, 'T') };
-  } else c = manual(s.cRate);
-  const C = ((s.cMode === 'NC' ? NC : T) * c.rate) / 100;
-
-  // TT – công việc không xác định được khối lượng từ thiết kế
-  let tt: { rate: number; source: string };
-  if (auto) {
-    const row = TT_ROW[s.workCategory] ?? s.workCategory;
-    if (row !== s.workCategory) warnings.push(`Bảng 3.5 không có dòng riêng cho "${TT36_WORK_CATEGORIES[s.workCategory]}" – tạm dùng dòng "${TT36_WORK_CATEGORIES[row]}", cần kiểm tra.`);
-    const l = lookupRate(t['3.5'], row, T);
-    tt = { rate: l.rate, source: describe(l, 'T') };
-  } else tt = manual(s.ttRate);
-  const TT = (T * tt.rate) / 100;
-  const GT = C + TT;
-
-  // TL – thu nhập chịu thuế tính trước
-  let tl: { rate: number; source: string };
-  if (auto) {
-    const row = s.tlCategory ?? (s.cMode === 'NC' && s.ncWorkType === 'lap_dat' ? 'lap_dat' : TL_ROW[s.workCategory] ?? s.workCategory);
-    if (!s.tlCategory && TL_ROW[s.workCategory]) warnings.push(`Bảng 3.6 không có dòng riêng cho "${TT36_WORK_CATEGORIES[s.workCategory]}" – tạm dùng dòng gần nhất, cần kiểm tra.`);
-    const l = lookupRate(t['3.6'], row, T + GT);
-    tl = { rate: l.rate, source: describe(l, 'T + GT') };
-  } else tl = manual(s.tlRate);
-  const TL = ((T + GT) * tl.rate) / 100;
-
-  const GXDTT = T + GT + TL;
-  const GTGT = (GXDTT * vatRate) / 100;
-  const GXD = GXDTT + GTGT;
-
-  // V – nhà tạm (separate line after VAT)
-  let nt: { rate: number; source: string };
-  if (auto) {
-    const l = lookupRate(t['3.7'], s.linearWorks ? 'theo_tuyen' : 'con_lai', GXDTT);
-    nt = { rate: l.rate, source: describe(l, 'GXDTT') };
-  } else nt = manual(s.ntRate);
-  const GXDNT = ((GXDTT * nt.rate) / 100) * (1 + vatRate / 100);
-
+  const provisional = Object.values(t).filter((tab) => tab.status !== 'verified');
+  if (provisional.length) {
+    warnings.push(
+      `Bảng ${provisional.map((x) => x.id).join(', ')} của ${set.label} đang ở trạng thái TẠM (provisional) – cần đối chiếu bản PDF đã ký trước khi dùng.`,
+    );
+  }
   for (const tab of Object.values(t)) {
-    if (tab.status !== 'verified') {
-      warnings.unshift(`Các bảng tỷ lệ của ${set.label} đang ở trạng thái TẠM (provisional) – cần đối chiếu bản PDF đã ký và phụ lục thay thế theo CV 9947/BXD-VP.`);
-      break;
+    if (tab.interpolation === 'linear') {
+      warnings.push(`Bảng ${tab.id} đang bật nội suy – không có căn cứ trong TT 36/2026 (chỉ tra theo khoảng).`);
     }
   }
 
-  const src38 = 'TT 36/2026/TT-BXD, Phụ lục III, Bảng 3.8 (đính chính QĐ 1538/QĐ-BXD)';
-  const kSrc = 'TT 37/2026/TT-BXD – hệ số điều chỉnh khi làm đêm';
-  const lines: CostLine[] = [
-    { code: 'VL', name: 'Chi phí vật liệu', formula: 'Σ Qj × Dj_vl', value: VL, level: 1, stt: '1', source: src38, expr: '{DT.VL}' },
-    {
-      code: 'NC',
-      name: 'Chi phí nhân công',
-      formula: `Σ Qj × Dj_nc × Knc (Knc = ${Knc.toFixed(4).replace('.', ',')})`,
-      coef: Knc,
-      value: NC,
-      level: 1,
-      stt: '2',
-      source: `${src38}; ${kSrc}`,
-      expr: '{DT.NC}*{coef}',
-    },
-    {
-      code: 'M',
-      name: 'Chi phí máy và thiết bị thi công',
-      formula: `Σ Qj × Dj_m × Km (Km = ${Km.toFixed(4).replace('.', ',')})`,
-      coef: Km,
-      value: M,
-      level: 1,
-      stt: '3',
-      source: `${src38}; ${kSrc}`,
-      expr: '{DT.M}*{coef}',
-    },
-    { code: 'T', name: 'Chi phí trực tiếp', formula: 'VL + NC + M', value: T, level: 0, stt: 'I', source: src38, expr: '{VL}+{NC}+{M}' },
-    {
-      code: 'C',
-      name: 'Chi phí chung',
-      formula: `${s.cMode} × ${pct(+c.rate.toFixed(4))}`,
-      rate: c.rate,
-      value: C,
-      level: 1,
-      stt: '1',
-      source: c.source,
-      expr: `{${s.cMode}}*{rate}/100`,
-    },
-    {
+  // Rows that do not depend on the bracket base
+  const ttRow = TT_PARENT[s.workCategory] ?? s.workCategory;
+  if (auto && ttRow !== s.workCategory) {
+    notes.push(`Bảng 3.5 không có dòng riêng cho "${TT36_WORK_CATEGORIES[s.workCategory]}" – áp dụng dòng loại công trình cha "${TT36_WORK_CATEGORIES[ttRow]}".`);
+  }
+  const tlRow = s.tlCategory ?? (s.cMode === 'NC' && s.ncWorkType === 'lap_dat' ? 'lap_dat' : TL_PARENT[s.workCategory] ?? s.workCategory);
+  if (auto && !s.tlCategory && TL_PARENT[s.workCategory]) {
+    notes.push(`Bảng 3.6 không có dòng riêng cho "${TT36_WORK_CATEGORIES[s.workCategory]}" – áp dụng dòng loại công trình cha "${TT36_WORK_CATEGORIES[tlRow]}".`);
+  }
+
+  const tmdt = s.gxdttTmdt && s.gxdttTmdt > 0 ? s.gxdttTmdt * 1e9 : null;
+
+  const pass = (bracketBase: number): Tt36Pass => {
+    let c: { rate: number; source: string };
+    let b33 = -1;
+    if (s.cMode === 'NC') {
+      if (auto) {
+        const l = lookupRate(t['3.4'], s.ncWorkType, NC);
+        c = { rate: l.rate, source: describe(l, 'chi phí nhân công') };
+      } else c = manual(s.cRate);
+    } else if (auto) {
+      const l = lookupRate(t['3.3'], s.workCategory, bracketBase);
+      b33 = bracketOf(t['3.3'], bracketBase);
+      c = { rate: l.rate, source: describe(l, 'chi phí XD trước thuế trong TMĐT') };
+    } else c = manual(s.cRate);
+    const C = ((s.cMode === 'NC' ? NC : T) * c.rate) / 100;
+
+    let tt: { rate: number; source: string };
+    if (auto) {
+      const l = lookupRate(t['3.5'], ttRow, T);
+      tt = { rate: l.rate, source: describe(l, '') };
+    } else tt = manual(s.ttRate);
+    // Per-hạng mục override (công tác XD trong đường hầm…): TT = Σ T_hm × tỷ lệ_hm
+    let TT = (T * tt.rate) / 100;
+    let ttAdjust = 0;
+    const overridden = (opts.categories ?? []).filter((cat) => cat.ttRate !== null && cat.ttRate !== undefined);
+    for (const cat of overridden) {
+      const Tcat = cat.direct.vl + cat.direct.nc * Knc + cat.direct.m * Km;
+      ttAdjust += (Tcat * (cat.ttRate! - tt.rate)) / 100;
+    }
+    TT += ttAdjust;
+    const GT = C + TT;
+
+    let tl: { rate: number; source: string };
+    if (auto) {
+      const l = lookupRate(t['3.6'], tlRow, T + GT);
+      tl = { rate: l.rate, source: describe(l, '') };
+    } else tl = manual(s.tlRate);
+    const TL = ((T + GT) * tl.rate) / 100;
+    const GXDTT = T + GT + TL;
+    const GTGT = (GXDTT * vatRate) / 100;
+    const GXD = GXDTT + GTGT;
+
+    let nt: { rate: number; source: string };
+    let b37 = -1;
+    if (auto) {
+      const l = lookupRate(t['3.7'], s.linearWorks ? 'theo_tuyen' : 'con_lai', bracketBase);
+      b37 = bracketOf(t['3.7'], bracketBase);
+      nt = { rate: l.rate, source: describe(l, 'chi phí XD trước thuế trong TMĐT') };
+    } else nt = manual(s.ntRate);
+    const GXDNT = ((GXDTT * nt.rate) / 100) * (1 + vatRate / 100);
+
+    const src38 = 'TT 36/2026/TT-BXD, Phụ lục III, Bảng 3.8 (đính chính QĐ 1538/QĐ-BXD)';
+    const kSrc = 'hệ số điều chỉnh khi làm đêm (Knc, Km)';
+    const ttLine: CostLine = {
       code: 'TT',
       name: 'Chi phí một số công việc không xác định được khối lượng từ thiết kế',
-      formula: `T × ${pct(tt.rate)}`,
+      formula: overridden.length ? `T × ${pct(tt.rate)}; hạng mục ${overridden.map((o) => `"${o.name}" ${pct(o.ttRate!)}`).join(', ')}` : `T × ${pct(tt.rate)}`,
       rate: tt.rate,
       value: TT,
       level: 1,
       stt: '2',
-      source: tt.source,
-      expr: '{T}*{rate}/100',
-    },
-    { code: 'GT', name: 'Chi phí gián tiếp', formula: 'C + TT', value: GT, level: 0, stt: 'II', source: src38, expr: '{C}+{TT}' },
-    {
-      code: 'TL',
-      name: 'Thu nhập chịu thuế tính trước',
-      formula: `(T + GT) × ${pct(tl.rate)}`,
-      rate: tl.rate,
-      value: TL,
-      level: 0,
-      stt: 'III',
-      source: tl.source,
-      expr: '({T}+{GT})*{rate}/100',
-    },
-    { code: 'GXDTT', name: 'Chi phí xây dựng trước thuế', formula: 'T + GT + TL', value: GXDTT, level: 0, stt: '', source: src38, expr: '{T}+{GT}+{TL}' },
-    {
-      code: 'GTGT',
-      name: 'Thuế giá trị gia tăng',
-      formula: `GXDTT × ${pct(vatRate)}`,
-      rate: vatRate,
-      value: GTGT,
-      level: 0,
-      stt: 'IV',
-      source: 'Thuế suất GTGT theo quy định hiện hành (nhập theo công trình)',
-      expr: '{GXDTT}*{rate}/100',
-    },
-    { code: 'GXD', name: 'Chi phí xây dựng sau thuế', formula: 'GXDTT + GTGT', value: GXD, level: 0, stt: '', source: src38, expr: '{GXDTT}+{GTGT}' },
-    {
-      code: 'GXDNT',
-      name: 'Chi phí nhà tạm để ở và điều hành thi công',
-      formula: `GXDTT × ${pct(nt.rate)} × (1 + ${pct(vatRate)})`,
-      rate: nt.rate,
-      value: GXDNT,
-      level: 0,
-      stt: 'V',
-      source: nt.source,
-      expr: '{GXDTT}*{rate}/100*(1+{rate:GTGT}/100)',
-    },
-  ];
+      source: overridden.length ? `${tt.source}; tỷ lệ riêng theo hạng mục (công tác XD trong đường hầm)` : tt.source,
+      expr: overridden.length ? `{T}*{rate}/100+${ttAdjust}` : '{T}*{rate}/100',
+    };
+    const lines: CostLine[] = [
+      { code: 'VL', name: 'Chi phí vật liệu', formula: 'Σ Qj × Dj_vl', value: VL, level: 1, stt: '1', source: src38, expr: '{DT.VL}' },
+      {
+        code: 'NC',
+        name: 'Chi phí nhân công',
+        formula: `Σ Qj × Dj_nc × Knc (Knc = ${Knc.toFixed(4).replace('.', ',')})`,
+        coef: Knc,
+        value: NC,
+        level: 1,
+        stt: '2',
+        source: `${src38}; ${kSrc}`,
+        expr: '{DT.NC}*{coef}',
+      },
+      {
+        code: 'M',
+        name: 'Chi phí máy và thiết bị thi công',
+        formula: `Σ Qj × Dj_m × Km (Km = ${Km.toFixed(4).replace('.', ',')})`,
+        coef: Km,
+        value: M,
+        level: 1,
+        stt: '3',
+        source: `${src38}; ${kSrc}`,
+        expr: '{DT.M}*{coef}',
+      },
+      { code: 'T', name: 'Chi phí trực tiếp', formula: 'VL + NC + M', value: T, level: 0, stt: 'I', source: src38, expr: '{VL}+{NC}+{M}' },
+      {
+        code: 'C',
+        name: 'Chi phí chung',
+        formula: `${s.cMode} × ${pct(+c.rate.toFixed(4))}`,
+        rate: c.rate,
+        value: C,
+        level: 1,
+        stt: '1',
+        source: c.source,
+        expr: `{${s.cMode}}*{rate}/100`,
+      },
+      ttLine,
+      { code: 'GT', name: 'Chi phí gián tiếp', formula: 'C + TT', value: GT, level: 0, stt: 'II', source: src38, expr: '{C}+{TT}' },
+      {
+        code: 'TL',
+        name: 'Thu nhập chịu thuế tính trước',
+        formula: `(T + GT) × ${pct(tl.rate)}`,
+        rate: tl.rate,
+        value: TL,
+        level: 0,
+        stt: 'III',
+        source: tl.source,
+        expr: '({T}+{GT})*{rate}/100',
+      },
+      { code: 'GXDTT', name: 'Chi phí xây dựng trước thuế', formula: 'T + GT + TL', value: GXDTT, level: 0, stt: '', source: src38, expr: '{T}+{GT}+{TL}' },
+      {
+        code: 'GTGT',
+        name: 'Thuế giá trị gia tăng',
+        formula: `GXDTT × ${pct(vatRate)}`,
+        rate: vatRate,
+        value: GTGT,
+        level: 0,
+        stt: 'IV',
+        source: 'Thuế suất GTGT theo quy định hiện hành (nhập theo công trình)',
+        expr: '{GXDTT}*{rate}/100',
+      },
+      { code: 'GXD', name: 'Chi phí xây dựng sau thuế', formula: 'GXDTT + GTGT', value: GXD, level: 0, stt: '', source: src38, expr: '{GXDTT}+{GTGT}' },
+      {
+        code: 'GXDNT',
+        name: 'Chi phí nhà tạm để ở và điều hành thi công',
+        formula: `GXDTT × ${pct(nt.rate)} × (1 + ${pct(vatRate)})`,
+        rate: nt.rate,
+        value: GXDNT,
+        level: 0,
+        stt: 'V',
+        source: nt.source,
+        expr: '{GXDTT}*{rate}/100*(1+{rate:GTGT}/100)',
+      },
+    ];
+    return { lines, T, GT, TL, GXDTT, GTGT, GXD, GXDNT, rates: { c: c.rate, tt: tt.rate, tl: tl.rate, nt: nt.rate }, brackets: [b33, b37] };
+  };
+
+  let result: Tt36Pass;
+  let bracketBase: { value: number; from: 'tmdt' | 'estimate' };
+  if (tmdt !== null) {
+    result = pass(tmdt);
+    bracketBase = { value: tmdt, from: 'tmdt' };
+  } else {
+    // Fixed-point iteration: bracket from T first, then from the resulting GXDTT until the brackets are stable.
+    let base = T;
+    const seen = new Map<string, Tt36Pass>();
+    result = pass(base);
+    for (let i = 0; i < 20; i++) {
+      const key = result.brackets.join(',');
+      const next = pass(result.GXDTT);
+      if (next.brackets.join(',') === key) {
+        result = next;
+        break;
+      }
+      if (seen.has(next.brackets.join(','))) {
+        // Oscillating at a bracket boundary: keep the pass whose own GXDTT is larger (higher bracket).
+        const candidates = [...seen.values(), result, next];
+        result = candidates.reduce((a, b) => (b.GXDTT > a.GXDTT ? b : a));
+        warnings.push('Giá trị dự toán dao động quanh biên khoảng của Bảng 3.3/3.7 – đã chọn khoảng theo GXDTT lớn hơn, cần kiểm tra.');
+        break;
+      }
+      seen.set(key, result);
+      result = next;
+      base = result.GXDTT;
+    }
+    bracketBase = { value: result.GXDTT, from: 'estimate' };
+    if (auto) {
+      warnings.push('Chưa nhập chi phí XD trong TMĐT được duyệt – đang dùng giá trị dự toán để tra khoảng.');
+    }
+  }
 
   return {
-    lines,
-    T,
-    GT,
-    TL,
-    G: GXDTT,
-    GTGT,
-    Gxd: GXD,
-    nhaTam: GXDNT,
-    total: GXD + GXDNT,
+    lines: result.lines,
+    T: result.T,
+    GT: result.GT,
+    TL: result.TL,
+    G: result.GXDTT,
+    GTGT: result.GTGT,
+    Gxd: result.GXD,
+    nhaTam: result.GXDNT,
+    total: result.GXD + result.GXDNT,
     Knc,
     Km,
-    GXDTT,
-    GXD,
-    GXDNT,
-    rates: { c: c.rate, tt: tt.rate, tl: tl.rate, nt: nt.rate },
+    GXDTT: result.GXDTT,
+    GXD: result.GXD,
+    GXDNT: result.GXDNT,
+    rates: result.rates,
+    bracketBase,
     warnings,
+    notes,
   };
 }
 
@@ -415,43 +546,77 @@ export interface ContingencyResult {
   total: number;
   dp1: number;
   dp2: number;
+  warnings: string[];
+}
+
+/** Resolve the dự phòng trượt giá inputs, mapping the Update 1 'index' setting onto công thức 2.9. */
+export function contingencyInputs(s: Tt36Settings): { periods: number; shares: number[]; index: number; mode: 'formula' | 'percent' } {
+  let mode: 'formula' | 'percent' = s.contingencyPriceMode === 'percent' ? 'percent' : 'formula';
+  let periods = Math.max(1, Math.round(s.contingencyPeriods || 1));
+  let index = (s.priceIndexAvg || 1) + (s.priceIndexDelta || 0);
+  if (s.contingencyPriceMode === 'index') {
+    mode = 'formula';
+    periods = Math.max(1, Math.round(s.durationYears || 1));
+    index = 1 + (s.priceIndexRate ?? 0) / 100;
+  }
+  const sched = s.contingencySchedule ?? [];
+  const valid = sched.length === periods && sched.every((x) => Number.isFinite(x) && x >= 0) && Math.abs(sched.reduce((a, b) => a + b, 0) - 100) < 1e-6;
+  const shares = valid ? sched : Array.from({ length: periods }, () => 100 / periods);
+  return { periods, shares, index, mode };
 }
 
 /**
- * Tổng dự toán with the two dự phòng components (TT 36/2026, wording corrected by QĐ 1538):
- *  - Gdp1 = base × tỷ lệ khối lượng/công việc phát sinh
- *  - Gdp2 = fixed % of base, or Σ_t (base / N) × [(1 + i)^t − 1] from duration N (years) and
- *    mean yearly construction price index change i (chỉ số giá xây dựng liên hoàn). Base excludes dự phòng.
+ * Tổng dự toán with the two dự phòng components of TT 36/2026, Phụ lục II:
+ *  - (2.8) GDP1 = G_TDP × kps, kps ≤ 5%
+ *  - (2.9) GDP2 = Σ_{t=1..T} G_TDP_t × [(I_bq + ΔI)^t − 1]
+ * G_TDP = dự toán XD công trình before dự phòng = (GXD + GXDNT) + thiết bị + QLDA + tư vấn + khác.
  */
 export function computeTotalEstimateTt36(constructionCost: number, s: Tt36Settings): ContingencyResult {
+  const warnings: string[] = [];
   const base = constructionCost + s.equipment + s.qlda + s.tuVan + s.other;
+  if (s.contingencyQtyRate > MAX_KPS) warnings.push(`kps = ${pct(s.contingencyQtyRate)} vượt mức tối đa ${MAX_KPS}% (TT 36/2026, công thức 2.8).`);
   const dp1 = (base * s.contingencyQtyRate) / 100;
+  const ci = contingencyInputs(s);
   let dp2: number;
   let dp2Formula: string;
-  if (s.contingencyPriceMode === 'index') {
-    const n = Math.max(1, Math.round(s.durationYears));
-    const i = s.priceIndexRate / 100;
+  let dp2Source: string;
+  const unit = s.contingencyPeriodUnit === 'quy' ? 'quý' : 'năm';
+  if (ci.mode === 'formula') {
     dp2 = 0;
-    for (let y = 1; y <= n; y++) dp2 += (base / n) * (Math.pow(1 + i, y) - 1);
-    dp2Formula = `Σ (V/${n}) × [(1 + ${pct(s.priceIndexRate)})^t − 1], t = 1…${n} năm`;
+    ci.shares.forEach((share, i) => {
+      dp2 += ((base * share) / 100) * (Math.pow(ci.index, i + 1) - 1);
+    });
+    const idx = ci.index.toFixed(4).replace('.', ',');
+    dp2Formula = `Σ G_TDP,t × [(I_bq + ΔI)^t − 1]; T = ${ci.periods} ${unit}, I_bq + ΔI = ${idx}, phân bổ ${ci.shares.map((x) => pct(+x.toFixed(2))).join(' / ')}`;
+    dp2Source = 'TT 36/2026/TT-BXD, Phụ lục II, công thức 2.9 (đính chính QĐ 1538/QĐ-BXD)';
   } else {
     dp2 = (base * s.contingencyPriceRate) / 100;
-    dp2Formula = `V × ${pct(s.contingencyPriceRate)}`;
+    dp2Formula = `G_TDP × ${pct(s.contingencyPriceRate)}`;
+    dp2Source = 'Tỷ lệ nhập tay – không theo công thức 2.9 TT 36/2026';
+    warnings.push('Dự phòng trượt giá đang tính theo tỷ lệ nhập tay, không theo công thức 2.9 TT 36/2026.');
   }
   const total = base + dp1 + dp2;
+  const input = 'Nhập theo công trình';
   return {
     total,
     dp1,
     dp2,
+    warnings,
     lines: [
-      { code: 'Gxd', name: 'Chi phí xây dựng (GXD + GXDNT)', formula: 'Bảng tổng hợp chi phí xây dựng', value: constructionCost },
-      { code: 'Gtb', name: 'Chi phí thiết bị', formula: 'Nhập', value: s.equipment },
-      { code: 'Gqlda', name: 'Chi phí quản lý dự án', formula: 'Nhập', value: s.qlda },
-      { code: 'Gtv', name: 'Chi phí tư vấn đầu tư xây dựng', formula: 'Nhập', value: s.tuVan },
-      { code: 'Gk', name: 'Chi phí khác', formula: 'Nhập', value: s.other },
-      { code: 'Gdp1', name: 'Dự phòng cho khối lượng, công việc phát sinh', formula: `V × ${pct(s.contingencyQtyRate)}`, value: dp1 },
-      { code: 'Gdp2', name: 'Dự phòng cho yếu tố trượt giá', formula: dp2Formula, value: dp2 },
-      { code: 'TDT', name: 'Tổng dự toán', formula: 'V + Gdp1 + Gdp2 (V = Gxd + Gtb + Gqlda + Gtv + Gk)', value: total },
+      { code: 'Gxd', name: 'Chi phí xây dựng (GXD + GXDNT)', formula: 'Bảng tổng hợp chi phí xây dựng', value: constructionCost, source: 'TT 36/2026/TT-BXD, PL III, Bảng 3.8' },
+      { code: 'Gtb', name: 'Chi phí thiết bị', formula: 'Nhập', value: s.equipment, source: input },
+      { code: 'Gqlda', name: 'Chi phí quản lý dự án', formula: 'Nhập', value: s.qlda, source: input },
+      { code: 'Gtv', name: 'Chi phí tư vấn đầu tư xây dựng', formula: 'Nhập', value: s.tuVan, source: input },
+      { code: 'Gk', name: 'Chi phí khác', formula: 'Nhập', value: s.other, source: input },
+      {
+        code: 'Gdp1',
+        name: 'Dự phòng cho khối lượng, công việc phát sinh',
+        formula: `G_TDP × kps = G_TDP × ${pct(s.contingencyQtyRate)}`,
+        value: dp1,
+        source: 'TT 36/2026/TT-BXD, Phụ lục II, công thức 2.8 (kps ≤ 5%)',
+      },
+      { code: 'Gdp2', name: 'Dự phòng cho yếu tố trượt giá', formula: dp2Formula, value: dp2, source: dp2Source },
+      { code: 'TDT', name: 'Tổng dự toán', formula: 'G_TDP + GDP1 + GDP2 (G_TDP = Gxd + Gtb + Gqlda + Gtv + Gk)', value: total },
     ],
   };
 }
@@ -500,6 +665,7 @@ export interface ProjectCost {
   settings: ProjectCostSettings;
   ratesSource: string;
   warnings: string[];
+  notes?: string[];
 }
 
 export function computeProjectCost(
@@ -508,15 +674,18 @@ export function computeProjectCost(
   stored: ProjectCostSettings | null | undefined,
   buildingType: BuildingType,
   vatRate: number,
+  opts: { gxdttTmdt?: number | null; categories?: CategoryCost[] } = {},
 ): ProjectCost {
   if (set.method === 'TT36_2026') {
     const s: Tt36Settings = { ...defaultTt36Settings(buildingType), ...(stored ?? {}) } as Tt36Settings;
-    const cs = computeTt36(direct, s, set, vatRate);
+    if (opts.gxdttTmdt !== undefined) s.gxdttTmdt = opts.gxdttTmdt;
+    const cs = computeTt36(direct, s, set, vatRate, { categories: opts.categories });
     const tdt = computeTotalEstimateTt36(cs.total!, s);
-    const warnings = [...cs.warnings];
-    if (tdt.dp2 === 0) warnings.push('Dự phòng trượt giá đang bằng 0 – kiểm tra thời gian thực hiện và chỉ số giá xây dựng.');
+    const warnings = [...cs.warnings, ...tdt.warnings];
+    if (tdt.dp2 === 0) warnings.push('Dự phòng trượt giá đang bằng 0 – kiểm tra thời gian xây dựng và chỉ số giá xây dựng (I_bq, ΔI).');
     return {
       legalSetId: set.id,
+      notes: cs.notes,
       costSummary: cs,
       totalEstimate: tdt,
       settings: { ...s, cRate: cs.rates.c, ttRate: cs.rates.tt, tlRate: cs.rates.tl, ntRate: cs.rates.nt },

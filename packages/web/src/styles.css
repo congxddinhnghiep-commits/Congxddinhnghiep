@@ -228,3 +228,6 @@ code { background: var(--line-soft); padding: 1px 4px; border-radius: 4px; }
 .legal-page .table td a { word-break: break-all; }
 .topbar a.nav { color: #fff; opacity: 0.9; text-decoration: none; font-size: 13px; }
 .topbar a.nav:hover { opacity: 1; text-decoration: underline; }
+.banner-legal .note { color: #1d4f91; }
+.schedule { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.schedule label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); width: 80px; }
