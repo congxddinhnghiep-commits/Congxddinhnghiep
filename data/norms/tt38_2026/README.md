@@ -18,3 +18,7 @@ Chưa tách: Phụ lục VII (định mức sử dụng vật liệu/cấp phố
 
 Trạng thái: `imported_needs_review` – dữ liệu tách tự động, đã kiểm tra mẫu; cần người có chuyên môn đối chiếu ngẫu nhiên với PDF (cột `page`) trước khi đánh dấu `verified`.
 Cột `raw` giữ nguyên chuỗi số trong PDF (dấu phẩy thập phân).
+
+## Phụ lục VII (bổ sung)
+`tt38_2026_pl7_vatlieu.json`: 1.085 bản ghi định mức sử dụng vật liệu / cấp phối (mã dạng 11.12111), mỗi bản ghi gồm mã, mục, quy cách, trang và các cột vật liệu (xi măng kg, cát m3, đá m3, nước lít, phụ gia…).
+Hạn chế: với các bảng một mã có nhiều dòng vật liệu (chương 12 trở đi), hiện chỉ lấy dòng thẳng hàng với mã – cần bổ sung. 3 mã trùng do lỗi in trong PDF (11.12129, 12.32501, 12.33204).
