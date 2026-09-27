@@ -208,3 +208,23 @@ code { background: var(--line-soft); padding: 1px 4px; border-radius: 4px; }
   .norm-search { grid-template-columns: 1fr; height: auto; }
   .row2 { grid-template-columns: 1fr; }
 }
+
+/* ---------- legal basis ---------- */
+.legal-badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--brand-soft); color: var(--brand); text-decoration: none; white-space: nowrap; }
+.legal-badge.historical { background: #f1e9ff; color: #5b2a9a; }
+.banner-legal { background: #fff6d6; color: var(--warn-ink); border: 1px solid #f0dc9a; border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+.banner-legal.provisional { border-left: 4px solid #d9a400; }
+.warn-box { background: #fff6d6; border: 1px solid #f0dc9a; color: var(--warn-ink); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
+.table td.source { font-size: 12px; color: var(--muted); max-width: 360px; }
+.table td.source.provisional { color: var(--warn-ink); }
+.status { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 10px; font-weight: 600; }
+.status.provisional { background: #fff0c2; color: #7a5a00; }
+.status.verified { background: #dcf5e6; color: #0b6b36; }
+.status.repealed { background: #f3e1e1; color: #8a1c1c; }
+.status.active { background: #dcf5e6; color: #0b6b36; }
+.legal-page section { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; }
+.legal-page h3 { font-size: 15px; color: var(--brand); margin-bottom: 8px; }
+.legal-page h4 { font-size: 14px; margin: 14px 0 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.legal-page .table td a { word-break: break-all; }
+.topbar a.nav { color: #fff; opacity: 0.9; text-decoration: none; font-size: 13px; }
+.topbar a.nav:hover { opacity: 1; text-decoration: underline; }

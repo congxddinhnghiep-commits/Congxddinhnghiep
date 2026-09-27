@@ -17,7 +17,7 @@ const TARGETS: { key: ImportTarget; label: string; hint: string; admin?: boolean
   {
     key: 'norms',
     label: 'Định mức (thư viện – quản trị viên)',
-    hint: 'Mỗi dòng một thành phần hao phí: mã định mức (có thể chỉ ghi ở dòng đầu), mã tài nguyên, hao phí, (loại, đơn giá). Dùng để nạp Định mức 12/2021 chính thức.',
+    hint: 'Mỗi dòng một thành phần hao phí: mã định mức (có thể chỉ ghi ở dòng đầu), mã tài nguyên, hao phí, (loại, đơn giá). Dùng để nạp định mức chính thức TT 38/2026 (nhân công theo nhóm) hoặc bộ lịch sử TT 12/2021.',
     admin: true,
   },
 ];
@@ -44,6 +44,8 @@ export function ImportPanel({
   const [mapping, setMapping] = useState<Record<string, number>>({});
   const [categoryId, setCategoryId] = useState<number>(data.categories[0]?.id ?? 0);
   const [priceScope, setPriceScope] = useState<'project' | 'base'>('project');
+  const datasets = [...new Set(config.legalSets.map((s) => s.normDataset))];
+  const [dataset, setDataset] = useState(data.legalSet.normDataset);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -102,6 +104,7 @@ export function ImportPanel({
         projectId: data.project.id,
         categoryId: target === 'items' ? categoryId : undefined,
         priceScope,
+        dataset: target === 'norms' ? dataset : undefined,
       });
       setMsg(r.message);
       onImported();
@@ -229,6 +232,18 @@ export function ImportPanel({
                   {data.categories.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {target === 'norms' && (
+              <label>
+                Nhập vào bộ định mức
+                <select value={dataset} onChange={(e) => setDataset(e.target.value)}>
+                  {datasets.map((d) => (
+                    <option key={d} value={d}>
+                      {d} – {config.legalSets.find((s) => s.normDataset === d)?.label}
                     </option>
                   ))}
                 </select>

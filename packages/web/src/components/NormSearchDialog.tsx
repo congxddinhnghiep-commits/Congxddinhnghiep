@@ -5,7 +5,18 @@ import { money, qty } from '../format';
 import { Modal } from './Modal';
 
 /** Tìm định mức theo mã hoặc tên (có dấu/không dấu). */
-export function NormSearchDialog({ initial, onPick, onClose }: { initial?: string; onPick: (n: Norm) => void; onClose: () => void }) {
+export function NormSearchDialog({
+  initial,
+  dataset,
+  onPick,
+  onClose,
+}: {
+  initial?: string;
+  /** Norm book version of the project (TT38_2026 or TT12_2021). */
+  dataset: string;
+  onPick: (n: Norm) => void;
+  onClose: () => void;
+}) {
   const [q, setQ] = useState(initial ?? '');
   const [list, setList] = useState<Norm[]>([]);
   const [sel, setSel] = useState(0);
@@ -14,15 +25,15 @@ export function NormSearchDialog({ initial, onPick, onClose }: { initial?: strin
 
   useEffect(() => {
     const t = setTimeout(() => {
-      if (q.trim()) api.searchNorms(q).then((r) => (setList(r), setSel(0)));
+      if (q.trim()) api.searchNorms(q, dataset).then((r) => (setList(r), setSel(0)));
       else setList([]);
     }, 200);
     return () => clearTimeout(t);
-  }, [q]);
+  }, [q, dataset]);
 
   useEffect(() => {
     const n = list[sel];
-    if (n) api.norm(n.code).then(setDetail);
+    if (n) api.norm(n.code, dataset).then(setDetail);
     else setDetail(null);
     listRef.current?.querySelector(`[data-i="${sel}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [list, sel]);
@@ -41,7 +52,7 @@ export function NormSearchDialog({ initial, onPick, onClose }: { initial?: strin
   };
 
   return (
-    <Modal title="Tra cứu định mức" onClose={onClose} wide>
+    <Modal title={`Tra cứu định mức – bộ ${dataset}`} onClose={onClose} wide>
       <input
         className="search-input"
         autoFocus

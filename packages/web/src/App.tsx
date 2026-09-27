@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, getToken, setToken, setUnauthorizedHandler, type AppConfig, type User } from './api';
 import { ChangePassword } from './pages/ChangePassword';
+import { LegalRegister } from './pages/LegalRegister';
 import { Login } from './pages/Login';
 import { ProjectList } from './pages/ProjectList';
 import { ProjectView } from './pages/ProjectView';
 
-type Route = { name: 'projects' } | { name: 'project'; id: number };
+type Route = { name: 'projects' } | { name: 'project'; id: number } | { name: 'legal' };
 
 function parseHash(): Route {
+  if (location.hash.startsWith('#/legal')) return { name: 'legal' };
   const m = /^#\/project\/(\d+)/.exec(location.hash);
   return m ? { name: 'project', id: Number(m[1]) } : { name: 'projects' };
 }
@@ -66,6 +68,12 @@ export function App() {
           <span className="logo">D</span> DUTOAN-AI
         </a>
         <span className="subtitle">Phần mềm lập dự toán xây dựng</span>
+        <a className="nav" href="#/projects">
+          Công trình
+        </a>
+        <a className="nav" href="#/legal">
+          Căn cứ pháp lý
+        </a>
         <span className="spacer" />
         <span className="user">
           {user.fullName || user.username}
@@ -77,10 +85,12 @@ export function App() {
       </header>
       {config.sampleData && (
         <div className="banner-sample">
-          ⚠ Dữ liệu định mức/đơn giá MẪU – thay bằng dữ liệu chính thức (Định mức 12/2021, đơn giá địa phương) qua chức năng <b>Nhập dữ liệu</b>.
+          ⚠ Dữ liệu định mức/đơn giá MẪU – thay bằng dữ liệu chính thức (định mức TT 38/2026, đơn giá địa phương) qua chức năng <b>Nhập dữ liệu</b>.
         </div>
       )}
-      {route.name === 'projects' ? (
+      {route.name === 'legal' ? (
+        <LegalRegister user={user} />
+      ) : route.name === 'projects' ? (
         <ProjectList user={user} config={config} onOpen={(id) => navigate({ name: 'project', id })} />
       ) : (
         <ProjectView key={route.id} projectId={route.id} user={user} config={config} onBack={() => navigate({ name: 'projects' })} />

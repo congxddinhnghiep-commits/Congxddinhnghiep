@@ -318,6 +318,7 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
       {search && (
         <NormSearchDialog
           initial={search.q}
+          dataset={data.legalSet.normDataset}
           onClose={() => setSearch(null)}
           onPick={(n) => {
             search.apply(n);

@@ -1,10 +1,22 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import type { BuildingType } from '@dutoan/core';
+import { defaultLegalSetFor, legalSetDateWarning, type BuildingType, type LegalSetId } from '@dutoan/core';
 import { api, type AppConfig, type Project, type User } from '../api';
 import { Modal } from '../components/Modal';
 
 function ProjectForm({ config, onSaved, onClose }: { config: AppConfig; onSaved: (p: Project) => void; onClose: () => void }) {
-  const [f, setF] = useState({ name: '', ownerName: '', location: '', buildingType: 'dan_dung' as BuildingType, priceBaseDate: '', vatRate: 8 });
+  const today = new Date().toISOString().slice(0, 10);
+  const [f, setF] = useState({
+    name: '',
+    ownerName: '',
+    location: '',
+    buildingType: 'dan_dung' as BuildingType,
+    priceBaseDate: '',
+    priceDate: today,
+    legalSet: defaultLegalSetFor(today) as LegalSetId,
+    vatRate: 8,
+  });
+  const [legalTouched, setLegalTouched] = useState(false);
+  const warning = legalSetDateWarning(f.legalSet, f.priceDate);
   const [error, setError] = useState('');
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -48,10 +60,38 @@ function ProjectForm({ config, onSaved, onClose }: { config: AppConfig; onSaved:
             </select>
           </label>
         </div>
+        <div className="row2">
+          <label>
+            Ngày lập giá
+            <input
+              type="date"
+              value={f.priceDate}
+              onChange={(e) => setF({ ...f, priceDate: e.target.value, legalSet: legalTouched ? f.legalSet : defaultLegalSetFor(e.target.value) })}
+            />
+          </label>
+          <label>
+            Ghi chú thời điểm giá (VD: Quý III/2026)
+            <input value={f.priceBaseDate} onChange={(e) => setF({ ...f, priceBaseDate: e.target.value })} />
+          </label>
+        </div>
         <label>
-          Thời điểm lập giá (ví dụ: Quý III/2026)
-          <input value={f.priceBaseDate} onChange={(e) => setF({ ...f, priceBaseDate: e.target.value })} />
+          Bộ căn cứ pháp lý
+          <select
+            value={f.legalSet}
+            onChange={(e) => {
+              setLegalTouched(true);
+              setF({ ...f, legalSet: e.target.value as LegalSetId });
+            }}
+          >
+            {config.legalSets.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
         </label>
+        <p className="hint">Mặc định theo ngày lập giá: từ 01/07/2026 dùng TT 36/2026 + TT 38/2026. Bộ pháp lý được lưu cố định cùng công trình.</p>
+        {warning && <p className="warn-box">⚠ {warning}</p>}
         {error && <div className="error">{error}</div>}
         <div className="actions">
           <button type="button" onClick={onClose}>
@@ -193,6 +233,7 @@ export function ProjectList({ user, config, onOpen }: { user: User; config: AppC
               <th>Chủ đầu tư</th>
               <th>Địa điểm</th>
               <th>Loại</th>
+              <th>Bộ pháp lý</th>
               <th>Cập nhật</th>
               <th />
             </tr>
@@ -214,6 +255,11 @@ export function ProjectList({ user, config, onOpen }: { user: User; config: AppC
                 <td>{p.ownerName}</td>
                 <td>{p.location}</td>
                 <td>{config.buildingTypes[p.buildingType]}</td>
+                <td>
+                  <span className={`legal-badge ${p.legalSet === 'TT11_2021' ? 'historical' : ''}`}>
+                    {config.legalSets.find((s) => s.id === p.legalSet)?.label ?? p.legalSet}
+                  </span>
+                </td>
                 <td>{new Date(p.updatedAt.replace(' ', 'T') + 'Z').toLocaleString('vi-VN')}</td>
                 <td className="row-actions">
                   <button onClick={() => onOpen(p.id)}>Mở</button>

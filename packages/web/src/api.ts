@@ -2,12 +2,15 @@ import type {
   Action,
   BuildingType,
   CategoryResult,
-  CostSettings,
   CostSummary,
   Intent,
+  LegalDocument,
+  LegalSet,
+  LegalSetId,
   Norm,
   PendingField,
-  RatesTable,
+  ProjectCostSettings,
+  RateTable,
   Reply,
   Resource,
   ResourceSummaryRow,
@@ -32,7 +35,9 @@ export interface Project {
   buildingType: BuildingType;
   priceBaseDate: string;
   vatRate: number;
-  costSettings: Partial<CostSettings> | null;
+  costSettings: ProjectCostSettings | null;
+  legalSet: LegalSetId;
+  priceDate: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -42,10 +47,20 @@ export interface EstimateResponse {
   categories: CategoryResult[];
   total: UnitCost;
   resourceSummary: ResourceSummaryRow[];
-  settings: CostSettings;
+  legalSet: { id: LegalSetId; label: string; status: 'current' | 'historical'; normDataset: string; documents: string[] };
+  provisionalRates: boolean;
+  settings: ProjectCostSettings;
   ratesSource: string;
-  costSummary: CostSummary;
+  costSummary: CostSummary & { warnings?: string[]; Knc?: number; Km?: number };
   totalEstimate: { lines: TotalEstimateLine[]; total: number };
+  warnings: string[];
+}
+
+export interface LegalRegister {
+  checkedAt: string;
+  note: string;
+  documents: LegalDocument[];
+  sets: LegalSet[];
 }
 
 export interface AppConfig {
@@ -54,7 +69,8 @@ export interface AppConfig {
   sampleData: boolean;
   googleDrive: { configured: boolean; clientId: string; apiKey: string; appId: string };
   buildingTypes: Record<BuildingType, string>;
-  rates: RatesTable;
+  legalSets: LegalSet[];
+  tt36WorkCategories: Record<string, string>;
 }
 
 export interface PriceRow extends Resource {
@@ -137,10 +153,10 @@ export const api = {
 
   projects: () => request<Project[]>('GET', '/projects'),
   createProject: (p: Partial<Project>) => request<Project>('POST', '/projects', p),
-  updateProject: (id: number, p: Partial<Project>) => request<Project>('PUT', `/projects/${id}`, p),
+  updateProject: (id: number, p: Partial<Project> & { confirmLegalSetChange?: boolean }) => request<Project>('PUT', `/projects/${id}`, p),
   deleteProject: (id: number) => request('DELETE', `/projects/${id}`),
   copyProject: (id: number) => request<Project>('POST', `/projects/${id}/copy`),
-  saveSettings: (id: number, costSettings: Partial<CostSettings>, vatRate: number) =>
+  saveSettings: (id: number, costSettings: ProjectCostSettings, vatRate: number) =>
     request<Project>('PUT', `/projects/${id}/settings`, { costSettings, vatRate }),
   estimate: (id: number) => request<EstimateResponse>('GET', `/projects/${id}/estimate`),
 
@@ -155,8 +171,13 @@ export const api = {
   prices: (pid: number, all: boolean) => request<PriceRow[]>('GET', `/projects/${pid}/prices${all ? '?all=1' : ''}`),
   setPrice: (pid: number, code: string, price: number | null) => request('PUT', `/projects/${pid}/prices/${encodeURIComponent(code)}`, { price }),
 
-  searchNorms: (q: string) => request<Norm[]>('GET', `/norms?q=${encodeURIComponent(q)}&limit=100`),
-  norm: (code: string) => request<Norm & { resources: (Resource & { consumption: number })[] }>('GET', `/norms/${encodeURIComponent(code)}`),
+  searchNorms: (q: string, dataset: string) => request<Norm[]>('GET', `/norms?q=${encodeURIComponent(q)}&dataset=${encodeURIComponent(dataset)}&limit=100`),
+  norm: (code: string, dataset: string) =>
+    request<Norm & { resources: (Resource & { consumption: number })[] }>('GET', `/norms/${encodeURIComponent(code)}?dataset=${encodeURIComponent(dataset)}`),
+
+  legal: () => request<LegalRegister>('GET', '/legal'),
+  setRateTable: (setId: LegalSetId, tableId: string, patch: { status?: 'verified' | 'provisional'; interpolation?: 'none' | 'linear' }) =>
+    request<RateTable>('PUT', `/legal/${setId}/tables/${encodeURIComponent(tableId)}`, patch),
 
   assistant: (pid: number, body: { text?: string; intent?: Intent; pending?: PendingField }) => request<Reply>('POST', `/projects/${pid}/assistant`, body),
   confirmAction: (pid: number, action: Action, description: string) =>

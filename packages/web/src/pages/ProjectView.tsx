@@ -68,9 +68,12 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
             ← Công trình
           </button>
           <h2 title={data.project.name}>{data.project.name}</h2>
+          <a className={`legal-badge ${data.legalSet.status}`} href="#/legal" title="Bộ căn cứ pháp lý của công trình">
+            {data.legalSet.label}
+          </a>
           <span className="spacer" />
           <span className="kpi">
-            Gxd: <b>{money(data.costSummary.Gxd)}</b> đ
+            Chi phí xây dựng: <b>{money(data.costSummary.total ?? data.costSummary.Gxd)}</b> đ
           </span>
           <button onClick={() => setShowImport(true)}>⤓ Nhập dữ liệu</button>
           <button onClick={exportExcel} disabled={exporting}>
@@ -83,6 +86,18 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
           )}
         </div>
         {error && <div className="error">{error}</div>}
+        {data.warnings.length > 0 && (
+          <div className={`banner-legal ${data.provisionalRates ? 'provisional' : ''}`} role="status">
+            {data.warnings.map((w, i) => (
+              <div key={i}>⚠ {w}</div>
+            ))}
+            {data.provisionalRates && (
+              <div>
+                Quản trị viên có thể đánh dấu “đã xác minh” sau khi đối chiếu tại mục <a href="#/legal">Căn cứ pháp lý</a>.
+              </div>
+            )}
+          </div>
+        )}
         <nav className="tabs">
           {TABS.map(([k, label]) => (
             <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>
