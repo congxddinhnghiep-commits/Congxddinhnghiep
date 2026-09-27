@@ -2,14 +2,16 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, getToken, setToken, setUnauthorizedHandler, type AppConfig, type User } from './api';
 import { ChangePassword } from './pages/ChangePassword';
 import { LegalRegister } from './pages/LegalRegister';
+import { PriceBooks } from './pages/PriceBooks';
 import { Login } from './pages/Login';
 import { ProjectList } from './pages/ProjectList';
 import { ProjectView } from './pages/ProjectView';
 
-type Route = { name: 'projects' } | { name: 'project'; id: number } | { name: 'legal' };
+type Route = { name: 'projects' } | { name: 'project'; id: number } | { name: 'legal' } | { name: 'priceBooks' };
 
 function parseHash(): Route {
   if (location.hash.startsWith('#/legal')) return { name: 'legal' };
+  if (location.hash.startsWith('#/price-books')) return { name: 'priceBooks' };
   const m = /^#\/project\/(\d+)/.exec(location.hash);
   return m ? { name: 'project', id: Number(m[1]) } : { name: 'projects' };
 }
@@ -71,6 +73,9 @@ export function App() {
         <a className="nav" href="#/projects">
           Công trình
         </a>
+        <a className="nav" href="#/price-books">
+          Bộ đơn giá
+        </a>
         <a className="nav" href="#/legal">
           Căn cứ pháp lý
         </a>
@@ -90,6 +95,8 @@ export function App() {
       )}
       {route.name === 'legal' ? (
         <LegalRegister user={user} />
+      ) : route.name === 'priceBooks' ? (
+        <PriceBooks user={user} config={config} />
       ) : route.name === 'projects' ? (
         <ProjectList user={user} config={config} onOpen={(id) => navigate({ name: 'project', id })} />
       ) : (

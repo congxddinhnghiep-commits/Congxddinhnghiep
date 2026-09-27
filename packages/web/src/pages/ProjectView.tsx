@@ -137,7 +137,7 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
         </nav>
         <div className="tab-body">
           {tab === 'estimate' && <EstimateGrid data={data} reload={reload} />}
-          {tab === 'prices' && <PricesTab projectId={projectId} onChanged={reload} />}
+          {tab === 'prices' && <PricesTab project={data.project} config={config} onChanged={reload} />}
           {tab === 'analysis' && <AnalysisTab data={data} />}
           {tab === 'resources' && <ResourceSummaryTab data={data} />}
           {tab === 'summary' && <CostSummaryTab data={data} />}

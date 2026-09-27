@@ -14,6 +14,7 @@ function ProjectForm({ config, onSaved, onClose }: { config: AppConfig; onSaved:
     priceDate: today,
     legalSet: defaultLegalSetFor(today) as LegalSetId,
     vatRate: 8,
+    region: '',
   });
   const [legalTouched, setLegalTouched] = useState(false);
   const warning = legalSetDateWarning(f.legalSet, f.priceDate);
@@ -21,7 +22,7 @@ function ProjectForm({ config, onSaved, onClose }: { config: AppConfig; onSaved:
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      onSaved(await api.createProject(f));
+      onSaved(await api.createProject({ ...f, region: f.region || null }));
     } catch (err) {
       setError((err as Error).message);
     }
@@ -37,10 +38,21 @@ function ProjectForm({ config, onSaved, onClose }: { config: AppConfig; onSaved:
           Chủ đầu tư
           <input value={f.ownerName} onChange={(e) => setF({ ...f, ownerName: e.target.value })} />
         </label>
-        <label>
-          Địa điểm xây dựng
-          <input value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} />
-        </label>
+        <div className="row2">
+          <label>
+            Địa điểm xây dựng
+            <input value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} />
+          </label>
+          <label>
+            Tỉnh/thành (để đề xuất bộ đơn giá)
+            <select value={f.region} onChange={(e) => setF({ ...f, region: e.target.value })}>
+              <option value="">— chọn —</option>
+              {config.regions.map((r) => (
+                <option key={r}>{r}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="row2">
           <label>
             Loại công trình

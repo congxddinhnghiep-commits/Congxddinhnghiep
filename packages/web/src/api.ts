@@ -42,6 +42,8 @@ export interface Project {
   status: 'draft' | 'approved';
   approvedBy: string | null;
   approvedAt: string | null;
+  region: string | null;
+  subArea: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -65,6 +67,62 @@ export interface EstimateResponse {
   totalEstimate: { lines: TotalEstimateLine[]; total: number };
   warnings: string[];
   notes: string[];
+  priceSources: Record<string, PriceSourceInfo>;
+}
+
+export interface PriceSourceInfo {
+  kind: 'manual' | 'book' | 'base';
+  label: string;
+  bookId?: number;
+  quoted?: number;
+  notes?: string[];
+}
+
+export interface PriceBookInfo {
+  id: number;
+  region: string;
+  subArea: string | null;
+  issuer: string;
+  docNumber: string;
+  docDate: string | null;
+  periodType: 'month' | 'quarter' | 'year';
+  periodYear: number;
+  periodValue: number | null;
+  periodStart: string;
+  periodEnd: string;
+  bookType: 'VL' | 'NC' | 'M' | 'TH';
+  vat: 'included' | 'excluded' | 'unknown';
+  vatRate: number | null;
+  delivery: string | null;
+  sourceUrl: string | null;
+  sourceFile: string | null;
+  status: 'draft' | 'verified';
+  note: string | null;
+  title: string;
+  rowCount: number;
+  unmatched: number;
+  verifiedBy: string | null;
+  verifiedAt: string | null;
+}
+
+export interface PriceBookRowInfo {
+  id: number;
+  resourceCode: string | null;
+  rawCode: string | null;
+  name: string;
+  spec: string | null;
+  unit: string;
+  price: number;
+  subArea: string | null;
+  sourceRow: number | null;
+  matchStatus: 'matched' | 'unmatched' | 'manual' | 'ignored';
+  matchNote: string | null;
+}
+
+export interface BookSel {
+  bookId: number;
+  resourceType: 'VL' | 'NC' | 'M';
+  priority: number;
 }
 
 export interface SuggestionCandidate {
@@ -129,11 +187,14 @@ export interface AppConfig {
   buildingTypes: Record<BuildingType, string>;
   legalSets: LegalSet[];
   tt36WorkCategories: Record<string, string>;
+  regions: string[];
 }
 
 export interface PriceRow extends Resource {
   isSample: boolean;
   projectPrice: number | null;
+  effectivePrice: number;
+  source: PriceSourceInfo | null;
   used: boolean;
 }
 
@@ -234,6 +295,34 @@ export const api = {
   confirmCodes: (pid: number, itemIds: number[]) => request<{ confirmed: number }>('POST', `/projects/${pid}/confirm-codes`, { itemIds }),
   approve: (pid: number) => request<Project>('POST', `/projects/${pid}/approve`),
   unapprove: (pid: number) => request<Project>('POST', `/projects/${pid}/unapprove`),
+
+  priceBooks: (q: { region?: string; type?: string } = {}) =>
+    request<PriceBookInfo[]>('GET', `/price-books?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString()}`),
+  priceBook: (bid: number) => request<PriceBookInfo & { rows: PriceBookRowInfo[] }>('GET', `/price-books/${bid}`),
+  createPriceBook: (b: Partial<PriceBookInfo>) => request<PriceBookInfo>('POST', '/price-books', b),
+  updatePriceBook: (bid: number, b: Partial<PriceBookInfo>) => request<PriceBookInfo>('PUT', `/price-books/${bid}`, b),
+  deletePriceBook: (bid: number) => request('DELETE', `/price-books/${bid}`),
+  setPriceBookStatus: (bid: number, status: 'draft' | 'verified') => request<PriceBookInfo>('POST', `/price-books/${bid}/status`, { status }),
+  importPriceBook: (bid: number, body: Record<string, unknown>) =>
+    request<{ imported: number; matched: number; unmatched: number; message: string }>('POST', `/price-books/${bid}/import`, body),
+  matchPriceRow: (bid: number, rid: number, body: { resourceCode?: string | null; ignore?: boolean }) => request('PUT', `/price-books/${bid}/rows/${rid}`, body),
+  priceHistory: (code: string) =>
+    request<{ resource: Resource; points: { bookId: number; title: string; region: string; subArea: string | null; periodStart: string; vat: string; status: string; unit: string; price: number }[] }>(
+      'GET',
+      `/resources/${encodeURIComponent(code)}/price-history`,
+    ),
+  projectPriceBooks: (pid: number) =>
+    request<{ selection: BookSel[]; proposals: { region: string | null; subArea: string | null; priceDate: string | null; books: PriceBookInfo[] }; books: PriceBookInfo[] }>(
+      'GET',
+      `/projects/${pid}/price-books`,
+    ),
+  saveProjectPriceBooks: (pid: number, selection: BookSel[]) => request('PUT', `/projects/${pid}/price-books`, { selection }),
+  previewPriceBooks: (pid: number, selection: BookSel[]) =>
+    request<{
+      rows: { code: string; name: string; unit: string; type: string; quantity: number; oldPrice: number; newPrice: number; oldSource: string; newSource: string; delta: number }[];
+      totalDelta: number;
+    }>('POST', `/projects/${pid}/price-books/preview`, { selection }),
+  searchResources: (q: string) => request<Resource[]>('GET', `/resources?q=${encodeURIComponent(q)}`),
 
   prices: (pid: number, all: boolean) => request<PriceRow[]>('GET', `/projects/${pid}/prices${all ? '?all=1' : ''}`),
   setPrice: (pid: number, code: string, price: number | null) => request('PUT', `/projects/${pid}/prices/${encodeURIComponent(code)}`, { price }),

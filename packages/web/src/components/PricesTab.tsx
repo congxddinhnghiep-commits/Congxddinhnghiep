@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import { RESOURCE_TYPE_LABELS, type ResourceType } from '@dutoan/core';
-import { api, type PriceRow } from '../api';
+import { api, type AppConfig, type PriceRow, type Project } from '../api';
+import { PriceHistory, ProjectPriceBooks } from './ProjectPriceBooks';
 import { money, parseInputNumber } from '../format';
 
-export function PricesTab({ projectId, onChanged }: { projectId: number; onChanged: () => void }) {
+export function PricesTab({ project, config, onChanged }: { project: Project; config: AppConfig; onChanged: () => void }) {
+  const projectId = project.id;
+  const [history, setHistory] = useState<string | null>(null);
   const [rows, setRows] = useState<PriceRow[]>([]);
   const [all, setAll] = useState(false);
   const [type, setType] = useState<ResourceType | ''>('');
@@ -33,6 +36,8 @@ export function PricesTab({ projectId, onChanged }: { projectId: number; onChang
 
   return (
     <div>
+      <ProjectPriceBooks project={project} config={config} onChanged={() => (load(), onChanged())} />
+      <h3>Giá tài nguyên của công trình</h3>
       <div className="toolbar">
         <select value={type} onChange={(e) => setType(e.target.value as ResourceType | '')}>
           <option value="">Tất cả loại</option>
@@ -46,7 +51,7 @@ export function PricesTab({ projectId, onChanged }: { projectId: number; onChang
         <label className="check">
           <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> Hiện cả tài nguyên chưa dùng
         </label>
-        <span className="hint">Nhập giá tại thời điểm lập dự toán; để trống để dùng giá gốc.</span>
+        <span className="hint">Ô “Giá nhập tay” ghi đè mọi nguồn khác; để trống để dùng bộ đơn giá đã chọn hoặc giá gốc.</span>
       </div>
       {error && <div className="error">{error}</div>}
       <div className="table-scroll">
@@ -58,20 +63,25 @@ export function PricesTab({ projectId, onChanged }: { projectId: number; onChang
               <th>ĐV</th>
               <th>Loại</th>
               <th className="num">Giá gốc (đ)</th>
-              <th className="num" style={{ width: 160 }}>
-                Giá công trình (đ)
+              <th className="num" style={{ width: 150 }}>
+                Giá nhập tay (đ)
               </th>
+              <th className="num">Giá áp dụng (đ)</th>
+              <th>Nguồn giá</th>
               <th className="num">Chênh lệch (đ)</th>
             </tr>
           </thead>
           <tbody>
             {shown.map((r) => {
-              const diff = r.projectPrice === null ? 0 : r.projectPrice - r.basePrice;
+              const diff = r.effectivePrice - r.basePrice;
               return (
                 <tr key={r.code}>
                   <td>{r.code}</td>
                   <td>
-                    {r.name} {r.isSample && <span className="tag">mẫu</span>}
+                    <button className="link" title="Xem lịch sử giá" onClick={() => setHistory(r.code)}>
+                      {r.name}
+                    </button>{' '}
+                    {r.isSample && <span className="tag">mẫu</span>}
                   </td>
                   <td>{r.unit}</td>
                   <td>{r.type}</td>
@@ -95,6 +105,11 @@ export function PricesTab({ projectId, onChanged }: { projectId: number; onChang
                       }}
                     />
                   </td>
+                  <td className="num">{money(r.effectivePrice)}</td>
+                  <td className={`source-cell ${r.source?.kind === 'base' ? 'base' : ''}`}>
+                    {r.source?.label}
+                    {r.source?.notes?.length ? ` (${r.source.notes.join('; ')})` : ''}
+                  </td>
                   <td className={`num ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}`}>{diff ? money(diff) : ''}</td>
                 </tr>
               );
@@ -102,6 +117,7 @@ export function PricesTab({ projectId, onChanged }: { projectId: number; onChang
           </tbody>
         </table>
       </div>
+      {history && <PriceHistory code={history} onClose={() => setHistory(null)} />}
       {shown.length === 0 && <p className="hint">Chưa có tài nguyên nào. Thêm công tác vào dự toán để xuất hiện vật liệu, nhân công, máy.</p>}
     </div>
   );
