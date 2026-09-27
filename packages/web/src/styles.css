@@ -287,3 +287,23 @@ tr.hdr td { background: #fff6d6; font-weight: 600; }
 .pb-type ol { margin: 4px 0 8px 18px; padding: 0; }
 b.up { color: var(--up); } b.down { color: var(--down); }
 @media (max-width: 900px) { .pb-grid { grid-template-columns: 1fr; } }
+
+/* ---------- section F ---------- */
+.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.error-text { color: var(--danger); }
+.vbadge { font-size: 11px; padding: 1px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
+.vbadge.fail { background: #fdecea; color: #b42318; }
+.vbadge.warning { background: #fff0c2; color: #7a5a00; }
+.vbadge.info { background: #e7eef8; color: #1d4f91; }
+.vbadge.pass { background: #dcf5e6; color: #0b6b36; }
+.vcheck { border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; }
+.vcheck h4 { cursor: pointer; margin: 0; font-size: 14px; display: flex; gap: 8px; align-items: center; }
+.vcheck.v-fail { border-left: 4px solid #b42318; }
+.vcheck.v-warning { border-left: 4px solid #d9a400; }
+.vcheck.v-pass { border-left: 4px solid #0b6b36; }
+.flag { font-size: 11px; color: #b42318; }
+.pm { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #f7ece0; color: #8a4b0f; white-space: nowrap; }
+.qty-cell { display: flex; align-items: center; }
+.sigma { font-size: 11px; color: var(--brand); margin-right: 2px; }
+td.nowrap { white-space: nowrap; }
+button.pm { border: none; cursor: pointer; }

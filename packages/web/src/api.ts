@@ -75,6 +75,8 @@ export interface PriceSourceInfo {
   label: string;
   bookId?: number;
   quoted?: number;
+  sourcePrice?: number;
+  transport?: number;
   notes?: string[];
 }
 
@@ -103,6 +105,12 @@ export interface PriceBookInfo {
   unmatched: number;
   verifiedBy: string | null;
   verifiedAt: string | null;
+  jurisdictionAtIssue?: string | null;
+  sourceFileUrl?: string | null;
+  sourceSha256?: string | null;
+  verificationStatus?: 'verified' | 'needs_review' | 'not_verified' | 'superseded';
+  transportIncluded?: 'yes' | 'no' | 'unknown';
+  workType?: string | null;
 }
 
 export interface PriceBookRowInfo {
@@ -164,12 +172,68 @@ export interface Analysis {
     category: string | null;
     warnings: string[];
     codeKnown?: boolean;
+    normalizedCode?: string;
+    pricingMethod?: string | null;
+    rawName?: string | null;
+    flags?: string[];
     suggestion?: { code: string; name: string; confidence: number; why: string } | null;
   }[];
   counts: Partial<Record<RowType, number>>;
   fields: { key: string; label: string }[];
   rowTypeLabels: Record<RowType, string>;
   warnings: string[];
+  encoding?: string;
+  sha256?: string | null;
+}
+
+export interface QuantityLineDTO {
+  id?: number;
+  description: string;
+  expression: string;
+  variables?: Record<string, number>;
+  variablesText?: string;
+  sign: 1 | -1;
+  unit: string | null;
+  result?: number | null;
+  factor?: number | null;
+  raw?: number | null;
+  error?: string | null;
+  warnings?: string[];
+}
+
+export interface TransportLegDTO {
+  id?: number;
+  fromLocation: string;
+  toLocation: string;
+  roadClass?: string | null;
+  distance: number;
+  freightRate: number;
+  loadFactor: number;
+  weightFactor: number;
+  handling: number;
+  toll: number;
+  note?: string | null;
+  amount?: number;
+}
+
+export interface ValidationReport {
+  generatedAt: string;
+  project: { id: number; name: string; legalSet: string; priceDate: string | null };
+  counts: { error: number; warning: number; info: number };
+  checks: {
+    id: string;
+    title: string;
+    rule: string;
+    status: 'pass' | 'warning' | 'fail';
+    findings: { severity: 'error' | 'warning' | 'info'; message: string; itemId?: number; line?: number; category?: string; code?: string }[];
+  }[];
+}
+
+export interface PricingDTO {
+  pricingMethod: 'NORM_BASED' | 'CUSTOM_GTT' | 'MARKET_QUOTE';
+  custom?: { vl?: number; nc?: number; m?: number } | null;
+  priceSource?: string | null;
+  quote?: { supplier?: string | null; number?: string | null; date?: string | null; validUntil?: string | null; vatStatus?: string | null; vatRate?: number | null } | null;
 }
 
 export interface LegalRegister {
@@ -302,7 +366,7 @@ export const api = {
   createPriceBook: (b: Partial<PriceBookInfo>) => request<PriceBookInfo>('POST', '/price-books', b),
   updatePriceBook: (bid: number, b: Partial<PriceBookInfo>) => request<PriceBookInfo>('PUT', `/price-books/${bid}`, b),
   deletePriceBook: (bid: number) => request('DELETE', `/price-books/${bid}`),
-  setPriceBookStatus: (bid: number, status: 'draft' | 'verified') => request<PriceBookInfo>('POST', `/price-books/${bid}/status`, { status }),
+  setPriceBookStatus: (bid: number, status: 'draft' | 'verified' | 'needs_review' | 'not_verified' | 'superseded') => request<PriceBookInfo>('POST', `/price-books/${bid}/status`, { status }),
   importPriceBook: (bid: number, body: Record<string, unknown>) =>
     request<{ imported: number; matched: number; unmatched: number; message: string }>('POST', `/price-books/${bid}/import`, body),
   matchPriceRow: (bid: number, rid: number, body: { resourceCode?: string | null; ignore?: boolean }) => request('PUT', `/price-books/${bid}/rows/${rid}`, body),
@@ -322,6 +386,17 @@ export const api = {
       rows: { code: string; name: string; unit: string; type: string; quantity: number; oldPrice: number; newPrice: number; oldSource: string; newSource: string; delta: number }[];
       totalDelta: number;
     }>('POST', `/projects/${pid}/price-books/preview`, { selection }),
+  quantityLines: (pid: number, itemId: number) => request<QuantityLineDTO[]>('GET', `/projects/${pid}/items/${itemId}/quantity-lines`),
+  saveQuantityLines: (pid: number, itemId: number, lines: QuantityLineDTO[]) =>
+    request<{ total: number; lines: QuantityLineDTO[] }>('PUT', `/projects/${pid}/items/${itemId}/quantity-lines`, { lines }),
+  evaluateQuantity: (lines: QuantityLineDTO[], itemUnit: string) =>
+    request<{ total: number; lines: QuantityLineDTO[]; errors: number }>('POST', '/quantity/evaluate', { lines, itemUnit }),
+  setPricing: (pid: number, itemId: number, body: PricingDTO) => request('PUT', `/projects/${pid}/items/${itemId}/pricing`, body),
+  transport: (pid: number) => request<Record<string, TransportLegDTO[]>>('GET', `/projects/${pid}/transport`),
+  saveTransport: (pid: number, code: string, legs: TransportLegDTO[]) => request<TransportLegDTO[]>('PUT', `/projects/${pid}/transport/${encodeURIComponent(code)}`, { legs }),
+  validation: (pid: number) => request<ValidationReport>('GET', `/projects/${pid}/validation`),
+  priceBookRecords: (bid: number) => request<Record<string, unknown>[]>('GET', `/price-books/${bid}/records`),
+  provinceMergers: () => request<{ effectiveDate: string; source: string; mergers: { successor: string; predecessors: string[] }[] }>('GET', '/province-mergers'),
   searchResources: (q: string) => request<Resource[]>('GET', `/resources?q=${encodeURIComponent(q)}`),
 
   prices: (pid: number, all: boolean) => request<PriceRow[]>('GET', `/projects/${pid}/prices${all ? '?all=1' : ''}`),

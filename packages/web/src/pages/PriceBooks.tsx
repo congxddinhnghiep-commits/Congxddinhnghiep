@@ -23,13 +23,30 @@ function BookForm({ config, onSaved, onClose }: { config: AppConfig; onSaved: (b
     vatRate: 10,
     delivery: '',
     sourceUrl: '',
+    sourceFileUrl: '',
     note: '',
+    jurisdictionAtIssue: '',
+    transportIncluded: 'unknown' as 'yes' | 'no' | 'unknown',
   });
   const [error, setError] = useState('');
+  const [mergers, setMergers] = useState<{ successor: string; predecessors: string[] }[]>([]);
+  useEffect(() => {
+    api.provinceMergers().then((m) => setMergers(m.mergers));
+  }, []);
+  const former = mergers.find((m) => m.successor === f.region)?.predecessors.filter((p) => p !== f.region) ?? [];
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      onSaved(await api.createPriceBook({ ...f, subArea: f.subArea || null, docDate: f.docDate || null, periodValue: f.periodType === 'year' ? null : f.periodValue }));
+      onSaved(
+        await api.createPriceBook({
+          ...f,
+          subArea: f.subArea || null,
+          docDate: f.docDate || null,
+          periodValue: f.periodType === 'year' ? null : f.periodValue,
+          jurisdictionAtIssue: f.jurisdictionAtIssue || null,
+          sourceFileUrl: f.sourceFileUrl || null,
+        }),
+      );
     } catch (err) {
       setError((err as Error).message);
     }
@@ -51,6 +68,18 @@ function BookForm({ config, onSaved, onClose }: { config: AppConfig; onSaved: (b
             <input value={f.subArea} onChange={(e) => setF({ ...f, subArea: e.target.value })} />
           </label>
         </div>
+        <label>
+          Địa giới lúc ban hành (trước 01/07/2025 có thể là tỉnh cũ)
+          <select value={f.jurisdictionAtIssue} onChange={(e) => setF({ ...f, jurisdictionAtIssue: e.target.value })}>
+            <option value="">{f.region} (như hiện tại)</option>
+            {former.map((p) => (
+              <option key={p}>{p}</option>
+            ))}
+          </select>
+        </label>
+        {f.jurisdictionAtIssue && (
+          <p className="warn-box">Bộ giá của tỉnh cũ chỉ được đề xuất cho công trình có khu vực thuộc {f.jurisdictionAtIssue}, không áp cho toàn tỉnh mới.</p>
+        )}
         <label>
           Cơ quan công bố
           <input placeholder="VD: Sở Xây dựng TP. Hồ Chí Minh" value={f.issuer} onChange={(e) => setF({ ...f, issuer: e.target.value })} />
@@ -115,9 +144,23 @@ function BookForm({ config, onSaved, onClose }: { config: AppConfig; onSaved: (b
           <input placeholder="VD: giá đến hiện trường trung tâm TP" value={f.delivery} onChange={(e) => setF({ ...f, delivery: e.target.value })} />
         </label>
         <label>
-          Nguồn (URL trang chính thức)
-          <input value={f.sourceUrl} onChange={(e) => setF({ ...f, sourceUrl: e.target.value })} />
+          Giá đã gồm vận chuyển đến công trình?
+          <select value={f.transportIncluded} onChange={(e) => setF({ ...f, transportIncluded: e.target.value as 'yes' | 'no' | 'unknown' })}>
+            <option value="unknown">Chưa rõ</option>
+            <option value="yes">Đã gồm (không cộng thêm vận chuyển)</option>
+            <option value="no">Chưa gồm</option>
+          </select>
         </label>
+        <div className="row2">
+          <label>
+            Trang công bố chính thức (URL)
+            <input value={f.sourceUrl} onChange={(e) => setF({ ...f, sourceUrl: e.target.value })} />
+          </label>
+          <label>
+            Link tải file (URL)
+            <input value={f.sourceFileUrl} onChange={(e) => setF({ ...f, sourceFileUrl: e.target.value })} />
+          </label>
+        </div>
         <label>
           Ghi chú
           <input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
@@ -162,6 +205,7 @@ function BookDetail({ bookId, user, onChanged }: { bookId: number; user: User; o
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [mapping, setMapping] = useState<Record<string, number>>({});
   const [filter, setFilter] = useState<'all' | 'unmatched'>('all');
+  const [records, setRecords] = useState<Record<string, unknown>[] | null>(null);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
   const isAdmin = user.role === 'admin';
@@ -223,6 +267,17 @@ function BookDetail({ bookId, user, onChanged }: { bookId: number; user: User; o
           {book.sourceFile ? ` · file: ${book.sourceFile}` : ''}
         </p>
       )}
+      <p className="hint">
+        Địa giới lúc ban hành: <b>{book.jurisdictionAtIssue ?? book.region}</b> · hiện tại: <b>{book.region}</b> · vận chuyển:{' '}
+        {book.transportIncluded === 'yes' ? 'đã gồm' : book.transportIncluded === 'no' ? 'chưa gồm' : 'chưa rõ'} · trạng thái xác minh:{' '}
+        <b>{book.verificationStatus}</b>
+        {book.sourceSha256 ? (
+          <>
+            {' '}
+            · SHA-256 <code title={book.sourceSha256}>{book.sourceSha256.slice(0, 12)}…</code>
+          </>
+        ) : null}
+      </p>
       {book.note && <p className="warn-box">{book.note}</p>}
       <p>
         <span className={`status ${book.status === 'verified' ? 'verified' : 'provisional'}`}>{book.status === 'verified' ? '✓ Đã xác minh' : 'Bản nháp'}</span>{' '}
@@ -241,8 +296,10 @@ function BookDetail({ bookId, user, onChanged }: { bookId: number; user: User; o
               Đánh dấu đã xác minh
             </button>
           ) : (
-            <button onClick={() => wrap(() => api.setPriceBookStatus(bookId, 'draft'))}>Chuyển về nháp</button>
+            <button onClick={() => wrap(() => api.setPriceBookStatus(bookId, 'needs_review'))}>Chuyển về cần duyệt</button>
           )}
+          <button onClick={() => wrap(() => api.setPriceBookStatus(bookId, 'superseded'))}>Đánh dấu đã bị thay thế</button>
+          <button onClick={() => api.priceBookRecords(bookId).then(setRecords)}>Bản ghi dữ liệu (data contract)</button>
         </div>
       )}
       {analysis && (
@@ -351,6 +408,30 @@ function BookDetail({ bookId, user, onChanged }: { bookId: number; user: User; o
         </table>
       </div>
       {book.rows.length === 0 && <p className="hint">Chưa có dòng giá. Tải file công bố giá chính thức và nhập vào để sử dụng.</p>}
+      {records && (
+        <Modal title={`Bản ghi theo data-contract.md (${records.length})`} onClose={() => setRecords(null)} wide>
+          <div className="table-scroll" style={{ maxHeight: 460 }}>
+            <table className="table compact">
+              <thead>
+                <tr>
+                  {Object.keys(records[0] ?? {}).map((k) => (
+                    <th key={k}>{k}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((r, i) => (
+                  <tr key={i}>
+                    {Object.values(r).map((v, j) => (
+                      <td key={j}>{v === null || v === undefined ? <span className="muted">missing</span> : String(v)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

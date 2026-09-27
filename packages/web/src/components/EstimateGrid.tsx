@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import type { Norm } from '@dutoan/core';
 import { api, type EstimateResponse, type SuggestionCandidate } from '../api';
 import { AutoAssignDialog, SuggestionCell } from './CodeAssist';
+import { ItemDialog } from './ItemDialog';
 import { money, parseInputNumber, qty, ROMAN } from '../format';
 import { NormSearchDialog } from './NormSearchDialog';
 
@@ -97,6 +98,7 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
   const [suggestions, setSuggestions] = useState<Map<number, SuggestionCandidate[]>>(new Map());
   const [autoOpen, setAutoOpen] = useState(false);
   const [confirmAll, setConfirmAll] = useState(false);
+  const [dialogItem, setDialogItem] = useState<number | null>(null);
 
   useEffect(() => {
     api
@@ -181,7 +183,7 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
               <th rowSpan={2} style={{ width: 130 }}>
                 Thành tiền (đ)
               </th>
-              <th rowSpan={2} style={{ width: 40 }} />
+              <th rowSpan={2} style={{ width: 52 }} />
             </tr>
             <tr>
               <th style={{ width: 100 }}>Vật liệu</th>
@@ -260,7 +262,17 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
                           </div>
                         </td>
                         <td>
-                          {suggestions.has(it.id) ? (
+                          {(it as { sourceFlags?: string[] }).sourceFlags?.length ? (
+                            <span className="flag" title={(it as { sourceFlags?: string[] }).sourceFlags!.join(', ')}>
+                              ⚠ lỗi ô nguồn{' '}
+                            </span>
+                          ) : null}
+                          {it.pricingMethod && it.pricingMethod !== 'NORM_BASED' ? (
+                            <button className="pm" title={it.priceSource ?? 'Chưa có nguồn giá'} onClick={() => setDialogItem(it.id)}>
+                              {it.pricingMethod === 'CUSTOM_GTT' ? 'GTT' : 'Báo giá'}
+                              {!it.priceSource ? ' · thiếu nguồn' : ''}
+                            </button>
+                          ) : suggestions.has(it.id) ? (
                             <SuggestionCell projectId={pid} itemId={it.id} candidates={suggestions.get(it.id)!} onDone={reload} />
                           ) : it.codeStatus === 'auto' ? (
                             <button
@@ -292,13 +304,19 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
                           <Cell value={it.quantityFormula ?? ''} r={r} col="formula" onCommit={(v) => upd({ quantityFormula: v })} placeholder="công thức" />
                         </td>
                         <td>
-                          <Cell value={qty(it.quantity)} r={r} col="qty" className="num" onCommit={(v) => upd(quantityPatch(v))} />
+                          <span className="qty-cell" title={it.quantitySource === 'LINES' ? 'Khối lượng = tổng các dòng bóc tách' : undefined}>
+                            {it.quantitySource === 'LINES' && <span className="sigma">Σ</span>}
+                            <Cell value={qty(it.quantity)} r={r} col="qty" className="num" onCommit={(v) => upd(quantityPatch(v))} />
+                          </span>
                         </td>
                         <td className="num">{money(it.unitCost.vl)}</td>
                         <td className="num">{money(it.unitCost.nc)}</td>
                         <td className="num">{money(it.unitCost.m)}</td>
                         <td className="num">{money(it.amount.total)}</td>
-                        <td>
+                        <td className="nowrap">
+                          <button className="icon tiny" tabIndex={-1} title="Bóc tách khối lượng, cách tính giá, nguồn gốc" onClick={() => setDialogItem(it.id)}>
+                            ⋯
+                          </button>
                           <button className="icon" tabIndex={-1} title="Xóa dòng" onClick={() => run(() => api.deleteItem(pid, it.id))}>
                             ×
                           </button>
@@ -377,6 +395,10 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
           </tfoot>
         </table>
       </div>
+      {dialogItem !== null && (() => {
+        const item = data.categories.flatMap((c) => c.items).find((i) => i.id === dialogItem);
+        return item ? <ItemDialog projectId={pid} item={item} onClose={() => setDialogItem(null)} onSaved={reload} /> : null;
+      })()}
       {autoOpen && <AutoAssignDialog projectId={pid} onClose={() => setAutoOpen(false)} onDone={reload} />}
       {search && (
         <NormSearchDialog

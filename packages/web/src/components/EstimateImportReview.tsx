@@ -197,9 +197,15 @@ export function EstimateImportReview({
                   </td>
                   <td>
                     {r.code}
-                    {r.code && r.codeKnown === false && <span className="code-state review"> không có</span>}
+                    {r.normalizedCode && r.normalizedCode !== r.code.trim().toUpperCase() && <span className="hint"> → {r.normalizedCode}</span>}
+                    {r.code && r.codeKnown === false && r.pricingMethod !== 'CUSTOM_GTT' && <span className="code-state review"> không có</span>}
                   </td>
-                  <td>{r.name}</td>
+                  <td title={r.rawName ? `Văn bản gốc: ${r.rawName}` : undefined}>
+                    {r.name}
+                    {r.rawName && <span className="hint"> (đã chuyển mã)</span>}
+                    {r.pricingMethod === 'CUSTOM_GTT' && <span className="pm"> GTT</span>}
+                    {r.flags?.length ? <span className="flag"> ⚠ {r.flags.join(', ')}</span> : null}
+                  </td>
                   <td>{r.unit}</td>
                   <td className="num">{r.quantity === null ? '' : qty(r.quantity)}</td>
                   <td className="warn-text">{r.warnings.join('; ')}</td>

@@ -8,6 +8,7 @@ import { ImportPanel } from '../components/ImportPanel';
 import { PricesTab } from '../components/PricesTab';
 import { ResourceSummaryTab } from '../components/ResourceSummaryTab';
 import { SettingsTab } from '../components/SettingsTab';
+import { ValidationTab } from '../components/ValidationTab';
 import { money } from '../format';
 
 const TABS = [
@@ -17,6 +18,7 @@ const TABS = [
   ['resources', 'Tổng hợp vật tư'],
   ['summary', 'Tổng hợp chi phí'],
   ['settings', 'Cài đặt hệ số'],
+  ['validation', 'Kiểm tra'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -142,6 +144,7 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
           {tab === 'resources' && <ResourceSummaryTab data={data} />}
           {tab === 'summary' && <CostSummaryTab data={data} />}
           {tab === 'settings' && <SettingsTab data={data} config={config} onSaved={reload} />}
+          {tab === 'validation' && <ValidationTab projectId={projectId} version={data} />}
         </div>
       </main>
       {showAssistant && (

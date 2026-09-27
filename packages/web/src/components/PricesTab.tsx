@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { RESOURCE_TYPE_LABELS, type ResourceType } from '@dutoan/core';
 import { api, type AppConfig, type PriceRow, type Project } from '../api';
 import { PriceHistory, ProjectPriceBooks } from './ProjectPriceBooks';
+import { TransportDialog } from './TransportDialog';
 import { money, parseInputNumber } from '../format';
 
 export function PricesTab({ project, config, onChanged }: { project: Project; config: AppConfig; onChanged: () => void }) {
   const projectId = project.id;
   const [history, setHistory] = useState<string | null>(null);
+  const [transport, setTransport] = useState<PriceRow | null>(null);
   const [rows, setRows] = useState<PriceRow[]>([]);
   const [all, setAll] = useState(false);
   const [type, setType] = useState<ResourceType | ''>('');
@@ -69,6 +71,7 @@ export function PricesTab({ project, config, onChanged }: { project: Project; co
               <th className="num">Giá áp dụng (đ)</th>
               <th>Nguồn giá</th>
               <th className="num">Chênh lệch (đ)</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -111,12 +114,20 @@ export function PricesTab({ project, config, onChanged }: { project: Project; co
                     {r.source?.notes?.length ? ` (${r.source.notes.join('; ')})` : ''}
                   </td>
                   <td className={`num ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}`}>{diff ? money(diff) : ''}</td>
+                  <td>
+                    {r.type === 'VL' && (
+                      <button className="small" title="Vận chuyển đến công trình" onClick={() => setTransport(r)}>
+                        🚚{r.source?.transport ? ` +${money(r.source.transport)}` : ''}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+      {transport && <TransportDialog projectId={projectId} resource={transport} onClose={() => setTransport(null)} onSaved={() => (load(), onChanged())} />}
       {history && <PriceHistory code={history} onClose={() => setHistory(null)} />}
       {shown.length === 0 && <p className="hint">Chưa có tài nguyên nào. Thêm công tác vào dự toán để xuất hiện vật liệu, nhân công, máy.</p>}
     </div>
