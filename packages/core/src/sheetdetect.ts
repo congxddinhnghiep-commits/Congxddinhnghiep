@@ -265,6 +265,10 @@ export interface ClassifiedRow {
   quantity: number | null;
   formula: string;
   prices: { vl: number | null; nc: number | null; m: number | null; unit: number | null };
+  /** Price-book mode: the quoted price of the row. */
+  price: number | null;
+  spec: string;
+  subArea: string;
   note: string;
   category: string | null;
   warnings: string[];
@@ -280,6 +284,8 @@ const str = (v: Cell | undefined): string => (v === null || v === undefined ? ''
 export function classifyRows(rows: Cell[][], header: Pick<HeaderDetection, 'headerRow' | 'headerRows' | 'mapping'>): ClassifiedRow[] {
   const m = header.mapping;
   const get = (r: Cell[], f: ImportField) => (m[f] === undefined || m[f]! < 0 ? undefined : r[m[f]!]);
+  // Price lists have no quantity column: a row is an item when it has a name/code and a price.
+  const priceMode = m.quantity === undefined && m.price !== undefined;
   const out: ClassifiedRow[] = [];
   let category: string | null = null;
   const seen = new Map<string, number>();
@@ -290,8 +296,10 @@ export function classifyRows(rows: Cell[][], header: Pick<HeaderDetection, 'head
     const code = str(get(r, 'code'));
     const name = str(get(r, 'name'));
     const unit = str(get(r, 'unit'));
-    const qRaw = get(r, 'quantity');
-    const quantity = parseFlexibleNumber(qRaw ?? null);
+    const qRaw = priceMode ? get(r, 'price') : get(r, 'quantity');
+    const qVal = parseFlexibleNumber(qRaw ?? null);
+    const quantity = priceMode ? null : qVal;
+    const price = priceMode ? qVal : parseFlexibleNumber(get(r, 'price') ?? null);
     const row: ClassifiedRow = {
       index: i,
       type: 'note',
@@ -307,6 +315,9 @@ export function classifyRows(rows: Cell[][], header: Pick<HeaderDetection, 'head
         m: parseFlexibleNumber(get(r, 'priceM') ?? null),
         unit: parseFlexibleNumber(get(r, 'unitPrice') ?? null),
       },
+      price,
+      spec: str(get(r, 'spec')),
+      subArea: str(get(r, 'subArea')),
       note: str(get(r, 'note')),
       category,
       warnings: [],
@@ -330,8 +341,13 @@ export function classifyRows(rows: Cell[][], header: Pick<HeaderDetection, 'head
       out.push(row);
       continue;
     }
-    const hasQty = quantity !== null;
-    if ((name || code) && hasQty && (unit || code)) {
+    const hasQty = qVal !== null;
+    if (priceMode && (name || code) && hasQty) {
+      row.type = 'item';
+      if (!unit) row.warnings.push('Thiếu đơn vị');
+      else if (!isKnownUnit(unit)) row.warnings.push(`Đơn vị lạ "${unit}"`);
+      if (qVal! <= 0) row.warnings.push('Giá bằng 0 hoặc âm');
+    } else if (!priceMode && (name || code) && hasQty && (unit || code)) {
       row.type = 'item';
       if (!unit) row.warnings.push('Thiếu đơn vị');
       else if (!isKnownUnit(unit)) row.warnings.push(`Đơn vị lạ "${unit}"`);

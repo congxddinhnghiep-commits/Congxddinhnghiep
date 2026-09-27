@@ -13,3 +13,4 @@ export * from './legal.js';
 export * from './units.js';
 export * from './suggest.js';
 export * from './sheetdetect.js';
+export * from './pricebook.js';

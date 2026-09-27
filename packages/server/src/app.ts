@@ -19,6 +19,7 @@ import { buildWorkbook } from './excel.js';
 import { downloadDriveFile } from './gdrive.js';
 import { applyImport, getParsed, parseBuffer, previewOf, storeParsed, type ImportTarget } from './importer.js';
 import { analyze, importEstimate, listTemplates } from './estimate-import.js';
+import { PriceBookService, regions, seedPriceBookExample } from './pricebooks.js';
 import { LegalService, legalDocuments } from './legal.js';
 import { HttpError, Repo } from './repo.js';
 
@@ -72,6 +73,9 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
   const repo = new Repo(db, legal);
   const auth = new AuthService(db, config.jwtSecret, config.jwtExpiresIn);
   const assistant = new AssistantService(repo);
+  const priceBooks = new PriceBookService(db, repo);
+  repo.priceResolver = (pid) => priceBooks.resolve(pid);
+  seedPriceBookExample(db);
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
 
   const app = express();
@@ -118,6 +122,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
       buildingTypes: BUILDING_TYPE_LABELS,
       legalSets: legal.all(),
       tt36WorkCategories: TT36_WORK_CATEGORIES,
+      regions: regions(),
     })),
   );
 
@@ -157,6 +162,12 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
     if (!Number.isFinite(n) || n < 0) throw new HttpError(400, 'Chi phí XD trong TMĐT không hợp lệ (tỷ đồng)');
     return n || null;
   };
+  const region = (v: unknown): string | null => {
+    if (v === null || v === '') return null;
+    const r = String(v);
+    if (!regions().includes(r)) throw new HttpError(400, 'Tỉnh/thành không có trong danh sách');
+    return r;
+  };
   const checkDate = (d: unknown) => {
     if (d !== undefined && d !== null && d !== '' && !(typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))) {
       throw new HttpError(400, 'Ngày lập giá không hợp lệ (yyyy-mm-dd)');
@@ -170,6 +181,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
       if (b.legalSet !== undefined && !legal.isLegalSet(b.legalSet)) throw new HttpError(400, 'Bộ pháp lý không hợp lệ');
       checkDate(b.priceDate);
       if (b.gxdttTmdt !== undefined) b.gxdttTmdt = tmdt(b.gxdttTmdt);
+      if (b.region !== undefined) b.region = region(b.region);
       const p = repo.createProject(req.user!.id, b);
       repo.createCategory(p.id, 'Hạng mục chung');
       return p;
@@ -193,6 +205,8 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
         legalSet: b.legalSet ?? p.legalSet,
         priceDate: b.priceDate !== undefined ? b.priceDate || null : p.priceDate,
         gxdttTmdt: b.gxdttTmdt !== undefined ? tmdt(b.gxdttTmdt) : p.gxdttTmdt,
+        region: b.region !== undefined ? region(b.region) : p.region,
+        subArea: b.subArea !== undefined ? String(b.subArea ?? '').trim() || null : p.subArea,
         name: b.name ?? p.name,
         ownerName: b.ownerName ?? p.ownerName,
         location: b.location ?? p.location,
@@ -419,9 +433,16 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
       const p = proj(req);
       const prices = repo.projectPrices(p.id);
       const used = new Set(repo.calculate(p.id).resourceSummary.map((r) => r.code));
+      const resolved = priceBooks.resolve(p.id);
       return repo
         .listResources()
-        .map((r) => ({ ...r, projectPrice: prices[r.code] ?? null, used: used.has(r.code) }))
+        .map((r) => ({
+          ...r,
+          projectPrice: prices[r.code] ?? null,
+          effectivePrice: resolved[r.code]?.price ?? r.basePrice,
+          source: resolved[r.code]?.source ?? null,
+          used: used.has(r.code),
+        }))
         .filter((r) => req.query.all === '1' || r.used || r.projectPrice !== null);
     }),
   );
@@ -535,6 +556,81 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
       });
     }),
   );
+
+  // price books by region and period – Update 2, D
+  api.get('/regions', h(() => regions()));
+  const bid = (req: Request) => id(req.params.bid);
+  api.get('/price-books', h((req) => priceBooks.list({ region: req.query.region ? String(req.query.region) : undefined, type: req.query.type ? String(req.query.type) : undefined })));
+  api.get('/price-books/:bid', h((req) => ({ ...priceBooks.get(bid(req)), rows: priceBooks.rows(bid(req)) })));
+  api.post(
+    '/price-books',
+    requireAdmin,
+    h((req) => {
+      const b = req.body ?? {};
+      if (b.region) region(b.region);
+      return priceBooks.create(b, req.user!.username);
+    }),
+  );
+  api.put(
+    '/price-books/:bid',
+    requireAdmin,
+    h((req) => {
+      const b = req.body ?? {};
+      if (b.region) region(b.region);
+      return priceBooks.update(bid(req), b);
+    }),
+  );
+  api.delete(
+    '/price-books/:bid',
+    requireAdmin,
+    h((req) => {
+      priceBooks.delete(bid(req));
+    }),
+  );
+  api.post(
+    '/price-books/:bid/status',
+    requireAdmin,
+    h((req) => priceBooks.setStatus(bid(req), req.body?.status === 'verified' ? 'verified' : 'draft', req.user!.username)),
+  );
+  api.post(
+    '/price-books/:bid/import',
+    requireAdmin,
+    h((req) => {
+      const b = req.body ?? {};
+      const f = getParsed(String(b.fileId), req.user!.id);
+      return priceBooks.importRows(bid(req), f, { ...headerOpts(b), replace: !!b.replace, saveTemplate: b.saveTemplate ?? null }, req.user!.username);
+    }),
+  );
+  api.put(
+    '/price-books/:bid/rows/:rid',
+    requireAdmin,
+    h((req) => priceBooks.matchRow(bid(req), id(req.params.rid), req.body?.resourceCode ? String(req.body.resourceCode) : null, !!req.body?.ignore)),
+  );
+  api.get('/resources/:code/price-history', h((req) => priceBooks.history(String(req.params.code))));
+  const selectionOf = (v: unknown) => {
+    if (!Array.isArray(v)) throw new HttpError(400, 'Danh sách bộ đơn giá không hợp lệ');
+    return v.map((x: { bookId: unknown; resourceType: unknown; priority: unknown }) => ({
+      bookId: id(String(x.bookId)),
+      resourceType: String(x.resourceType) as 'VL' | 'NC' | 'M',
+      priority: Number(x.priority) || 1,
+    }));
+  };
+  api.get(
+    '/projects/:id/price-books',
+    h((req) => {
+      const p = proj(req);
+      return { selection: priceBooks.selection(p.id), proposals: priceBooks.proposals(p.id), books: priceBooks.list() };
+    }),
+  );
+  api.put(
+    '/projects/:id/price-books',
+    h((req) => {
+      const p = proj(req);
+      priceBooks.saveSelection(p.id, selectionOf(req.body?.selection));
+      return { selection: priceBooks.selection(p.id) };
+    }),
+  );
+  api.post('/projects/:id/price-books/preview', h((req) => priceBooks.preview(proj(req).id, selectionOf(req.body?.selection))));
 
   // import existing estimate files (any layout) – Update 2, B
   const mappingOf = (v: unknown) => (v && typeof v === 'object' ? (v as Record<string, number>) : undefined);

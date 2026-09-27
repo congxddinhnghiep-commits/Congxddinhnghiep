@@ -15,6 +15,7 @@ import {
   type NormResource,
   type ProjectCostSettings,
   type Resource,
+  type ResolvedPrice,
   type ResourceType,
 } from '@dutoan/core';
 import type { DB } from './db.js';
@@ -46,6 +47,8 @@ export interface ProjectRow {
   status: 'draft' | 'approved' | null;
   approved_by: string | null;
   approved_at: string | null;
+  region: string | null;
+  sub_area: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -69,6 +72,9 @@ export interface Project {
   status: 'draft' | 'approved';
   approvedBy: string | null;
   approvedAt: string | null;
+  /** Tỉnh/thành (after the 2025 merger) and optional sub-area used to pick price books. */
+  region: string | null;
+  subArea: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -89,6 +95,8 @@ export const toProject = (r: ProjectRow): Project => ({
   status: r.status ?? 'draft',
   approvedBy: r.approved_by,
   approvedAt: r.approved_at,
+  region: r.region,
+  subArea: r.sub_area,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -166,6 +174,9 @@ export class Repo {
     readonly legal: LegalService,
   ) {}
 
+  /** Effective price + source per resource (price books); set by the app. */
+  priceResolver?: (projectId: number) => Record<string, ResolvedPrice>;
+
   /** Norm dataset of the project's legal set (TT38_2026 or TT12_2021). */
   datasetOf(projectId: number): string {
     return this.legal.get(this.getProject(projectId)!.legalSet).normDataset;
@@ -194,8 +205,8 @@ export class Repo {
   createProject(ownerId: number, data: Partial<Project>): Project {
     const info = this.db
       .prepare(
-        `INSERT INTO projects (owner_id, name, owner_name, location, building_type, price_base_date, vat_rate, legal_set, price_date, gxdtt_tmdt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO projects (owner_id, name, owner_name, location, building_type, price_base_date, vat_rate, legal_set, price_date, gxdtt_tmdt, region, sub_area)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         ownerId,
@@ -208,6 +219,8 @@ export class Repo {
         data.legalSet ?? defaultLegalSetFor(data.priceDate),
         data.priceDate || null,
         data.gxdttTmdt ?? null,
+        data.region || null,
+        data.subArea || null,
       );
     return this.getProject(Number(info.lastInsertRowid))!;
   }
@@ -218,7 +231,7 @@ export class Repo {
     this.db
       .prepare(
         `UPDATE projects SET name = ?, owner_name = ?, location = ?, building_type = ?, price_base_date = ?,
-         vat_rate = ?, cost_settings = ?, legal_set = ?, price_date = ?, gxdtt_tmdt = ?, updated_at = datetime('now') WHERE id = ?`,
+         vat_rate = ?, cost_settings = ?, legal_set = ?, price_date = ?, gxdtt_tmdt = ?, region = ?, sub_area = ?, updated_at = datetime('now') WHERE id = ?`,
       )
       .run(
         next.name,
@@ -231,6 +244,8 @@ export class Repo {
         next.legalSet,
         next.priceDate || null,
         next.gxdttTmdt ?? null,
+        next.region || null,
+        next.subArea || null,
         id,
       );
     return this.getProject(id)!;
@@ -276,6 +291,12 @@ export class Repo {
       this.db
         .prepare(`INSERT INTO project_prices (project_id, resource_code, price) SELECT ?, resource_code, price FROM project_prices WHERE project_id = ?`)
         .run(copy.id, id);
+      this.db
+        .prepare(
+          `INSERT INTO project_price_books (project_id, book_id, resource_type, priority) SELECT ?, book_id, resource_type, priority FROM project_price_books WHERE project_id = ?`,
+        )
+        .run(copy.id, id);
+      this.updateProject(copy.id, { region: src.region, subArea: src.subArea, gxdttTmdt: src.gxdttTmdt, priceDate: src.priceDate, legalSet: src.legalSet });
       return this.getProject(copy.id)!;
     })();
   }
@@ -660,7 +681,12 @@ export class Repo {
       .map((c) => resStmt.get(c) as ResourceRow | undefined)
       .filter((r): r is ResourceRow => !!r)
       .map(toResource);
-    const estimate = computeEstimate({ categories, items, normResources, resources, projectPrices: this.projectPrices(projectId) });
+    const resolved = this.priceResolver?.(projectId);
+    const effective = resolved ? Object.fromEntries(Object.entries(resolved).map(([k, v]) => [k, v.price])) : this.projectPrices(projectId);
+    const estimate = computeEstimate({ categories, items, normResources, resources, projectPrices: effective });
+    const priceSources = Object.fromEntries(
+      estimate.resourceSummary.map((r) => [r.code, resolved?.[r.code]?.source ?? { kind: 'base', label: 'Giá gốc thư viện' }]),
+    );
     const cost = computeProjectCost(legalSet, estimate.total, project.costSettings, project.buildingType, project.vatRate, {
       gxdttTmdt: project.gxdttTmdt,
       categories: estimate.categories.map((c) => ({ id: c.id, name: c.name, direct: c.total, ttRate: c.ttRate })),
@@ -677,6 +703,7 @@ export class Repo {
       totalEstimate: cost.totalEstimate,
       warnings: dateWarning ? [dateWarning, ...cost.warnings] : cost.warnings,
       notes: cost.notes ?? [],
+      priceSources,
     };
   }
 }

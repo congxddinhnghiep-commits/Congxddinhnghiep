@@ -81,6 +81,9 @@ function row(ws: ExcelJS.Worksheet, rowNo: number, values: Cell[], opts: { bold?
   return r;
 }
 
+const sourceLabel = (src: { label: string; notes?: string[] } | undefined) =>
+  src ? `${src.label}${src.notes?.length ? ` (${src.notes.join('; ')})` : ''}` : '';
+
 const roman = (n: number) =>
   ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX'][n - 1] ?? String(n);
 
@@ -125,10 +128,10 @@ export async function buildWorkbook(calc: Calculation, author: string, legalDocs
   const wsTDT = wb.addWorksheet('TDT');
 
   // ------------------------------------------------------------------ THVT
-  setupSheet(wsTV, [6, 14, 42, 9, 12, 14, 14, 18], false);
-  title(wsTV, 1, 'BẢNG TỔNG HỢP VẬT TƯ', 8);
-  info(wsTV, 2, projectInfo[0], 8);
-  header(wsTV, 4, ['STT', 'Mã hiệu', 'Tên vật tư, nhân công, máy', 'Đơn vị', 'Loại', 'Khối lượng', 'Giá (đ)', 'Thành tiền (đ)']);
+  setupSheet(wsTV, [6, 14, 42, 9, 8, 14, 14, 18, 48], true);
+  title(wsTV, 1, 'BẢNG TỔNG HỢP VẬT TƯ', 9);
+  info(wsTV, 2, projectInfo[0], 9);
+  header(wsTV, 4, ['STT', 'Mã hiệu', 'Tên vật tư, nhân công, máy', 'Đơn vị', 'Loại', 'Khối lượng', 'Giá (đ)', 'Thành tiền (đ)', 'Nguồn giá']);
   const resRow = new Map<string, number>();
   let r = 5;
   calc.resourceSummary.forEach((s, i) => {
@@ -145,13 +148,14 @@ export async function buildWorkbook(calc: Calculation, author: string, legalDocs
         { formula: `SUMIF(PTVT!$B:$B,B${r},PTVT!$G:$G)`, result: s.quantity },
         s.price,
         { formula: `F${r}*G${r}`, result: s.amount },
+        sourceLabel(calc.priceSources[s.code]),
       ],
       { numFmts: { 6: QTY, 7: MONEY, 8: MONEY } },
-    );
+    ).getCell(9).font = { name: FONT, size: 9, italic: true };
     r++;
   });
   const tvLast = r - 1;
-  row(wsTV, r, ['', '', 'TỔNG CỘNG', '', '', '', '', { formula: `SUM(H5:H${Math.max(5, tvLast)})`, result: calc.total.total }], {
+  row(wsTV, r, ['', '', 'TỔNG CỘNG', '', '', '', '', { formula: `SUM(H5:H${Math.max(5, tvLast)})`, result: calc.total.total }, ''], {
     bold: true,
     numFmts: { 8: MONEY },
   });

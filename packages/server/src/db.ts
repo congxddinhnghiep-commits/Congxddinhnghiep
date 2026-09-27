@@ -112,6 +112,57 @@ CREATE TABLE IF NOT EXISTS assistant_history (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS price_books (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  region TEXT NOT NULL,
+  sub_area TEXT,
+  issuer TEXT NOT NULL DEFAULT '',
+  doc_number TEXT NOT NULL DEFAULT '',
+  doc_date TEXT,
+  period_type TEXT NOT NULL CHECK (period_type IN ('month', 'quarter', 'year')),
+  period_year INTEGER NOT NULL,
+  period_value INTEGER,
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  book_type TEXT NOT NULL CHECK (book_type IN ('VL', 'NC', 'M', 'TH')),
+  vat TEXT NOT NULL DEFAULT 'unknown' CHECK (vat IN ('included', 'excluded', 'unknown')),
+  vat_rate REAL,
+  delivery TEXT,
+  source_url TEXT,
+  source_file TEXT,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'verified')),
+  note TEXT,
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  verified_by TEXT,
+  verified_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS price_book_rows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  book_id INTEGER NOT NULL REFERENCES price_books(id) ON DELETE CASCADE,
+  resource_code TEXT,
+  raw_code TEXT,
+  name TEXT NOT NULL,
+  spec TEXT,
+  unit TEXT NOT NULL DEFAULT '',
+  price REAL NOT NULL,
+  sub_area TEXT,
+  source_row INTEGER,
+  match_status TEXT NOT NULL DEFAULT 'unmatched' CHECK (match_status IN ('matched', 'unmatched', 'manual', 'ignored')),
+  match_note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_price_book_rows_book ON price_book_rows(book_id);
+CREATE INDEX IF NOT EXISTS idx_price_book_rows_res ON price_book_rows(resource_code);
+
+CREATE TABLE IF NOT EXISTS project_price_books (
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  book_id INTEGER NOT NULL REFERENCES price_books(id) ON DELETE CASCADE,
+  resource_type TEXT NOT NULL CHECK (resource_type IN ('VL', 'NC', 'M')),
+  priority INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (project_id, book_id, resource_type)
+);
+
 CREATE TABLE IF NOT EXISTS import_templates (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -165,6 +216,8 @@ export function migrate(db: DB): void {
   if (!pc.includes('status')) db.exec(`ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'`);
   if (!pc.includes('approved_by')) db.exec(`ALTER TABLE projects ADD COLUMN approved_by TEXT`);
   if (!pc.includes('approved_at')) db.exec(`ALTER TABLE projects ADD COLUMN approved_at TEXT`);
+  if (!pc.includes('region')) db.exec(`ALTER TABLE projects ADD COLUMN region TEXT`);
+  if (!pc.includes('sub_area')) db.exec(`ALTER TABLE projects ADD COLUMN sub_area TEXT`);
 
   if (!columns(db, 'norms').includes('dataset')) {
     db.pragma('foreign_keys = OFF');

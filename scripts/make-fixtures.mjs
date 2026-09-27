@@ -124,4 +124,24 @@ const range = (s, e) => ({ s: XLSX.utils.decode_cell(s), e: XLSX.utils.decode_ce
   XLSX.utils.book_append_sheet(wb, ws, '工程量清单 BOQ');
   XLSX.writeFile(wb, path.join(out, 'song-ngu-viet-trung.xlsx'));
 }
+// 4) Price list (SYNTHETIC test data – not an official publication): group rows, codes for some
+//    rows only, spec column, sub-area column, prices per tấn / m3.
+{
+  const rows = [
+    ['BẢNG GIÁ THỬ NGHIỆM – SỐ LIỆU GIẢ ĐỊNH, KHÔNG PHẢI CÔNG BỐ GIÁ'],
+    ['STT', 'Mã VL', 'Tên vật liệu', 'Quy cách', 'ĐVT', 'Giá chưa VAT (đồng)', 'Khu vực'],
+    ['I', null, 'XI MĂNG'],
+    [1, 'V.XM40', 'Xi măng', 'PCB40', 'tấn', '1.650.000', null],
+    [2, null, 'Xi măng PCB40', 'bao 50kg', 'tấn', '1.720.000', 'Cần Giờ'],
+    ['II', null, 'CÁT, ĐÁ'],
+    [3, null, 'Cát vàng', 'hạt to', 'm3', 420000, null],
+    [4, null, 'Đá dăm 1x2', null, 'm3', 455000, null],
+    [5, null, 'Thép hình I200', 'SS400', 'kg', 21500, null],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!merges'] = [range('A1', 'G1')];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Gia VL');
+  XLSX.writeFile(wb, path.join(out, 'bang-gia-thu-nghiem.xlsx'));
+}
 console.log('fixtures written to', out);
