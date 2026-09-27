@@ -1,0 +1,20 @@
+{
+  "id": "LEGACY_OBSERVED_A",
+  "name": "Biến thể công thức quan sát trong kho mẫu cũ (chỉ tham chiếu)",
+  "status": "reference_only",
+  "effectiveFrom": null,
+  "effectiveTo": null,
+  "source": ".claude/skills/construction-estimation-engine/calculation_rules.json – observed_legacy_formula_variants. KHÔNG phải quy định hiện hành; không dùng làm mặc định.",
+  "variables": ["VL", "NC", "M"],
+  "rules": [
+    { "key": "TT", "formula": "1.5% * (VL + NC + M)", "rounding": "vnd", "description": "Trực tiếp khác (biến thể cũ)" },
+    { "key": "T", "formula": "VL + NC + M + TT", "rounding": "vnd" },
+    { "key": "C", "formula": "6% * T", "rounding": "vnd", "description": "Chi phí chung (biến thể cũ)" },
+    { "key": "TL", "formula": "5.5% * (T + C)", "rounding": "vnd" },
+    { "key": "G", "formula": "T + C + TL", "rounding": "vnd" },
+    { "key": "VAT", "formula": "10% * G", "rounding": "vnd" },
+    { "key": "Gs", "formula": "G + VAT", "rounding": "vnd" },
+    { "key": "Glt", "formula": "1% * Gs", "rounding": "vnd" },
+    { "key": "Gdt", "formula": "Gs + Glt", "rounding": "vnd" }
+  ]
+}

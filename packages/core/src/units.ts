@@ -70,6 +70,17 @@ export function unitFactor(from: string, to: string): number | null {
   else if (fb === 'tan' && tb === 'kg') base = 1000;
   else if (fb === 'm' && tb === 'km') base = 0.001;
   else if (fb === 'km' && tb === 'm') base = 1000;
+  else {
+    // Length-based units: mm, cm, dm, m (and their squares / cubes)
+    const len: Record<string, number> = { mm: 0.001, cm: 0.01, dm: 0.1, m: 1 };
+    const dim = (u: string): [number, number] | null => {
+      const m = /^(mm|cm|dm|m)([23]?)$/.exec(u);
+      return m ? [len[m[1]], m[2] ? Number(m[2]) : 1] : null;
+    };
+    const a = dim(fb);
+    const b = dim(tb);
+    if (a && b && a[1] === b[1]) base = Math.pow(a[0] / b[0], a[1]);
+  }
   if (base === null) return null;
   return (base * fn) / tn;
 }

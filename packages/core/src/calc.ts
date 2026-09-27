@@ -78,6 +78,11 @@ function add(a: UnitCost, b: UnitCost): void {
   a.total += b.total;
 }
 
+/** hao phí tài nguyên = khối lượng công tác × định mức × hệ số điều chỉnh */
+export function expandResource(quantity: number, consumption: number, coefficient = 1): number {
+  return quantity * consumption * coefficient;
+}
+
 export function priceOf(resource: Resource, projectPrices?: Record<string, number>): number {
   const p = projectPrices?.[resource.code];
   return p !== undefined && p !== null ? p : resource.basePrice;
@@ -93,7 +98,7 @@ export function computeUnitCost(
   for (const nr of normResources) {
     const r = resources.get(nr.resourceCode);
     if (!r) continue;
-    u[typeKey[r.type]] += nr.consumption * priceOf(r, projectPrices);
+    u[typeKey[r.type]] += expandResource(1, nr.consumption, nr.coefficient ?? 1) * priceOf(r, projectPrices);
   }
   u.total = u.vl + u.nc + u.m;
   return u;
@@ -132,7 +137,7 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
             const r = resources.get(nr.resourceCode);
             if (!r) continue;
             const price = priceOf(r, input.projectPrices);
-            const quantity = nr.consumption * q;
+            const quantity = expandResource(q, nr.consumption, nr.coefficient ?? 1);
             analysis.push({
               resourceCode: r.code,
               name: r.name,
@@ -141,7 +146,7 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
               consumption: nr.consumption,
               quantity,
               price,
-              unitAmount: nr.consumption * price,
+              unitAmount: expandResource(1, nr.consumption, nr.coefficient ?? 1) * price,
               amount: quantity * price,
             });
             const s = summary.get(r.code) ?? {

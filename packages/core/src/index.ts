@@ -14,3 +14,7 @@ export * from './units.js';
 export * from './suggest.js';
 export * from './sheetdetect.js';
 export * from './pricebook.js';
+export * from './quantity.js';
+export * from './codes.js';
+export * from './encoding.js';
+export * from './costrules.js';

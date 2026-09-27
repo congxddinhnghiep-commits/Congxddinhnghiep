@@ -35,6 +35,8 @@ export interface NormResource {
   normCode: string;
   resourceCode: string;
   consumption: number;
+  /** Adjustment coefficient applied to the consumption (default 1). */
+  coefficient?: number;
 }
 
 export interface Category {
