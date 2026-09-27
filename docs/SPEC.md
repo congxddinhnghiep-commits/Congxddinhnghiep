@@ -94,5 +94,16 @@ Sheets: TH (Tổng hợp chi phí — with the project's legal basis (documents,
 - **C. Norm lookup and auto code suggestion**: code prefixes (AF.1, AF11), abbreviations (BT, BTCT, VK, CT, M250/B20, PCB40, đk ≤10mm), parameter extraction, unit compatibility as a hard filter with conversion, top-5 with confidence and "vì sao"; grid suggestion column, one-click accept, bulk "Gắn mã tự động" (threshold, default 0,8, preview); auto codes must be confirmed before the estimate can be approved; assistant command "gắn mã cho các công việc chưa có mã".
 - **D. Price books by region and period**: PriceBook (region = 34 tỉnh/thành after the 2025 merger, sub-area, issuer, document, month/quarter/year, type VL/NC/M/TH, VAT flag, delivery, source, draft/verified) with rows; project region + proposals; selection per resource type with priority; resolution manual → books → base (flagged); price source in the price tab and Excel THVT; Excel import with fuzzy matching and review list; price history and switching diff. Seed: one metadata-only HCMC book (0 rows).
 
+## Section F (skills construction-estimation-engine, du-toan-xay-dung-data-vn)
+- Safe quantity expression engine (AST whitelist, variables, %, limits; no eval) and multi-line QuantityLine per item incl. deductions and unit conversion (mm → m, m3 → 100m3, kg → t).
+- Pricing methods NORM_BASED / CUSTOM_GTT / MARKET_QUOTE with mandatory price source; GTT codes on import map to CUSTOM_GTT.
+- Legacy VNI / TCVN3 text detected per sheet and converted to Unicode on import; raw text kept.
+- Norm code canonicalisation AF11121 ↔ AF.11121 (raw kept).
+- #NAME? / #REF! / external workbook links flagged (FLAG_EXTERNAL_LINK_OR_BROKEN_FORMULA), never used silently.
+- Price book records follow data-contract.md (jurisdiction at issue vs current, area, vat_status, commercial terms, sha256, verification_status); province merger mapping from nguon-chinh-thuc.md.
+- Transport legs to site with no double counting.
+- Validation report screen covering the engine skill's mandatory checks.
+- Cost rules as versioned data; legacy percentage variants are reference-only, never defaults.
+
 ## Out of scope for Phase 1
 Thanh quyết toán, dự thầu nâng cao, đồng bộ nhiều người dùng thời gian thực, Electron installer (just prepare structure).

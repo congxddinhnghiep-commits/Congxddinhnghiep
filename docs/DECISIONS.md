@@ -161,3 +161,43 @@ Nguồn: `docs/LEGAL-UPDATE-2026.md` (đã xác minh metadata ngày 2026-09-27).
     thứ 2 ≥ 0,1, đơn vị tương thích); còn lại vào danh sách “cần xem lại” để gán tay hoặc bỏ qua. Mọi thay đổi dòng giá đưa bộ về nháp;
     chỉ xác minh được bộ có dòng giá. Chênh lệch khi đổi bộ tính trên chi phí trực tiếp trước hệ số (Knc/Km, gián tiếp…).
 
+## Section F – theo skill `construction-estimation-engine` và `du-toan-xay-dung-data-vn`
+
+57. **Parser khối lượng** tự viết: tokenizer → AST chỉ gồm số, biến, dấu âm, + − × ÷, ngoặc, % (không `eval`, không hàm, không
+    thuộc tính); giới hạn 500 ký tự, độ sâu 40, 400 nút. “x/×” chỉ là phép nhân khi đứng giữa số/ngoặc (biến tên X vẫn dùng được).
+    Số: “0,3” thập phân; “1,000,000,000” hoặc “1.000.000.000” (≥ 2 nhóm) là hàng nghìn; “1e9”. Parser cũ `evaluateFormula` (diễn giải
+    KL một dòng) được giữ để tương thích.
+58. **QuantityLine**: mỗi công tác có thể có nhiều dòng (diễn giải, biểu thức, biến, Cộng/Trừ, đơn vị dòng). KL công tác = Σ dấu × giá trị ×
+    hệ số quy đổi (mm/cm/dm/m và bình phương/lập phương, m3→100m3, kg→tấn). Giá trị âm chỉ hợp lệ trên dòng “Trừ”. Sửa KL tay sau đó
+    không xóa các dòng – báo cáo kiểm tra báo lệch.
+59. **Phương thức giá**: `NORM_BASED` (mặc định), `CUSTOM_GTT` (mã GTT/TT/“tạm tính” khi nhập hoặc chọn tay), `MARKET_QUOTE`
+    (nhà cung cấp, số, ngày, hiệu lực, VAT). Đơn giá nhập theo VL/NC/M; báo giá “đã gồm VAT” được quy về trước thuế (VAT chỉ cộng
+    một lần ở bảng tổng hợp). Công tác GTT/báo giá không được gợi ý mã và không bị ép vào định mức; thiếu nguồn giá → lỗi ở báo cáo kiểm tra.
+60. **Bảng mã cũ**: nhận diện theo từng sheet (đa số phiếu trên các ô có ký tự ngoài ASCII) giữa Unicode, VNI-Windows và TCVN3 (ABC);
+    chỉ chuyển khi sheet là VNI/TCVN3. Bản gốc lưu theo ô (`sheet.raw`) và trên công tác (`source_raw_text`), không ghi đè.
+    Bảng chuyển VNI/TCVN3 dựng theo quy ước phông phổ biến; đã kiểm với `parsed_xlsx_code_catalog.csv` (không còn ký tự dấu VNI).
+61. **Chuẩn hóa mã**: chỉ viết lại mã dạng 2 chữ + 5 số (+ hậu tố ngắn) thành `XX.99999…` – đúng quy ước của các bộ định mức đang
+    có (TT12/TT38); mã khác giữ nguyên và báo “không có trong bộ định mức”. Mã gốc luôn được giữ (`source_code`).
+62. **Ô lỗi / liên kết ngoài**: giá trị `#NAME?`, `#REF!`, `#VALUE!`… và công thức trỏ tới workbook khác (`[Book.xlsx]Sheet!A1`,
+    đường dẫn ổ đĩa) được gắn cờ `FLAG_EXTERNAL_LINK_OR_BROKEN_FORMULA` theo dòng; khối lượng lỗi → 0 kèm cảnh báo, không dùng im lặng.
+    Phần `xl/externalLinks` của file cũng được báo ở mức file.
+63. **Bộ giá theo `data-contract.md`**: thêm `jurisdiction_at_issue`, `source_file_url`, `source_sha256` (tính khi nhập file),
+    `verification_status` (verified / needs_review / not_verified / superseded), `transport_included`, `work_type`; dòng giá lưu
+    `description_original`, `unit_original`, `value_original`, `vat_status`, `source_locator`, `commercial_terms`, `verification_status`.
+    Endpoint `/price-books/:id/records` xuất đúng tên trường hợp đồng; trường không có dữ liệu để trống (“missing”), không phỏng đoán.
+64. **Sáp nhập tỉnh** (`data/province-mergers.json`, chỉ 4 trường hợp ghi trong `nguon-chinh-thuc.md`): bộ giá của tỉnh cũ phải khai
+    tỉnh kế thừa đúng và kỳ giá trước 01/07/2025; chỉ được đề xuất cho công trình có khu vực trùng tỉnh cũ (không áp cho toàn tỉnh mới).
+    Danh sách đề xuất trả kèm các bộ bị loại và lý do.
+65. **Vận chuyển đến công trình**: chặng vận chuyển theo tài nguyên và công trình; tiền/đơn vị = cự ly × cước × trọng lượng × hệ số + bốc dỡ
+    + phí. Chỉ cộng khi nguồn giá chưa gồm vận chuyển: giá gốc thư viện → cộng; bộ giá “chưa gồm”/“chưa rõ” → cộng (ghi chú khi chưa rõ);
+    bộ giá “đã gồm” và **giá nhập tay (coi là giá đến công trình)** → không cộng, ghi chú “tránh tính 2 lần”. Giá nguồn và phần vận chuyển
+    được lưu riêng trong nguồn giá.
+66. **Báo cáo kiểm tra** (`/projects/:id/validation`, tab “Kiểm tra”): 13 nhóm theo mục 6 của skill engine (đủ trường, KL = Σ dòng,
+    thành tiền = KL × đơn giá, đơn vị khớp định mức, hiệu lực định mức/bộ quy tắc, mã chưa giải quyết, GTT/báo giá có nguồn, nguồn giá tài
+    nguyên, tổng cha = con và chuỗi bảng tổng hợp, đối chiếu đơn giá với phân tích hao phí, hệ số bất thường/áp hai lần, ô lỗi/liên kết
+    ngoài, trùng lặp). Báo cáo không chặn duyệt dự toán (chỉ mã “tự động” chưa xác nhận mới chặn) – người duyệt tự đánh giá.
+67. **Bộ quy tắc chi phí dạng dữ liệu** (`CostRuleSet`, biểu thức đánh giá bằng parser an toàn, danh sách biến cho phép). Các biến thể tỷ lệ
+    cũ quan sát trong kho mẫu (TT 1,5%, C 6%, TL 5,5%, VAT 10%, Glt 1%…) nằm ở `data/cost-rules/legacy-observed.json` với
+    `status: reference_only` – **không bao giờ được chọn làm mặc định** (có test). Bảng tổng hợp thực tế vẫn theo bộ pháp lý của công trình.
+68. Toàn bộ `test_cases.json` của skill được chạy trong `packages/core/test/engine-skill.test.ts` (đọc trực tiếp file của skill).
+

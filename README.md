@@ -22,7 +22,7 @@ GT = C + TT → TL (Bảng 3.6) → GXDTT → GTGT → GXD, và dòng riêng **V
 Tổng dự toán có hai khoản dự phòng theo Phụ lục II TT 36/2026: GDP1 = G_TDP × kps (kps ≤ 5%) và
 GDP2 = Σ G_TDP,t × [(I_bq + ΔI)^t − 1] với lịch phân bổ giá trị theo năm/quý.
 Khi nâng cấp từ bản cũ, các công trình đã có được giữ ở bộ lịch sử nên số liệu không đổi.
-Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/UPDATE-2.md](docs/UPDATE-2.md), [docs/DECISIONS.md](docs/DECISIONS.md) mục 27–56.
+Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/UPDATE-2.md](docs/UPDATE-2.md), [docs/DECISIONS.md](docs/DECISIONS.md) mục 27–68.
 
 ## Tính năng (Phase 1)
 - Đăng nhập, phân quyền quản trị/người dùng, bắt buộc đổi mật khẩu lần đầu.
@@ -79,6 +79,21 @@ Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/UPDATE
 - Trong công trình → tab **Giá vật liệu/NC/Máy**: chọn tỉnh/thành (và khu vực) → phần mềm đề xuất các bộ cùng tỉnh có kỳ giá ≤ ngày lập giá →
   thêm bộ cho từng loại tài nguyên, sắp **ưu tiên** → **Xem chênh lệch giá** → **Áp dụng**. Thứ tự áp giá: giá nhập tay → bộ đơn giá theo ưu tiên →
   giá gốc (MẪU). Cột **Nguồn giá** cho biết giá lấy từ đâu (cả trong sheet THVT của file Excel); bấm tên tài nguyên để xem lịch sử giá theo kỳ.
+
+### 4. Bóc tách khối lượng, GTT/báo giá, vận chuyển và kiểm tra
+- Nút **⋯** ở cuối mỗi dòng dự toán mở hộp thoại công tác:
+  - **Bóc tách khối lượng**: nhiều dòng diễn giải, biểu thức an toàn (`13*5,4*0,1`, `(L+W)*2*H*N` với biến `L=6; W=4; H=3,3; N=2`, `12%`),
+    dòng **Trừ** cho lỗ mở, đơn vị dòng (vd. nhập mm3 → tự đổi ra m3). Khối lượng công tác = tổng các dòng.
+  - **Cách tính giá**: theo định mức, **GTT** (giá tạm tính/tự lập) hoặc **báo giá thị trường** (nhà cung cấp, số, ngày, hiệu lực, VAT) –
+    bắt buộc ghi nguồn giá.
+  - **Nguồn gốc**: file/sheet/dòng, mô tả và mã gốc, văn bản gốc nếu file dùng bảng mã cũ, cờ ô lỗi.
+- Nhập file cũ dùng **VNI** hoặc **TCVN3** được tự chuyển sang Unicode (bản gốc vẫn lưu); mã `AF11121` được chuẩn hóa thành `AF.11121`;
+  dòng mã **GTT** được tính theo giá trong file; ô `#NAME?`, `#REF!` hay công thức liên kết file khác được gắn cờ, không dùng im lặng.
+- Tab giá: nút 🚚 để khai báo các chặng **vận chuyển đến công trình**; phần mềm không cộng lại nếu nguồn giá đã gồm vận chuyển.
+- Tab **Kiểm tra**: báo cáo lỗi/cảnh báo theo các kiểm tra bắt buộc (khối lượng, đơn giá, đơn vị, hiệu lực định mức, mã chưa gắn, nguồn giá,
+  tổng hợp, hệ số bất thường, ô lỗi…).
+- Bộ đơn giá lưu thêm địa giới lúc ban hành (tỉnh cũ trước 01/07/2025), trạng thái xác minh, SHA-256 của file nguồn và xem được **bản ghi
+  dữ liệu** theo chuẩn `data-contract.md`.
 
 ## Cấu trúc thư mục
 ```
