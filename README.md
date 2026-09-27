@@ -3,9 +3,9 @@
 Phần mềm lập dự toán công trình xây dựng tại Việt Nam (chức năng lõi tương tự Dự toán F1/G8), chạy được **trên web**
 (đăng nhập từ trình duyệt bất kỳ) và **trên máy tính cá nhân** (cùng một mã nguồn), kèm **trợ lý AI** nhận lệnh tiếng Việt.
 
-> ⚠ Định mức/đơn giá kèm theo là **DỮ LIỆU MẪU**. Bảng tỷ lệ TT 36/2026 đang ở trạng thái **TẠM (provisional)** – phải đối chiếu
-> với bản PDF đã ký và phụ lục thay thế (CV 9947/BXD-VP) rồi đánh dấu “đã xác minh” tại màn hình **Căn cứ pháp lý** trước khi
-> dùng cho hồ sơ thật. Nạp định mức TT 38/2026 và bảng giá địa phương qua chức năng Nhập dữ liệu.
+> ⚠ Định mức và giá tài nguyên kèm theo là **DỮ LIỆU MẪU** (không lấy từ TT 38/2026 hay công bố giá nào). Hãy nạp định mức chính thức
+> (phụ lục TT 38/2026 thay thế theo CV 9947/BXD-VPB) và công bố giá địa phương qua chức năng Nhập dữ liệu / Bộ đơn giá.
+> Bảng tỷ lệ TT 36/2026 (Bảng 3.3–3.7) đã được đối chiếu và đánh dấu **đã xác minh**; quản trị viên có thể chuyển về TẠM tại **Căn cứ pháp lý**.
 
 ## Căn cứ pháp lý (cập nhật 27/09/2026)
 Mỗi công trình lưu một **bộ căn cứ pháp lý** và không bao giờ bị tự động đổi:
@@ -15,11 +15,14 @@ Mỗi công trình lưu một **bộ căn cứ pháp lý** và không bao giờ 
 | **TT 36/2026 + TT 38/2026** (hiện hành) | Ngày lập giá từ 01/07/2026 (mặc định) | Bảng 3.8 TT 36/2026 (đính chính QĐ 1538/QĐ-BXD) | Bộ `TT38_2026`, nhân công theo **nhóm** |
 | **TT 11/2021 + TT 12/2021** (lịch sử) | Ngày lập giá trước 01/07/2026 | Phương pháp Phase 1 | Bộ `TT12_2021`, nhân công theo cấp bậc |
 
-Bảng tổng hợp chi phí theo TT 36/2026: T (VL + NC×Knc + M×Km) → C (Bảng 3.3 theo T, hoặc Bảng 3.4 theo NC) → TT (Bảng 3.5) →
+Bảng 3.3 và 3.7 tra khoảng theo **chi phí xây dựng trước thuế của công trình trong TMĐT được duyệt** (nhập ở tab Cài đặt hệ số, đơn vị
+tỷ đồng); để trống thì phần mềm dùng giá trị dự toán và cảnh báo. Không nội suy giữa các khoảng.
+Bảng tổng hợp chi phí theo TT 36/2026: T (VL + NC×Knc + M×Km) → C (Bảng 3.3, hoặc Bảng 3.4 theo NC) → TT (Bảng 3.5) →
 GT = C + TT → TL (Bảng 3.6) → GXDTT → GTGT → GXD, và dòng riêng **V. Nhà tạm** = GXDTT × Bảng 3.7 × (1 + TGTGT).
-Tổng dự toán có hai khoản dự phòng (khối lượng phát sinh; trượt giá theo % hoặc theo thời gian và chỉ số giá xây dựng).
+Tổng dự toán có hai khoản dự phòng theo Phụ lục II TT 36/2026: GDP1 = G_TDP × kps (kps ≤ 5%) và
+GDP2 = Σ G_TDP,t × [(I_bq + ΔI)^t − 1] với lịch phân bổ giá trị theo năm/quý.
 Khi nâng cấp từ bản cũ, các công trình đã có được giữ ở bộ lịch sử nên số liệu không đổi.
-Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/DECISIONS.md](docs/DECISIONS.md) mục 27–38.
+Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/UPDATE-2.md](docs/UPDATE-2.md), [docs/DECISIONS.md](docs/DECISIONS.md) mục 27–56.
 
 ## Tính năng (Phase 1)
 - Đăng nhập, phân quyền quản trị/người dùng, bắt buộc đổi mật khẩu lần đầu.
@@ -45,12 +48,46 @@ Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/DECISI
   Khi thiếu thông tin hoặc có nhiều lựa chọn, trợ lý **hỏi lại bằng các nút bấm**; mọi thay đổi đều **xem trước** và chỉ thực hiện khi
   bấm **Xác nhận**; có **Hoàn tác**. Nếu đặt `ANTHROPIC_API_KEY`, trợ lý dùng Claude để hiểu câu lệnh tự do hơn.
 
+## Hướng dẫn nhanh các tính năng mới
+
+### 1. Nhập file dự toán / BOQ có sẵn (mọi mẫu Excel)
+1. Mở công trình → **⤓ Nhập dữ liệu** → loại dữ liệu “Dự toán / BOQ có sẵn” → chọn file `.xlsx`, `.xlsm`, `.xls` hoặc `.csv`
+   (hoặc chọn từ Google Drive).
+2. Phần mềm liệt kê các sheet kèm loại tự nhận diện (Dự toán chi tiết, Tổng hợp chi phí, Phân tích vật tư…) và chọn sẵn sheet dự toán.
+3. Kiểm tra **ánh xạ cột** (STT, Mã hiệu, Tên công việc, Đơn vị, Khối lượng, Đơn giá VL/NC/M…), dòng tiêu đề (1 hoặc 2 dòng) và bảng dòng:
+   mỗi dòng có nhãn *Hạng mục / Công việc / Cộng-Tổng (bỏ qua) / Ghi chú*, có thể đổi loại hoặc **Bỏ qua** từng dòng; cột cảnh báo nêu thiếu
+   đơn vị, khối lượng bằng 0, dòng trùng, đơn vị lạ, mã không có trong bộ định mức; cột gợi ý mã cho dòng chưa có mã.
+4. Tùy chọn: đặt tên **mẫu nhập** để lần sau file cùng mẫu tự nhận ánh xạ; bật **gắn mã tự động** với ngưỡng tin cậy.
+5. Bấm **Nhập**. Mỗi công việc giữ nguyên mô tả, khối lượng, đơn vị, mã và vị trí gốc (file / sheet / dòng) – rê chuột vào tên công việc để xem.
+   Nhập nhầm thì bấm **↶ Hoàn tác** ở khung trợ lý.
+
+### 2. Tra định mức và gắn mã tự động
+- Ô tra định mức (F3) nhận mã (`AF.1`, `AF11`), chữ có/không dấu và viết tắt: `BT`, `BTCT`, `VK`, `CT` (cốt thép), `M250`/`B20`, `PCB40`,
+  `đk ≤10mm`, `Ø16`, `dày 220`, `đất C2`…
+- Trên lưới dự toán, cột **Gợi ý / trạng thái mã** hiện mã đề xuất và độ tin cậy cho công việc chưa có mã: bấm để chấp nhận, hoặc ▾ để xem 5 gợi
+  ý kèm lý do (“vì sao”). Đơn vị phải tương thích (m3 ↔ 100m3, kg ↔ tấn được quy đổi tự động, khối lượng gốc vẫn được giữ).
+- **⚙ Gắn mã tự động**: chọn ngưỡng (mặc định 80%), xem trước danh sách rồi áp dụng. Công việc dưới ngưỡng giữ trạng thái “cần xem lại”.
+  Mã gắn tự động có nhãn “tự động · xác nhận” – phải xác nhận (từng dòng hoặc cả loạt) trước khi bấm **Duyệt dự toán**.
+- Trợ lý: gõ “gắn mã cho các công việc chưa có mã” (có thể thêm “ngưỡng 70%”).
+
+### 3. Bộ đơn giá theo khu vực và thời điểm
+- Menu **Bộ đơn giá**: quản trị viên thêm bộ (tỉnh/thành, khu vực, cơ quan công bố, số và ngày văn bản, kỳ tháng/quý/năm, loại VL/NC/Máy,
+  giá đã/chưa gồm VAT, điều kiện giao hàng, nguồn), rồi **nhập file công bố giá** (mọi mẫu Excel). Dòng khớp tài nguyên theo mã hoặc tên/quy cách;
+  dòng chưa khớp vào danh sách **cần xem lại** để gán tay hoặc bỏ qua. Kiểm tra xong bấm **Đánh dấu đã xác minh**.
+- Có sẵn một bộ **chỉ có thông tin văn bản** của Sở Xây dựng TP.HCM (công bố giá VLXD tháng 02/2026, 7563/TB-SXD-KTVLXD) – chưa có giá,
+  cần tải file chính thức tại soxaydung.hochiminhcity.gov.vn và nhập vào.
+- Trong công trình → tab **Giá vật liệu/NC/Máy**: chọn tỉnh/thành (và khu vực) → phần mềm đề xuất các bộ cùng tỉnh có kỳ giá ≤ ngày lập giá →
+  thêm bộ cho từng loại tài nguyên, sắp **ưu tiên** → **Xem chênh lệch giá** → **Áp dụng**. Thứ tự áp giá: giá nhập tay → bộ đơn giá theo ưu tiên →
+  giá gốc (MẪU). Cột **Nguồn giá** cho biết giá lấy từ đâu (cả trong sheet THVT của file Excel); bấm tên tài nguyên để xem lịch sử giá theo kỳ.
+
 ## Cấu trúc thư mục
 ```
 packages/core    Hàm tính toán thuần (đơn giá, tổng hợp chi phí, công thức, bộ hiểu lệnh tiếng Việt) + unit test
 packages/server  Express + SQLite (better-sqlite3), JWT, xuất/nhập Excel, API trợ lý
 packages/web     Giao diện React + Vite
 data/legal/      Sổ văn bản pháp lý và bảng tỷ lệ theo bộ pháp lý (tt36-2026.json, tt11-2021.json)
+data/regions.json  34 tỉnh/thành (sau sắp xếp 2025) cho danh sách chọn khu vực
+scripts/         make-fixtures.mjs – tạo các file Excel mẫu dùng cho test
 data/            dutoan.db (tạo khi chạy)
 docs/            SPEC.md, DECISIONS.md, LEGAL-UPDATE-2026.md, google-drive-setup.md
 desktop/         Khung Electron (Phase 2)

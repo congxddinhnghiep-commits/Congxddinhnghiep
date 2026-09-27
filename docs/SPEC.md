@@ -47,7 +47,7 @@ Cost summary per **TT 36/2026/TT-BXD, Phụ lục III, Bảng 3.8** (as correcte
 - V. GXDNT (nhà tạm để ở và điều hành thi công) = GXDTT × rate (Bảng 3.7, bracket by GXDTT, "theo tuyến" or "còn lại") × (1 + TGTGT) — separate line after VAT
 - Tổng dự toán: V = (GXD + GXDNT) + thiết bị + QLDA + tư vấn + chi phí khác; dự phòng Gdp1 = V × % (khối lượng/công việc phát sinh) and Gdp2 (trượt giá) = V × % or Σ_t (V/N) × [(1 + i)^t − 1] from duration N and chỉ số giá xây dựng i.
 
-Rate tables are **data** (`data/legal/tt36-2026.json`, `data/legal/tt11-2021.json`) with source, table number and status `provisional`; the app shows a warning banner until an admin marks each table verified (after checking the signed PDF and replacement appendices under CV 9947/BXD-VP). Bracket lookup uses "≤ upper bound" without interpolation unless interpolation is configured per table. Every summary line shows its formula and source (document, table, row, bracket, status).
+Rate tables are **data** (`data/legal/tt36-2026.json`, `data/legal/tt11-2021.json`) with source, table number and status. TT 36/2026 Bảng 3.3–3.7 are `verified` (Update 2 A1: PL III was not replaced by CV 9947/BXD-VPB); an admin can reset a table to `provisional`, which shows a warning banner. **Bracket base (Update 2 A1b)**: Bảng 3.3 and 3.7 are looked up by the công trình's chi phí XD trước thuế in the approved TMĐT (project field `gxdtt_tmdt`, tỷ đồng; fallback: the estimate's own GXDTT, iterated, with a warning), Bảng 3.4 by chi phí nhân công; no interpolation (opt-in only, with a warning). Bảng 3.5/3.6 missing rows use the parent loại công trình; TT rate can be overridden per hạng mục (công tác trong đường hầm). Dự phòng per PL II formulas 2.8 (kps ≤ 5%) and 2.9 (schedule per period, I_bq, ΔI). Every summary line shows its formula and source.
 
 The historical TT 11/2021 method (C, LT, TT, GTk inside GT; G; Gxd) is kept unchanged for historical projects; its sample rates are marked GIÁ TRỊ MẪU.
 
@@ -88,6 +88,11 @@ Sheets: TH (Tổng hợp chi phí — with the project's legal basis (documents,
 - Unit tests for the calculation engine (hand-checked example with numbers) and for the rule-based parser (at least 15 Vietnamese sentences).
 - README.md in Vietnamese: how to run in Codespaces, locally on Windows, and how to deploy to the web.
 - Commit in small logical steps with clear messages; push to origin main when done.
+
+## Update 2 features (docs/UPDATE-2.md)
+- **B. Import existing estimate files (any layout)**: .xlsx/.xlsm/.xls/.csv; sheet list with auto-classification and 30-row preview; header detection (incl. merged 2-row headers, VN with/without diacritics, Chinese headers); row classification (hạng mục, công việc, Cộng/Tổng excluded, notes, numbering rows); VN/EN number formats, cached formula values, merged cells; mapping review with editable columns, row-type override, warnings; provenance (file/sheet/row/description/quantity/unit/code) on every item; code check + suggestions; reusable import templates by header fingerprint.
+- **C. Norm lookup and auto code suggestion**: code prefixes (AF.1, AF11), abbreviations (BT, BTCT, VK, CT, M250/B20, PCB40, đk ≤10mm), parameter extraction, unit compatibility as a hard filter with conversion, top-5 with confidence and "vì sao"; grid suggestion column, one-click accept, bulk "Gắn mã tự động" (threshold, default 0,8, preview); auto codes must be confirmed before the estimate can be approved; assistant command "gắn mã cho các công việc chưa có mã".
+- **D. Price books by region and period**: PriceBook (region = 34 tỉnh/thành after the 2025 merger, sub-area, issuer, document, month/quarter/year, type VL/NC/M/TH, VAT flag, delivery, source, draft/verified) with rows; project region + proposals; selection per resource type with priority; resolution manual → books → base (flagged); price source in the price tab and Excel THVT; Excel import with fuzzy matching and review list; price history and switching diff. Seed: one metadata-only HCMC book (0 rows).
 
 ## Out of scope for Phase 1
 Thanh quyết toán, dự thầu nâng cao, đồng bộ nhiều người dùng thời gian thực, Electron installer (just prepare structure).
