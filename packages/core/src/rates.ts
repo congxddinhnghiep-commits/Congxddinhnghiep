@@ -1,6 +1,6 @@
 import type { BuildingType, CostSettings } from './types.js';
 
-/** Shape of data/rates-default.json */
+/** Legacy (TT 11/2021) rates shape, built from data/legal/tt11-2021.json by tt11RatesTable(). */
 export interface RatesTable {
   _note: string;
   /** Upper bounds (VND) of each cost bracket; the last bracket is open-ended. */

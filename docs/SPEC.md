@@ -17,28 +17,42 @@ All UI text MUST be Vietnamese (with proper diacritics). Code/comments in Englis
 
 ## Data model
 - users(id, username, password_hash, full_name, role)
-- projects(id, owner_id, name, owner_name/chủ đầu tư, location, building_type [dân dụng | công nghiệp | giao thông | NN&PTNT | hạ tầng kỹ thuật], price_base_date, vat_rate, created_at)
+- projects(id, owner_id, name, owner_name/chủ đầu tư, location, building_type [dân dụng | công nghiệp | giao thông | NN&PTNT | hạ tầng kỹ thuật], price_base_date, price_date (ISO), legal_set [TT36_2026 | TT11_2021], vat_rate, created_at)
 - categories / hạng mục (id, project_id, name, order)
 - estimate_items (id, category_id, order, norm_code, name, unit, quantity, quantity_formula/diễn giải khối lượng e.g. "2*3.5*0.3", note)
 - norms / định mức (code, name, unit, group) + norm_resources (norm_code, resource_code, consumption)
 - resources / tài nguyên (code, name, unit, type [VL | NC | M], base_price)
 - project_prices (project_id, resource_code, price)  → giá vật liệu/nhân công/máy tại thời điểm lập (overrides base price)
 - cost_settings per project (rates below, editable)
+- norms / norm_resources are versioned by `dataset` (TT38_2026 current, TT12_2021 historical); a project uses the dataset of its legal set
+- rate_table_status (legal_set, table_id, status provisional|verified, interpolation, verified_by, verified_at)
 
 ## Calculation engine (pure functions in `packages/core`, fully unit-tested)
 Per item: VL = Σ(consumption × price) for type VL; same for NC, M. Unit price (đơn giá) = VL + NC + M; amount = quantity × unit price. Support resource-analysis (phân tích vật tư) and resource summary (tổng hợp vật tư).
 
-Cost summary per Thông tư 11/2021/TT-BXD (as amended by TT 09/2024/TT-BXD), "Bảng tổng hợp chi phí xây dựng":
-- T = VL + NC + M (chi phí trực tiếp)
-- GT = C + LT + TT + GTk  (chi phí gián tiếp: chi phí chung, lán trại, một số công việc không xác định KL từ thiết kế, chi phí gián tiếp khác) — each = T × rate (C may be on T or NC per building type; make the base configurable)
-- TL = (T + GT) × rate  (thu nhập chịu thuế tính trước)
-- G = T + GT + TL  (dự toán trước thuế)
-- GTGT = G × vat_rate (default 8%, configurable 8/10%)
-- Gxd = G + GTGT
-- Tổng dự toán (optional sheet): Gxd + thiết bị + QLDA + tư vấn + chi phí khác + dự phòng (KL phát sinh %, trượt giá %).
-Default rates: put them in `data/rates-default.json` by building type and cost bracket, CLEARLY marked "GIÁ TRỊ MẪU – cần kiểm tra lại theo Phụ lục TT11/2021 & TT09/2024". User can edit per project. Show rate source/formula next to each line.
+### Legal sets (updated 2026-09-27 — see docs/LEGAL-UPDATE-2026.md)
+Each project stores a **legal set**; it is never changed automatically (switching requires explicit confirmation and recalculates).
+- **TT 36/2026 + TT 38/2026** (current) — default when the price date is on/after 2026-07-01 (or empty).
+- **TT 11/2021 + TT 12/2021** (historical) — for price dates before 2026-07-01. Databases from Phase 1 are migrated with all existing projects pinned to this set so their results do not change silently.
+
+Cost summary per **TT 36/2026/TT-BXD, Phụ lục III, Bảng 3.8** (as corrected by QĐ 1538/QĐ-BXD):
+- VL = Σ Qj × Dj_vl; NC = Σ Qj × Dj_nc × Knc; M = Σ Qj × Dj_m × Km
+  (Knc = 1 + tỷ lệ làm đêm × tỷ lệ chênh lệch đơn giá đêm; Km = 1 + g × (Knc − 1), g = tỷ trọng tiền lương trong giá ca máy)
+- T = VL + NC + M
+- C = T × rate (Bảng 3.3, bracket by T) — or NC × rate (Bảng 3.4, bracket by NC) for the listed work types
+- TT = T × rate (Bảng 3.5)
+- GT = C + TT
+- TL = (T + GT) × rate (Bảng 3.6)
+- GXDTT = T + GT + TL; GTGT = GXDTT × TGTGT (8/10%); GXD = GXDTT + GTGT
+- V. GXDNT (nhà tạm để ở và điều hành thi công) = GXDTT × rate (Bảng 3.7, bracket by GXDTT, "theo tuyến" or "còn lại") × (1 + TGTGT) — separate line after VAT
+- Tổng dự toán: V = (GXD + GXDNT) + thiết bị + QLDA + tư vấn + chi phí khác; dự phòng Gdp1 = V × % (khối lượng/công việc phát sinh) and Gdp2 (trượt giá) = V × % or Σ_t (V/N) × [(1 + i)^t − 1] from duration N and chỉ số giá xây dựng i.
+
+Rate tables are **data** (`data/legal/tt36-2026.json`, `data/legal/tt11-2021.json`) with source, table number and status `provisional`; the app shows a warning banner until an admin marks each table verified (after checking the signed PDF and replacement appendices under CV 9947/BXD-VP). Bracket lookup uses "≤ upper bound" without interpolation unless interpolation is configured per table. Every summary line shows its formula and source (document, table, row, bracket, status).
+
+The historical TT 11/2021 method (C, LT, TT, GTk inside GT; G; Gxd) is kept unchanged for historical projects; its sample rates are marked GIÁ TRỊ MẪU.
 
 ## Sample data (seed)
+- Labour resources in the current norm dataset use **nhóm nhân công** (e.g. "Nhân công nhóm 3") instead of cấp bậc thợ (TT 38/2026); the historical dataset keeps cấp bậc thợ.
 - Seed ~40 common norm codes (bê tông lót, bê tông móng/cột/dầm/sàn, cốt thép, ván khuôn, xây gạch, trát, đào đất, đắp đất, sơn, lát nền, ép cọc...) with resources and sample prices. Mark every seeded record `is_sample=1` and show a banner "Dữ liệu định mức/đơn giá MẪU – thay bằng dữ liệu chính thức".
 - Provide an importer for official norm/price data from Excel (column mapping dialog), so real định mức 12/2021 and provincial price books can be loaded later.
 - Seed admin user from env `ADMIN_USER` / `ADMIN_PASS` (default admin/admin123 only in dev, force change on first login).
@@ -49,10 +63,11 @@ Default rates: put them in `data/rates-default.json` by building type and cost b
 3. Công trình: tabs — "Dự toán chi tiết" (grid by hạng mục), "Giá vật liệu/NC/Máy", "Phân tích vật tư", "Tổng hợp vật tư", "Tổng hợp chi phí", "Cài đặt hệ số".
 4. Norm search dialog (tìm theo mã hoặc tên, có dấu/không dấu).
 5. AI assistant side panel (see below).
-6. Import panel: "Từ máy tính" (upload .xlsx/.csv; when running locally also accept an absolute path) and "Từ Google Drive".
+6. Import panel: "Từ máy tính" (upload .xlsx/.csv; when running locally also accept an absolute path) and "Từ Google Drive". Norm import targets a dataset (TT38_2026 / TT12_2021).
+7. Căn cứ pháp lý (legal-basis register): documents with number, issuer, dates, status and official source; legal sets; rate tables with source/table number/status, admin "mark verified" and interpolation switch.
 
 ## Excel export (one workbook, Vietnamese template style)
-Sheets: TH (Tổng hợp chi phí), DTCT (Dự toán chi tiết), PTVT (Phân tích vật tư), THVT (Tổng hợp vật tư), CLVT (Chênh lệch giá vật tư). Use real Excel formulas (not hard-coded numbers) so the file stays editable, A4 print setup, Times New Roman, number format #,##0.
+Sheets: TH (Tổng hợp chi phí — with the project's legal basis (documents, dates, sources), a provisional-rates warning and a "Nguồn / căn cứ" column per line), DTCT (Dự toán chi tiết), PTVT (Phân tích vật tư), THVT (Tổng hợp vật tư), CLVT (Chênh lệch giá vật tư). Use real Excel formulas (not hard-coded numbers) so the file stays editable, A4 print setup, Times New Roman, number format #,##0.
 
 ## AI assistant (Phase 1: no LLM required)
 - Architecture: `AssistantEngine` with an `IntentProvider` interface.

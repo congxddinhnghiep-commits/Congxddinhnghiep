@@ -16,13 +16,13 @@ Spec (docs/SPEC.md) để ngỏ một số điểm. Dưới đây là các quy�
    bê tông lồng nhau, “vật liệu khác %”, “máy khác %”, hệ số điều chỉnh nhân công/máy. Định mức bê tông mẫu đã quy đổi sẵn cấp phối.
    → Phase 2 cần bổ sung khi nạp Định mức 12/2021 chính thức.
 7. **Không làm tròn trong tính toán**; chỉ làm tròn khi hiển thị (#,##0). File Excel dùng công thức nên kết quả khớp với Excel.
-8. **Nhóm quy mô chi phí** để chọn tỷ lệ mặc định được xác định theo **chi phí trực tiếp T** (tránh vòng lặp khi G phụ thuộc chính tỷ lệ).
-   Các tỷ lệ trong `data/rates-default.json` là **GIÁ TRỊ MẪU** – phải kiểm tra lại theo Phụ lục TT11/2021 & TT09/2024.
+8. *(Bộ lịch sử TT 11/2021)* Nhóm quy mô chi phí được xác định theo **chi phí trực tiếp T**. Tỷ lệ của bộ này (nay ở
+   `data/legal/tt11-2021.json`) vẫn là **GIÁ TRỊ MẪU** Phase 1. Với TT 36/2026 xem mục 27–29.
 9. **Tỷ lệ lưu dưới dạng %** (6,5 nghĩa là 6,5%). Cơ sở tính chi phí chung chọn được T hoặc NC. Người dùng có thể tắt “Tự động” để nhập tay.
 10. **Giá**: thư viện có *giá gốc* (`resources.base_price`); mỗi công trình có *giá công trình* ghi đè (`project_prices`).
     Chênh lệch giá (CLVT) = (giá công trình − giá gốc) × khối lượng.
-11. **Tổng dự toán**: dự phòng khối lượng phát sinh và dự phòng trượt giá đều tính trên (Gxd + Gtb + Gqlda + Gtv + Gk) × tỷ lệ
-    (đơn giản hóa; chưa tính trượt giá theo chỉ số và thời gian thực hiện).
+11. **Tổng dự toán** (bộ lịch sử): dự phòng khối lượng phát sinh và trượt giá đều = (Gxd + Gtb + Gqlda + Gtv + Gk) × tỷ lệ.
+    Với TT 36/2026 xem mục 32.
 12. **Diễn giải khối lượng**: bộ phân tích công thức an toàn (không dùng `eval`): + − × / ^, ngoặc, “x” là nhân, dấu phẩy thập phân,
     chú thích trong `[...]` hoặc `"..."` được bỏ qua.
 
@@ -56,6 +56,47 @@ Spec (docs/SPEC.md) để ngỏ một số điểm. Dưới đây là các quy�
     (Google Sheets xuất sang .xlsx). Scope `drive.file` khi có `GOOGLE_APP_ID`, ngược lại `drive.readonly`.
 
 ## Dữ liệu mẫu
-25. 43 định mức và 37 tài nguyên mẫu, mã hiệu theo kiểu Định mức 12/2021 nhưng **hao phí và giá chỉ mang tính minh họa**
+25. 43 định mức mẫu cho mỗi bộ định mức (TT38_2026 và TT12_2021) và 40 tài nguyên mẫu, mã hiệu theo kiểu sách định mức nhưng **hao phí và giá chỉ mang tính minh họa**
     (`is_sample = 1`, có banner cảnh báo). Công trình mới được tạo sẵn hạng mục “Hạng mục chung”.
 26. Electron: chỉ chuẩn bị khung (`desktop/`), chưa nằm trong workspaces để không phải tải Electron khi cài đặt.
+
+## Cập nhật pháp lý 2026 (TT 36/2026, TT 37/2026, TT 38/2026 – QĐ 1538/QĐ-BXD)
+Nguồn: `docs/LEGAL-UPDATE-2026.md` (đã xác minh metadata ngày 2026-09-27).
+
+27. **Bộ pháp lý có phiên bản**: `TT36_2026` (“TT 36/2026 + TT 38/2026”, hiện hành) và `TT11_2021` (“TT 11/2021 + TT 12/2021”, lịch sử).
+    Mỗi công trình lưu `legal_set`. Mặc định theo **ngày lập giá** (`price_date`, ISO): từ 2026-07-01 → TT36; trước đó → TT11;
+    để trống → TT36 (quy định tại thời điểm tạo). Ghi chú thời điểm giá dạng chữ (“Quý III/2026”) giữ ở trường riêng.
+28. **Không tính lại ngầm**: khi nâng cấp CSDL Phase 1, mọi công trình đã có được gán `TT11_2021` và định mức cũ chuyển sang bộ
+    `TT12_2021`, nên kết quả không đổi (có test). Đổi bộ pháp lý chỉ qua thao tác có xác nhận (API trả 409 nếu thiếu
+    `confirmLegalSetChange`); khi đổi, hệ số được đặt lại theo mặc định của bộ mới, các khoản nhập tay (thiết bị, QLDA…) được giữ.
+    Nếu ngày lập giá không khớp bộ pháp lý, hiển thị cảnh báo chứ không tự đổi.
+29. **Engine TT 36/2026 theo Bảng 3.8** (đã đính chính): T; C = T × Bảng 3.3 hoặc NC × Bảng 3.4; TT = T × Bảng 3.5; GT = C + TT;
+    TL = (T + GT) × Bảng 3.6; GXDTT; GTGT; GXD; dòng V riêng GXDNT = GXDTT × Bảng 3.7 × (1 + TGTGT).
+    Khoảng tra: Bảng 3.3 theo T, Bảng 3.4 theo NC (sau Knc), Bảng 3.7 theo GXDTT. “Tổng chi phí xây dựng” chuyển sang tổng dự toán
+    = GXD + GXDNT.
+30. **Knc, Km**: Knc = 1 + tỷ lệ làm đêm × tỷ lệ chênh lệch đơn giá đêm; Km = 1 + g × (Knc − 1). Nhập theo % ở cài đặt công trình.
+    Áp dụng ở bảng tổng hợp (NC = Σ NC chi tiết × Knc); các bảng chi tiết/PTVT vẫn hiển thị giá trị chưa nhân hệ số. Trong Excel,
+    dòng NC/M ở sheet TH = tổng DTCT × ô hệ số.
+31. **Bảng tỷ lệ là dữ liệu** (`data/legal/tt36-2026.json`): mỗi bảng có số hiệu, tiêu đề, nguồn, cơ sở tra, các khoảng, trạng thái.
+    Giá trị lấy nguyên từ LEGAL-UPDATE-2026 (trích tự động) nên trạng thái mặc định là **`provisional`**; banner cảnh báo hiển thị
+    tới khi quản trị viên đánh dấu “đã xác minh” từng bảng (lưu ở bảng `rate_table_status` kèm người/thời điểm – không sửa file).
+    Tra khoảng dùng biên “≤”, **không nội suy**; nội suy tuyến tính chỉ khi bật cho từng bảng (khi văn bản yêu cầu).
+    Ứng dụng không cho sửa giá trị tỷ lệ trên giao diện; muốn sửa phải sửa file dữ liệu (có lịch sử git).
+32. **Hai khoản dự phòng**: Gdp1 = V × tỷ lệ; Gdp2 = V × tỷ lệ hoặc Σ_t (V/N) × [(1 + i)^t − 1] với N năm (làm tròn, ≥ 1) phân bổ
+    đều, i = chỉ số giá xây dựng bình quân/năm. V = GXD + GXDNT + thiết bị + QLDA + tư vấn + khác (không gồm dự phòng).
+    Công thức theo chỉ số là cách hiểu phổ biến của phương pháp trước đây – **cần đối chiếu nội dung đã đính chính của TT 36/2026**.
+33. **Ánh xạ dòng khi bảng thiếu dòng**: Bảng 3.5/3.6 không có dòng “Tu bổ, phục hồi di tích” và các dòng “hầm” riêng ở Bảng 3.6;
+    tạm dùng dòng gần nhất (dân dụng / ngành tương ứng) và **hiển thị cảnh báo**. Có thể chọn dòng Bảng 3.6 thủ công; lắp đặt
+    thiết bị (Bảng 3.4 “lap_dat”) mặc định dùng dòng TL “Lắp đặt thiết bị công nghệ / đường dây điện”.
+    Mặc định “công trình theo tuyến” (Bảng 3.7) = bật cho loại Giao thông, tắt cho loại khác – người dùng chỉnh được.
+34. **Định mức có phiên bản** theo `dataset` (khóa chính dataset + mã): `TT38_2026` và `TT12_2021`. Công trình tra định mức theo bộ
+    của bộ pháp lý; nhập định mức chọn bộ đích, không ghi đè bộ khác.
+35. **Nhóm nhân công**: định mức mẫu TT38 dùng tài nguyên “Nhân công nhóm 2/3/4”; bộ TT12 giữ “Nhân công bậc x/7”. Việc gán
+    bậc → nhóm trong dữ liệu mẫu chỉ để minh họa, **không** tra từ TT 38/2026. Giá nhân công nhóm là giá mẫu.
+36. **Sổ căn cứ pháp lý** (`data/legal/documents.json`, màn hình “Căn cứ pháp lý”): số hiệu, cơ quan, ngày ban hành/hiệu lực,
+    tình trạng, nguồn chính thức. Văn bản lịch sử (TT 11/2021, TT 12/2021, TT 09/2024) chưa được xác minh lại nên ngày để trống
+    và gắn nhãn “chưa xác minh” thay vì điền theo trí nhớ.
+37. **Excel TH**: đầu sheet liệt kê bộ pháp lý và các văn bản (số hiệu, ngày, nguồn), cảnh báo khi bảng tỷ lệ còn TẠM; thêm cột
+    “Nguồn / căn cứ” cho từng dòng; mọi dòng là công thức Excel sinh từ biểu thức của engine (dùng chung cho TT36 và TT11).
+38. ClaudeProvider/trợ lý không đổi: trợ lý chỉ thao tác trên dự toán; không được đổi bộ pháp lý hay đánh dấu xác minh bảng tỷ lệ.
+
