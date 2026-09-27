@@ -1,0 +1,15 @@
+{
+  "name": "DUTOAN-AI",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm",
+  "postCreateCommand": "npm install && npm run build",
+  "forwardPorts": [3000, 5173],
+  "portsAttributes": {
+    "3000": { "label": "DUTOAN-AI (npm start)", "onAutoForward": "openBrowser" },
+    "5173": { "label": "Vite dev server (npm run dev)", "onAutoForward": "notify" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode", "vitest.explorer"]
+    }
+  }
+}
