@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS projects (
   price_base_date TEXT NOT NULL DEFAULT '',
   vat_rate REAL NOT NULL DEFAULT 8,
   cost_settings TEXT,
+  legal_set TEXT NOT NULL DEFAULT 'TT36_2026',
+  price_date TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -49,12 +51,14 @@ CREATE TABLE IF NOT EXISTS estimate_items (
 );
 
 CREATE TABLE IF NOT EXISTS norms (
-  code TEXT PRIMARY KEY,
+  dataset TEXT NOT NULL,
+  code TEXT NOT NULL,
   name TEXT NOT NULL,
   unit TEXT NOT NULL,
   grp TEXT NOT NULL DEFAULT '',
   name_search TEXT NOT NULL DEFAULT '',
-  is_sample INTEGER NOT NULL DEFAULT 0
+  is_sample INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (dataset, code)
 );
 
 CREATE TABLE IF NOT EXISTS resources (
@@ -68,11 +72,24 @@ CREATE TABLE IF NOT EXISTS resources (
 );
 
 CREATE TABLE IF NOT EXISTS norm_resources (
-  norm_code TEXT NOT NULL REFERENCES norms(code) ON DELETE CASCADE,
+  dataset TEXT NOT NULL,
+  norm_code TEXT NOT NULL,
   resource_code TEXT NOT NULL REFERENCES resources(code),
   consumption REAL NOT NULL,
   is_sample INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (norm_code, resource_code)
+  PRIMARY KEY (dataset, norm_code, resource_code),
+  FOREIGN KEY (dataset, norm_code) REFERENCES norms(dataset, code) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS rate_table_status (
+  legal_set TEXT NOT NULL,
+  table_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'provisional' CHECK (status IN ('provisional', 'verified')),
+  interpolation TEXT CHECK (interpolation IN ('none', 'linear')),
+  verified_by TEXT,
+  verified_at TEXT,
+  note TEXT,
+  PRIMARY KEY (legal_set, table_id)
 );
 
 CREATE TABLE IF NOT EXISTS project_prices (
@@ -95,8 +112,41 @@ CREATE TABLE IF NOT EXISTS assistant_history (
 
 CREATE INDEX IF NOT EXISTS idx_items_category ON estimate_items(category_id);
 CREATE INDEX IF NOT EXISTS idx_categories_project ON categories(project_id);
-CREATE INDEX IF NOT EXISTS idx_norm_resources_norm ON norm_resources(norm_code);
 `;
+
+const columns = (db: DB, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+
+/**
+ * Upgrade a Phase 1 database in place:
+ * - projects get a legal set; existing projects are pinned to the historical TT11/2021 set so
+ *   their results do not change silently;
+ * - norms become versioned by dataset (existing norms → TT12_2021) instead of being overwritten.
+ */
+export function migrate(db: DB): void {
+  const pcols = columns(db, 'projects');
+  if (!pcols.includes('legal_set')) {
+    db.exec(`ALTER TABLE projects ADD COLUMN legal_set TEXT`);
+    db.exec(`UPDATE projects SET legal_set = 'TT11_2021' WHERE legal_set IS NULL`);
+  }
+  if (!pcols.includes('price_date')) db.exec(`ALTER TABLE projects ADD COLUMN price_date TEXT`);
+
+  if (!columns(db, 'norms').includes('dataset')) {
+    db.pragma('foreign_keys = OFF');
+    db.transaction(() => {
+      db.exec(`ALTER TABLE norm_resources RENAME TO norm_resources_v1`);
+      db.exec(`ALTER TABLE norms RENAME TO norms_v1`);
+      db.exec(SCHEMA);
+      db.exec(`INSERT INTO norms (dataset, code, name, unit, grp, name_search, is_sample)
+               SELECT 'TT12_2021', code, name, unit, grp, name_search, is_sample FROM norms_v1`);
+      db.exec(`INSERT INTO norm_resources (dataset, norm_code, resource_code, consumption, is_sample)
+               SELECT 'TT12_2021', norm_code, resource_code, consumption, is_sample FROM norm_resources_v1`);
+      db.exec(`DROP TABLE norm_resources_v1`);
+      db.exec(`DROP TABLE norms_v1`);
+    })();
+    db.pragma('foreign_keys = ON');
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_norm_resources_norm ON norm_resources(dataset, norm_code)`);
+}
 
 export function openDb(file: string): DB {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -104,5 +154,6 @@ export function openDb(file: string): DB {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }

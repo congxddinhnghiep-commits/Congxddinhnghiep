@@ -1,24 +1,22 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import {
-  computeCostSummary,
   computeEstimate,
-  computeTotalEstimate,
-  effectiveSettings,
+  computeProjectCost,
+  defaultLegalSetFor,
+  legalSetDateWarning,
   normalizeText,
   searchByCodeOrName,
   type BuildingType,
   type Category,
-  type CostSettings,
   type EstimateItem,
+  type LegalSetId,
   type Norm,
   type NormResource,
-  type RatesTable,
+  type ProjectCostSettings,
   type Resource,
   type ResourceType,
 } from '@dutoan/core';
-import { DATA_DIR } from './config.js';
 import type { DB } from './db.js';
+import type { LegalService } from './legal.js';
 
 export class HttpError extends Error {
   constructor(
@@ -29,11 +27,6 @@ export class HttpError extends Error {
   }
 }
 
-let ratesCache: RatesTable | null = null;
-export function ratesTable(): RatesTable {
-  if (!ratesCache) ratesCache = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'rates-default.json'), 'utf8'));
-  return ratesCache!;
-}
 
 export interface ProjectRow {
   id: number;
@@ -45,6 +38,8 @@ export interface ProjectRow {
   price_base_date: string;
   vat_rate: number;
   cost_settings: string | null;
+  legal_set: LegalSetId | null;
+  price_date: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -58,7 +53,11 @@ export interface Project {
   buildingType: BuildingType;
   priceBaseDate: string;
   vatRate: number;
-  costSettings: Partial<CostSettings> | null;
+  costSettings: ProjectCostSettings | null;
+  /** Legal set pinned to the project (never changed automatically). */
+  legalSet: LegalSetId;
+  /** ISO price date used to pick the default legal set. */
+  priceDate: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -73,6 +72,8 @@ export const toProject = (r: ProjectRow): Project => ({
   priceBaseDate: r.price_base_date,
   vatRate: r.vat_rate,
   costSettings: r.cost_settings ? JSON.parse(r.cost_settings) : null,
+  legalSet: r.legal_set ?? 'TT11_2021',
+  priceDate: r.price_date,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -118,7 +119,15 @@ const toResource = (r: ResourceRow): Resource & { isSample: boolean } => ({
 });
 
 export class Repo {
-  constructor(readonly db: DB) {}
+  constructor(
+    readonly db: DB,
+    readonly legal: LegalService,
+  ) {}
+
+  /** Norm dataset of the project's legal set (TT38_2026 or TT12_2021). */
+  datasetOf(projectId: number): string {
+    return this.legal.get(this.getProject(projectId)!.legalSet).normDataset;
+  }
 
   // ---------------- projects ----------------
   listProjects(userId: number, isAdmin: boolean): Project[] {
@@ -143,8 +152,8 @@ export class Repo {
   createProject(ownerId: number, data: Partial<Project>): Project {
     const info = this.db
       .prepare(
-        `INSERT INTO projects (owner_id, name, owner_name, location, building_type, price_base_date, vat_rate)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO projects (owner_id, name, owner_name, location, building_type, price_base_date, vat_rate, legal_set, price_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         ownerId,
@@ -154,6 +163,8 @@ export class Repo {
         data.buildingType ?? 'dan_dung',
         data.priceBaseDate ?? '',
         data.vatRate ?? 8,
+        data.legalSet ?? defaultLegalSetFor(data.priceDate),
+        data.priceDate || null,
       );
     return this.getProject(Number(info.lastInsertRowid))!;
   }
@@ -164,7 +175,7 @@ export class Repo {
     this.db
       .prepare(
         `UPDATE projects SET name = ?, owner_name = ?, location = ?, building_type = ?, price_base_date = ?,
-         vat_rate = ?, cost_settings = ?, updated_at = datetime('now') WHERE id = ?`,
+         vat_rate = ?, cost_settings = ?, legal_set = ?, price_date = ?, updated_at = datetime('now') WHERE id = ?`,
       )
       .run(
         next.name,
@@ -174,6 +185,8 @@ export class Repo {
         next.priceBaseDate,
         next.vatRate,
         next.costSettings ? JSON.stringify(next.costSettings) : null,
+        next.legalSet,
+        next.priceDate || null,
         id,
       );
     return this.getProject(id)!;
@@ -272,7 +285,7 @@ export class Repo {
   ): EstimateItem {
     this.getCategory(projectId, data.categoryId);
     const code = (data.normCode ?? '').trim().toUpperCase();
-    const norm = code ? this.getNorm(code) : undefined;
+    const norm = code ? this.getNorm(code, this.datasetOf(projectId)) : undefined;
     const max = (this.db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM estimate_items WHERE category_id = ?').get(data.categoryId) as { m: number }).m;
     const info = this.db
       .prepare(
@@ -299,7 +312,7 @@ export class Repo {
     // Changing the norm code re-fills name and unit from the norm library.
     if (data.normCode !== undefined && data.normCode.trim().toUpperCase() !== cur.normCode) {
       next.normCode = data.normCode.trim().toUpperCase();
-      const norm = this.getNorm(next.normCode);
+      const norm = this.getNorm(next.normCode, this.datasetOf(projectId));
       if (norm) {
         next.normCode = norm.code;
         if (data.name === undefined) next.name = norm.name;
@@ -324,28 +337,28 @@ export class Repo {
   }
 
   // ---------------- norms & resources ----------------
-  getNorm(code: string): Norm | undefined {
-    const r = this.db.prepare('SELECT code, name, unit, grp FROM norms WHERE code = ? COLLATE NOCASE').get(code) as
+  getNorm(code: string, dataset: string): Norm | undefined {
+    const r = this.db.prepare('SELECT code, name, unit, grp FROM norms WHERE dataset = ? AND code = ? COLLATE NOCASE').get(dataset, code) as
       | { code: string; name: string; unit: string; grp: string }
       | undefined;
     return r && { code: r.code, name: r.name, unit: r.unit, group: r.grp };
   }
 
-  getNormResources(code: string): (NormResource & Resource)[] {
+  getNormResources(code: string, dataset: string): (NormResource & Resource)[] {
     return (
       this.db
         .prepare(
           `SELECT nr.norm_code, nr.resource_code, nr.consumption, r.* FROM norm_resources nr
-           JOIN resources r ON r.code = nr.resource_code WHERE nr.norm_code = ?
+           JOIN resources r ON r.code = nr.resource_code WHERE nr.dataset = ? AND nr.norm_code = ?
            ORDER BY CASE r.type WHEN 'VL' THEN 0 WHEN 'NC' THEN 1 ELSE 2 END, r.code`,
         )
-        .all(code) as (ResourceRow & { norm_code: string; resource_code: string; consumption: number })[]
+        .all(dataset, code) as (ResourceRow & { norm_code: string; resource_code: string; consumption: number })[]
     ).map((r) => ({ ...toResource(r), normCode: r.norm_code, resourceCode: r.resource_code, consumption: r.consumption }));
   }
 
   /** Diacritic-insensitive search by code or name. */
-  searchNorms(query: string, limit = 30): Norm[] {
-    const all = this.db.prepare('SELECT code, name, unit, grp FROM norms').all() as { code: string; name: string; unit: string; grp: string }[];
+  searchNorms(query: string, dataset: string, limit = 30): Norm[] {
+    const all = this.db.prepare('SELECT code, name, unit, grp FROM norms WHERE dataset = ?').all(dataset) as { code: string; name: string; unit: string; grp: string }[];
     return searchByCodeOrName(all, query, limit).map((h) => ({ code: h.item.code, name: h.item.name, unit: h.item.unit, group: h.item.grp }));
   }
 
@@ -419,9 +432,10 @@ export class Repo {
     const codes = [...new Set(items.map((i) => i.normCode).filter(Boolean))];
     const normResources: NormResource[] = [];
     const resourceCodes = new Set<string>();
-    const stmt = this.db.prepare('SELECT norm_code, resource_code, consumption FROM norm_resources WHERE norm_code = ?');
+    const legalSet = this.legal.get(project.legalSet);
+    const stmt = this.db.prepare('SELECT norm_code, resource_code, consumption FROM norm_resources WHERE dataset = ? AND norm_code = ?');
     for (const c of codes) {
-      for (const r of stmt.all(c) as { norm_code: string; resource_code: string; consumption: number }[]) {
+      for (const r of stmt.all(legalSet.normDataset, c) as { norm_code: string; resource_code: string; consumption: number }[]) {
         normResources.push({ normCode: r.norm_code, resourceCode: r.resource_code, consumption: r.consumption });
         resourceCodes.add(r.resource_code);
       }
@@ -432,10 +446,19 @@ export class Repo {
       .filter((r): r is ResourceRow => !!r)
       .map(toResource);
     const estimate = computeEstimate({ categories, items, normResources, resources, projectPrices: this.projectPrices(projectId) });
-    const { settings, source } = effectiveSettings(project.costSettings, ratesTable(), project.buildingType, estimate.total.total);
-    const costSummary = computeCostSummary(estimate.total, settings, project.vatRate);
-    const totalEstimate = computeTotalEstimate(costSummary.Gxd, settings);
-    return { project, ...estimate, settings, ratesSource: source, costSummary, totalEstimate };
+    const cost = computeProjectCost(legalSet, estimate.total, project.costSettings, project.buildingType, project.vatRate);
+    const dateWarning = legalSetDateWarning(project.legalSet, project.priceDate);
+    return {
+      project,
+      ...estimate,
+      legalSet: { id: legalSet.id, label: legalSet.label, status: legalSet.status, normDataset: legalSet.normDataset, documents: legalSet.documents },
+      provisionalRates: Object.values(legalSet.tables).some((t) => t.status !== 'verified'),
+      settings: cost.settings,
+      ratesSource: cost.ratesSource,
+      costSummary: cost.costSummary,
+      totalEstimate: cost.totalEstimate,
+      warnings: dateWarning ? [dateWarning, ...cost.warnings] : cost.warnings,
+    };
   }
 }
 

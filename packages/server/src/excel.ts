@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { amountInWords, BUILDING_TYPE_LABELS, evaluateFormula, RESOURCE_TYPE_LABELS } from '@dutoan/core';
+import type { LegalDocument } from '@dutoan/core';
 import type { Calculation } from './repo.js';
 
 const FONT = 'Times New Roman';
@@ -93,7 +94,7 @@ function excelQuantity(formula: string | null | undefined, value: number): Cell 
   return { formula: f, result: value };
 }
 
-export async function buildWorkbook(calc: Calculation, author: string): Promise<ExcelJS.Workbook> {
+export async function buildWorkbook(calc: Calculation, author: string, legalDocs: LegalDocument[]): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
   wb.creator = author;
   wb.created = new Date();
@@ -104,7 +105,7 @@ export async function buildWorkbook(calc: Calculation, author: string): Promise<
     p.ownerName ? `Chủ đầu tư: ${p.ownerName}` : '',
     p.location ? `Địa điểm: ${p.location}` : '',
     `Loại công trình: ${BUILDING_TYPE_LABELS[p.buildingType] ?? p.buildingType}`,
-    p.priceBaseDate ? `Thời điểm lập giá: ${p.priceBaseDate}` : '',
+    p.priceBaseDate || p.priceDate ? `Thời điểm lập giá: ${[p.priceBaseDate, p.priceDate].filter(Boolean).join(' – ')}` : '',
   ].filter(Boolean);
 
   // Sheet creation order = tab order.
@@ -283,45 +284,69 @@ export async function buildWorkbook(calc: Calculation, author: string): Promise<
   wsDT.views = [{ state: 'frozen', ySplit: 5 }];
 
   // ------------------------------------------------------------------ TH
-  setupSheet(wsTH, [6, 52, 26, 11, 20, 9], false);
-  title(wsTH, 1, 'BẢNG TỔNG HỢP CHI PHÍ XÂY DỰNG', 6);
-  info(wsTH, 2, projectInfo.join('   –   '), 6);
-  info(wsTH, 3, `Căn cứ: Thông tư 11/2021/TT-BXD, sửa đổi bởi Thông tư 09/2024/TT-BXD. Hệ số: ${calc.ratesSource}`, 6);
-  header(wsTH, 5, ['STT', 'Khoản mục chi phí', 'Cách tính', 'Tỷ lệ (%)', 'Giá trị (đ)', 'Ký hiệu']);
+  // Columns: STT | Khoản mục | Cách tính | Tỷ lệ (%) / hệ số | Giá trị | Ký hiệu | Nguồn / căn cứ
+  setupSheet(wsTH, [6, 46, 30, 12, 20, 9, 56], true);
+  title(wsTH, 1, 'BẢNG TỔNG HỢP DỰ TOÁN CHI PHÍ XÂY DỰNG', 7);
+  info(wsTH, 2, projectInfo.join('   –   '), 7);
+  const docs = legalDocs.filter((d) => calc.legalSet.documents.includes(d.id));
+  info(wsTH, 3, `Bộ căn cứ pháp lý: ${calc.legalSet.label}${calc.legalSet.status === 'historical' ? ' (lịch sử)' : ''}`, 7);
+  wsTH.getCell(3, 1).font = { name: FONT, size: 11, bold: true };
+  let r0 = 4;
+  for (const d of docs) {
+    const dates = [d.issued ? `ban hành ${d.issued}` : '', d.effective ? `hiệu lực ${d.effective}` : ''].filter(Boolean).join(', ');
+    info(wsTH, r0++, `– ${d.type} ${d.number}: ${d.title}${dates ? ` (${dates})` : ''}${d.url ? ` – ${d.url}` : ''}${d.verified ? '' : ' [chưa xác minh]'}`, 7);
+  }
+  if (calc.provisionalRates) {
+    info(wsTH, r0, 'CẢNH BÁO: bảng tỷ lệ đang ở trạng thái TẠM (provisional) – chưa đối chiếu bản PDF đã ký / phụ lục thay thế (CV 9947/BXD-VP).', 7);
+    wsTH.getCell(r0++, 1).font = { name: FONT, size: 11, bold: true, color: { argb: 'FFB42318' } };
+  }
+  const headRow = r0 + 1;
+  header(wsTH, headRow, ['STT', 'Khoản mục chi phí', 'Cách tính', 'Tỷ lệ (%) / hệ số', 'Giá trị (đ)', 'Ký hiệu', 'Nguồn / căn cứ']);
   const lineRow: Record<string, number> = {};
   const cs = calc.costSummary;
-  r = 6;
+  r = headRow + 1;
   cs.lines.forEach((l) => (lineRow[l.code] = r++));
-  const E = (code: string) => `E${lineRow[code]}`;
-  const D = (code: string) => `D${lineRow[code]}`;
-  const formulas: Record<string, string> = {
-    VL: `DTCT!J${dtTotal}`,
-    NC: `DTCT!K${dtTotal}`,
-    M: `DTCT!L${dtTotal}`,
-    T: `${E('VL')}+${E('NC')}+${E('M')}`,
-    C: `${calc.settings.cBase === 'NC' ? E('NC') : E('T')}*${D('C')}/100`,
-    LT: `${E('T')}*${D('LT')}/100`,
-    TT: `${E('T')}*${D('TT')}/100`,
-    GTk: `${E('T')}*${D('GTk')}/100`,
-    GT: `${E('C')}+${E('LT')}+${E('TT')}+${E('GTk')}`,
-    TL: `(${E('T')}+${E('GT')})*${D('TL')}/100`,
-    G: `${E('T')}+${E('GT')}+${E('TL')}`,
-    GTGT: `${E('G')}*${D('GTGT')}/100`,
-    Gxd: `${E('G')}+${E('GTGT')}`,
-  };
-  let no = 0;
+  const dtRef: Record<string, string> = { 'DT.VL': `DTCT!J${dtTotal}`, 'DT.NC': `DTCT!K${dtTotal}`, 'DT.M': `DTCT!L${dtTotal}` };
+  const toExcel = (expr: string, rr: number) =>
+    expr.replace(/\{([^}]+)\}/g, (_, tok: string) => {
+      if (tok === 'rate' || tok === 'coef') return `D${rr}`;
+      if (tok.startsWith('rate:')) return `D${lineRow[tok.slice(5)]}`;
+      if (dtRef[tok]) return dtRef[tok];
+      if (lineRow[tok] === undefined) throw new Error(`Unknown token ${tok}`);
+      return `E${lineRow[tok]}`;
+    });
   for (const l of cs.lines) {
     const rr = lineRow[l.code];
-    row(
-      wsTH,
-      rr,
-      [l.level === 0 ? roman(++no) : '', l.name, l.formula, l.rate ?? '', { formula: formulas[l.code], result: l.value }, l.code],
-      { bold: l.level === 0, numFmts: { 4: '0.00', 5: MONEY } },
-    );
+    const d: Cell = l.coef !== undefined ? l.coef : l.rate ?? '';
+    const val: Cell = l.expr ? { formula: toExcel(l.expr, rr), result: l.value } : l.value;
+    const rowObj = row(wsTH, rr, [l.stt ?? '', l.name, l.formula, d, val, l.code, l.source ?? ''], {
+      bold: l.level === 0,
+      numFmts: { 4: l.coef !== undefined ? '0.0000' : '0.00', 5: MONEY },
+    });
+    rowObj.getCell(7).font = { name: FONT, size: 9, italic: true };
+    rowObj.getCell(7).alignment = { wrapText: true, vertical: 'middle' };
   }
-  r = lineRow.Gxd + 2;
-  info(wsTH, r, `Bằng chữ: ${amountInWords(cs.Gxd)}.`, 6);
-  info(wsTH, r + 1, 'Ghi chú: tỷ lệ mặc định là GIÁ TRỊ MẪU – cần kiểm tra lại theo Phụ lục TT11/2021 & TT09/2024.', 6);
+  r = lineRow[cs.lines[cs.lines.length - 1].code] + 1;
+  const gxdRow = lineRow.GXD ?? lineRow.Gxd;
+  const thTotalRow = r;
+  row(
+    wsTH,
+    r,
+    [
+      '',
+      cs.nhaTam ? 'Tổng chi phí xây dựng (GXD + GXDNT)' : 'Tổng chi phí xây dựng',
+      '',
+      '',
+      { formula: cs.nhaTam ? `E${gxdRow}+E${lineRow.GXDNT}` : `E${gxdRow}`, result: cs.total ?? cs.Gxd },
+      '',
+      '',
+    ],
+    { bold: true, numFmts: { 5: MONEY } },
+  );
+  r += 2;
+  info(wsTH, r, `Bằng chữ: ${amountInWords(cs.total ?? cs.Gxd)}.`, 7);
+  info(wsTH, r + 1, `Nguồn tỷ lệ: ${calc.ratesSource}`, 7);
+  calc.warnings.forEach((w, i) => info(wsTH, r + 2 + i, `Lưu ý: ${w}`, 7));
 
   // ------------------------------------------------------------------ CLVT
   setupSheet(wsCL, [6, 14, 40, 9, 14, 14, 14, 14, 18], false);
@@ -357,21 +382,27 @@ export async function buildWorkbook(calc: Calculation, author: string): Promise<
   );
 
   // ------------------------------------------------------------------ TDT
-  setupSheet(wsTDT, [6, 46, 40, 11, 20], false);
+  setupSheet(wsTDT, [6, 46, 44, 11, 20], false);
   title(wsTDT, 1, 'BẢNG TỔNG HỢP DỰ TOÁN', 5);
   info(wsTDT, 2, projectInfo[0], 5);
+  info(wsTDT, 3, `Căn cứ: ${calc.legalSet.label}`, 5);
   header(wsTDT, 4, ['STT', 'Khoản mục chi phí', 'Cách tính', 'Tỷ lệ (%)', 'Giá trị (đ)']);
   const s = calc.settings;
-  const tl = calc.totalEstimate.lines;
-  const base = 'SUM(E5:E9)';
+  const byCode = Object.fromEntries(calc.totalEstimate.lines.map((l) => [l.code, l]));
+  const V = 'SUM(E5:E9)';
+  const indexMode = s.contingencyPriceMode === 'index';
+  const years = Math.max(1, Math.round(s.durationYears ?? 1));
+  const dp2Formula = indexMode
+    ? Array.from({ length: years }, (_, i) => `(${V}/${years})*((1+${s.priceIndexRate ?? 0}/100)^${i + 1}-1)`).join('+')
+    : `${V}*D11/100`;
   const tdtRows: [string, string, string | number, Cell][] = [
-    [tl[0].name, 'Bảng tổng hợp chi phí xây dựng', '', { formula: `TH!${E('Gxd')}`, result: tl[0].value }],
-    [tl[1].name, 'Nhập', '', s.equipment],
-    [tl[2].name, 'Nhập', '', s.qlda],
-    [tl[3].name, 'Nhập', '', s.tuVan],
-    [tl[4].name, 'Nhập', '', s.other],
-    [tl[5].name, '(Gxd + Gtb + Gqlda + Gtv + Gk) × tỷ lệ', s.contingencyQtyRate, { formula: `${base}*D10/100`, result: tl[5].value }],
-    [tl[6].name, '(Gxd + Gtb + Gqlda + Gtv + Gk) × tỷ lệ', s.contingencyPriceRate, { formula: `${base}*D11/100`, result: tl[6].value }],
+    [byCode.Gxd.name, byCode.Gxd.formula, '', { formula: `TH!E${thTotalRow}`, result: byCode.Gxd.value }],
+    [byCode.Gtb.name, 'Nhập', '', byCode.Gtb.value],
+    [byCode.Gqlda.name, 'Nhập', '', byCode.Gqlda.value],
+    [byCode.Gtv.name, 'Nhập', '', byCode.Gtv.value],
+    [byCode.Gk.name, 'Nhập', '', byCode.Gk.value],
+    [byCode.Gdp1.name, byCode.Gdp1.formula, s.contingencyQtyRate ?? 0, { formula: `${V}*D10/100`, result: byCode.Gdp1.value }],
+    [byCode.Gdp2.name, byCode.Gdp2.formula, indexMode ? '' : s.contingencyPriceRate ?? 0, { formula: dp2Formula, result: byCode.Gdp2.value }],
   ];
   tdtRows.forEach((v, i) => row(wsTDT, 5 + i, [i + 1, v[0], v[1], v[2], v[3]], { numFmts: { 4: '0.00', 5: MONEY } }));
   row(wsTDT, 12, ['', 'TỔNG DỰ TOÁN', '', '', { formula: 'SUM(E5:E11)', result: calc.totalEstimate.total }], { bold: true, numFmts: { 5: MONEY } });

@@ -19,9 +19,10 @@ export function createProvider(): IntentProvider {
 }
 
 export function contextFor(repo: Repo, projectId: number): AssistantContext {
+  const dataset = repo.datasetOf(projectId);
   return {
-    searchNorms: (q, limit) => repo.searchNorms(q, limit),
-    getNorm: (code) => repo.getNorm(code),
+    searchNorms: (q, limit) => repo.searchNorms(q, dataset, limit),
+    getNorm: (code) => repo.getNorm(code, dataset),
     listCategories: () => repo.listCategories(projectId).map((c) => ({ id: c.id, name: c.name })),
     searchResources: (q, limit) => repo.searchResources(q, limit).map((r) => ({ ...r, price: repo.effectivePrice(projectId, r.code) })),
     getResource: (code) => {

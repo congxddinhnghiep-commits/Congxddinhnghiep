@@ -1,0 +1,77 @@
+{
+  "id": "TT11_2021",
+  "label": "TT 11/2021 + TT 12/2021 (lịch sử)",
+  "method": "TT11_2021",
+  "status": "historical",
+  "effectiveFrom": null,
+  "effectiveTo": "2026-06-30",
+  "normDataset": "TT12_2021",
+  "documents": ["TT-11-2021", "TT-12-2021", "TT-09-2024"],
+  "note": "Bộ pháp lý lịch sử – chỉ dùng cho công trình lập giá trước 01/07/2026. Các tỷ lệ là GIÁ TRỊ MẪU của Phase 1, chưa đối chiếu với văn bản gốc; số hiệu bảng chưa xác minh.",
+  "tables": {
+    "C": {
+      "id": "C",
+      "title": "Chi phí chung (% chi phí trực tiếp)",
+      "source": "TT 11/2021/TT-BXD – bảng chi phí chung (số hiệu bảng chưa xác minh; GIÁ TRỊ MẪU)",
+      "basis": "T",
+      "brackets": [15000000000, 100000000000, 500000000000, 1000000000000],
+      "bracketLabels": ["≤ 15 tỷ", "≤ 100 tỷ", "≤ 500 tỷ", "≤ 1.000 tỷ", "> 1.000 tỷ"],
+      "interpolation": "none",
+      "status": "provisional",
+      "rows": [
+        { "key": "dan_dung", "label": "Dân dụng", "values": [7.3, 6.9, 6.5, 6.3, 6.1] },
+        { "key": "cong_nghiep", "label": "Công nghiệp", "values": [6.2, 5.9, 5.6, 5.4, 5.2] },
+        { "key": "giao_thong", "label": "Giao thông", "values": [6.2, 5.8, 5.5, 5.3, 5.1] },
+        { "key": "nn_ptnt", "label": "NN&PTNT", "values": [6.2, 5.8, 5.4, 5.2, 5.0] },
+        { "key": "ha_tang", "label": "Hạ tầng kỹ thuật", "values": [5.5, 5.1, 4.8, 4.6, 4.4] }
+      ]
+    },
+    "LT": {
+      "id": "LT",
+      "title": "Chi phí nhà tạm để ở và điều hành thi công (% chi phí trực tiếp)",
+      "source": "TT 11/2021/TT-BXD – bảng chi phí nhà tạm (số hiệu bảng chưa xác minh; GIÁ TRỊ MẪU)",
+      "basis": "T",
+      "brackets": [15000000000, 100000000000, 500000000000, 1000000000000],
+      "bracketLabels": ["≤ 15 tỷ", "≤ 100 tỷ", "≤ 500 tỷ", "≤ 1.000 tỷ", "> 1.000 tỷ"],
+      "interpolation": "none",
+      "status": "provisional",
+      "rows": [
+        { "key": "dan_dung", "label": "Dân dụng", "values": [1.1, 1.0, 0.9, 0.8, 0.7] },
+        { "key": "cong_nghiep", "label": "Công nghiệp", "values": [1.2, 1.1, 1.0, 0.9, 0.8] },
+        { "key": "giao_thong", "label": "Giao thông", "values": [1.2, 1.1, 1.0, 0.9, 0.8] },
+        { "key": "nn_ptnt", "label": "NN&PTNT", "values": [1.2, 1.1, 1.0, 0.9, 0.8] },
+        { "key": "ha_tang", "label": "Hạ tầng kỹ thuật", "values": [1.1, 1.0, 0.9, 0.8, 0.7] }
+      ]
+    },
+    "TT": {
+      "id": "TT",
+      "title": "Chi phí một số công việc không xác định được khối lượng từ thiết kế (% T)",
+      "source": "TT 11/2021/TT-BXD (số hiệu bảng chưa xác minh; GIÁ TRỊ MẪU)",
+      "basis": "T",
+      "interpolation": "none",
+      "status": "provisional",
+      "rows": [
+        { "key": "dan_dung", "label": "Dân dụng", "values": [2.5] },
+        { "key": "cong_nghiep", "label": "Công nghiệp", "values": [2.0] },
+        { "key": "giao_thong", "label": "Giao thông", "values": [2.0] },
+        { "key": "nn_ptnt", "label": "NN&PTNT", "values": [2.0] },
+        { "key": "ha_tang", "label": "Hạ tầng kỹ thuật", "values": [2.0] }
+      ]
+    },
+    "TL": {
+      "id": "TL",
+      "title": "Thu nhập chịu thuế tính trước (% (T + GT))",
+      "source": "TT 11/2021/TT-BXD (số hiệu bảng chưa xác minh; GIÁ TRỊ MẪU)",
+      "basis": "T+GT",
+      "interpolation": "none",
+      "status": "provisional",
+      "rows": [
+        { "key": "dan_dung", "label": "Dân dụng", "values": [5.5] },
+        { "key": "cong_nghiep", "label": "Công nghiệp", "values": [6.0] },
+        { "key": "giao_thong", "label": "Giao thông", "values": [6.0] },
+        { "key": "nn_ptnt", "label": "NN&PTNT", "values": [5.5] },
+        { "key": "ha_tang", "label": "Hạ tầng kỹ thuật", "values": [5.5] }
+      ]
+    }
+  }
+}

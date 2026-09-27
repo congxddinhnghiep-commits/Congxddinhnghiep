@@ -2,7 +2,15 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import fs from 'node:fs';
 import path from 'node:path';
 import multer from 'multer';
-import { BUILDING_TYPE_LABELS, evaluateFormula, FormulaError, isFormula, type BuildingType, type CostSettings } from '@dutoan/core';
+import {
+  BUILDING_TYPE_LABELS,
+  evaluateFormula,
+  FormulaError,
+  isFormula,
+  TT36_WORK_CATEGORIES,
+  type BuildingType,
+  type ProjectCostSettings,
+} from '@dutoan/core';
 import { AssistantService } from './assistant.js';
 import { AuthService, requireAdmin, requirePasswordChanged } from './auth.js';
 import { config, WEB_DIST } from './config.js';
@@ -10,7 +18,8 @@ import type { DB } from './db.js';
 import { buildWorkbook } from './excel.js';
 import { downloadDriveFile } from './gdrive.js';
 import { applyImport, getParsed, parseBuffer, previewOf, storeParsed, type ImportTarget } from './importer.js';
-import { HttpError, ratesTable, Repo } from './repo.js';
+import { LegalService, legalDocuments } from './legal.js';
+import { HttpError, Repo } from './repo.js';
 
 type Handler = (req: Request, res: Response) => unknown | Promise<unknown>;
 /** Wrap a handler: JSON-serialise the return value and forward errors. */
@@ -58,7 +67,8 @@ function quantityFromBody(body: { quantity?: unknown; quantityFormula?: unknown 
 }
 
 export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
-  const repo = new Repo(db);
+  const legal = new LegalService(db);
+  const repo = new Repo(db, legal);
   const auth = new AuthService(db, config.jwtSecret, config.jwtExpiresIn);
   const assistant = new AssistantService(repo);
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
@@ -105,8 +115,25 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
         appId: config.google.appId,
       },
       buildingTypes: BUILDING_TYPE_LABELS,
-      rates: ratesTable(),
+      legalSets: legal.all(),
+      tt36WorkCategories: TT36_WORK_CATEGORIES,
     })),
+  );
+
+  // legal-basis register
+  api.get('/legal', h(() => ({ ...legalDocuments(), sets: legal.all() })));
+  api.put(
+    '/legal/:setId/tables/:tableId',
+    requireAdmin,
+    h((req) => {
+      const setId = req.params.setId;
+      if (!legal.isLegalSet(setId)) throw new HttpError(404, 'Không có bộ pháp lý này');
+      const b = req.body ?? {};
+      if (b.status !== undefined && b.status !== 'verified' && b.status !== 'provisional') throw new HttpError(400, 'Trạng thái không hợp lệ');
+      if (b.interpolation !== undefined && b.interpolation !== 'none' && b.interpolation !== 'linear') throw new HttpError(400, 'Kiểu nội suy không hợp lệ');
+      legal.setTableStatus(setId, String(req.params.tableId), { status: b.status, interpolation: b.interpolation }, req.user!.username);
+      return legal.get(setId).tables[String(req.params.tableId)];
+    }),
   );
 
   // users (admin)
@@ -123,11 +150,18 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
   // projects
   const proj = (req: Request) => repo.requireProject(id(req.params.id), req.user!.id, req.user!.role === 'admin');
   api.get('/projects', h((req) => repo.listProjects(req.user!.id, req.user!.role === 'admin')));
+  const checkDate = (d: unknown) => {
+    if (d !== undefined && d !== null && d !== '' && !(typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))) {
+      throw new HttpError(400, 'Ngày lập giá không hợp lệ (yyyy-mm-dd)');
+    }
+  };
   api.post(
     '/projects',
     h((req) => {
       const b = req.body ?? {};
       if (b.buildingType && !BUILDING_TYPES.includes(b.buildingType)) throw new HttpError(400, 'Loại công trình không hợp lệ');
+      if (b.legalSet !== undefined && !legal.isLegalSet(b.legalSet)) throw new HttpError(400, 'Bộ pháp lý không hợp lệ');
+      checkDate(b.priceDate);
       const p = repo.createProject(req.user!.id, b);
       repo.createCategory(p.id, 'Hạng mục chung');
       return p;
@@ -141,7 +175,15 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
       const b = req.body ?? {};
       if (b.buildingType && !BUILDING_TYPES.includes(b.buildingType)) throw new HttpError(400, 'Loại công trình không hợp lệ');
       if (b.vatRate !== undefined && !(Number(b.vatRate) >= 0 && Number(b.vatRate) <= 100)) throw new HttpError(400, 'Thuế suất không hợp lệ');
+      checkDate(b.priceDate);
+      // Changing the legal set changes results, so it must be requested explicitly.
+      if (b.legalSet !== undefined && b.legalSet !== p.legalSet) {
+        if (!legal.isLegalSet(b.legalSet)) throw new HttpError(400, 'Bộ pháp lý không hợp lệ');
+        if (b.confirmLegalSetChange !== true) throw new HttpError(409, 'Đổi bộ pháp lý sẽ tính lại toàn bộ dự toán – cần xác nhận.');
+      }
       return repo.updateProject(p.id, {
+        legalSet: b.legalSet ?? p.legalSet,
+        priceDate: b.priceDate !== undefined ? b.priceDate || null : p.priceDate,
         name: b.name ?? p.name,
         ownerName: b.ownerName ?? p.ownerName,
         location: b.location ?? p.location,
@@ -162,13 +204,36 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
     '/projects/:id/settings',
     h((req) => {
       const p = proj(req);
-      const b = (req.body?.costSettings ?? {}) as Partial<CostSettings>;
-      const numeric: (keyof CostSettings)[] = ['cRate', 'ltRate', 'ttRate', 'gtkRate', 'tlRate', 'equipment', 'qlda', 'tuVan', 'other', 'contingencyQtyRate', 'contingencyPriceRate'];
-      const clean: Partial<CostSettings> = { autoRates: !!b.autoRates, cBase: b.cBase === 'NC' ? 'NC' : 'T' };
+      const b = (req.body?.costSettings ?? {}) as ProjectCostSettings;
+      const numeric: (keyof ProjectCostSettings)[] = [
+        'cRate', 'ltRate', 'ttRate', 'gtkRate', 'tlRate', 'ntRate', 'equipment', 'qlda', 'tuVan', 'other',
+        'contingencyQtyRate', 'contingencyPriceRate', 'nightShare', 'nightPremium', 'machineLaborShare', 'priceIndexRate', 'durationYears',
+      ];
+      const clean: ProjectCostSettings = { autoRates: !!b.autoRates, cBase: b.cBase === 'NC' ? 'NC' : 'T' };
+      // TT 36/2026 options
+      const set = legal.get(p.legalSet);
+      if (set.method === 'TT36_2026') {
+        if (b.workCategory !== undefined) {
+          if (!(b.workCategory in TT36_WORK_CATEGORIES)) throw new HttpError(400, 'Loại công việc không hợp lệ');
+          clean.workCategory = b.workCategory;
+        }
+        if (b.cMode !== undefined) clean.cMode = b.cMode === 'NC' ? 'NC' : 'T';
+        if (b.ncWorkType !== undefined) {
+          if (!set.tables['3.4'].rows.some((r) => r.key === b.ncWorkType)) throw new HttpError(400, 'Loại công tác (Bảng 3.4) không hợp lệ');
+          clean.ncWorkType = b.ncWorkType;
+        }
+        if (b.tlCategory) {
+          if (!set.tables['3.6'].rows.some((r) => r.key === b.tlCategory)) throw new HttpError(400, 'Dòng Bảng 3.6 không hợp lệ');
+          clean.tlCategory = b.tlCategory;
+        }
+        if (b.linearWorks !== undefined) clean.linearWorks = !!b.linearWorks;
+        if (b.contingencyPriceMode !== undefined) clean.contingencyPriceMode = b.contingencyPriceMode === 'index' ? 'index' : 'percent';
+      }
       for (const k of numeric) {
         if (b[k] === undefined) continue;
         const v = Number(b[k]);
         if (!Number.isFinite(v) || v < 0) throw new HttpError(400, `Giá trị không hợp lệ: ${k}`);
+        if (['nightShare', 'nightPremium', 'machineLaborShare'].includes(k) && v > 100) throw new HttpError(400, `Tỷ lệ phải ≤ 100%: ${k}`);
         (clean as Record<string, number>)[k] = v;
       }
       const vat = req.body?.vatRate !== undefined ? Number(req.body.vatRate) : p.vatRate;
@@ -252,13 +317,20 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
   );
 
   // norms & resources library
-  api.get('/norms', h((req) => repo.searchNorms(String(req.query.q ?? ''), Math.min(Number(req.query.limit) || 50, 200))));
+  const datasets = () => new Set(legal.all().map((s) => s.normDataset));
+  const dataset = (v: unknown) => {
+    const d = typeof v === 'string' && v ? v : legal.get('TT36_2026').normDataset;
+    if (!datasets().has(d)) throw new HttpError(400, 'Bộ định mức không hợp lệ');
+    return d;
+  };
+  api.get('/norms', h((req) => repo.searchNorms(String(req.query.q ?? ''), dataset(req.query.dataset), Math.min(Number(req.query.limit) || 50, 200))));
   api.get(
     '/norms/:code',
     h((req) => {
-      const n = repo.getNorm(String(req.params.code));
+      const ds = dataset(req.query.dataset);
+      const n = repo.getNorm(String(req.params.code), ds);
       if (!n) throw new HttpError(404, 'Không tìm thấy định mức');
-      return { ...n, resources: repo.getNormResources(n.code) };
+      return { ...n, dataset: ds, resources: repo.getNormResources(n.code, ds) };
     }),
   );
   api.get('/resources', h((req) => (req.query.q ? repo.searchResources(String(req.query.q), 50) : repo.listResources())));
@@ -268,7 +340,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
     '/projects/:id/export.xlsx',
     h(async (req, res) => {
       const calc = repo.calculate(proj(req).id);
-      const wb = await buildWorkbook(calc, req.user!.fullName || req.user!.username);
+      const wb = await buildWorkbook(calc, req.user!.fullName || req.user!.username, legalDocuments().documents);
       const safe = calc.project.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^\w-]+/g, '_');
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename="DuToan_${safe || 'CongTrinh'}.xlsx"`);
@@ -337,6 +409,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
         projectId,
         categoryId: b.categoryId ? Number(b.categoryId) : undefined,
         priceScope: b.priceScope === 'project' ? 'project' : 'base',
+        dataset: t === 'norms' ? dataset(b.dataset) : undefined,
       });
     }),
   );

@@ -32,7 +32,7 @@ export function executeAction(repo: Repo, projectId: number, action: Action): Ac
           categoryId = repo.createCategory(projectId, p.newCategoryName).id;
           undo.push({ op: 'deleteCategory', categoryId });
         }
-        if (!repo.getNorm(p.normCode)) throw new Error(`Không tìm thấy mã định mức ${p.normCode}`);
+        if (!repo.getNorm(p.normCode, repo.datasetOf(projectId))) throw new Error(`Không tìm thấy mã định mức ${p.normCode}`);
         const item = repo.createItem(projectId, {
           categoryId,
           normCode: p.normCode,

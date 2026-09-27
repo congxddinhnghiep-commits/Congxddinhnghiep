@@ -194,6 +194,8 @@ export interface ApplyOptions {
   categoryId?: number;
   /** For prices: update library base prices or project prices. */
   priceScope?: 'base' | 'project';
+  /** For norms: dataset (norm book version) to import into. */
+  dataset?: string;
 }
 
 export function applyImport(repo: Repo, f: ParsedFile, o: ApplyOptions): { message: string; count: number; skipped: number } {
@@ -208,15 +210,16 @@ export function applyImport(repo: Repo, f: ParsedFile, o: ApplyOptions): { messa
   let skipped = 0;
 
   if (o.target === 'norms') {
+    const dataset = o.dataset ?? 'TT38_2026';
     const upsertNorm = db.prepare(
-      `INSERT INTO norms (code, name, unit, grp, name_search, is_sample) VALUES (?, ?, ?, ?, ?, 0)
-       ON CONFLICT(code) DO UPDATE SET name = excluded.name, unit = excluded.unit, grp = excluded.grp,
+      `INSERT INTO norms (dataset, code, name, unit, grp, name_search, is_sample) VALUES (?, ?, ?, ?, ?, ?, 0)
+       ON CONFLICT(dataset, code) DO UPDATE SET name = excluded.name, unit = excluded.unit, grp = excluded.grp,
        name_search = excluded.name_search, is_sample = 0`,
     );
-    const clearNR = db.prepare('DELETE FROM norm_resources WHERE norm_code = ?');
+    const clearNR = db.prepare('DELETE FROM norm_resources WHERE dataset = ? AND norm_code = ?');
     const insNR = db.prepare(
-      `INSERT INTO norm_resources (norm_code, resource_code, consumption, is_sample) VALUES (?, ?, ?, 0)
-       ON CONFLICT(norm_code, resource_code) DO UPDATE SET consumption = excluded.consumption, is_sample = 0`,
+      `INSERT INTO norm_resources (dataset, norm_code, resource_code, consumption, is_sample) VALUES (?, ?, ?, ?, 0)
+       ON CONFLICT(dataset, norm_code, resource_code) DO UPDATE SET consumption = excluded.consumption, is_sample = 0`,
     );
     const norms = new Set<string>();
     db.transaction(() => {
@@ -226,11 +229,11 @@ export function applyImport(repo: Repo, f: ParsedFile, o: ApplyOptions): { messa
         if (code) {
           current = code;
           if (!norms.has(code)) {
-            const existing = repo.getNorm(code);
+            const existing = repo.getNorm(code, dataset);
             const name = str(get(r, 'normName')) || existing?.name || code;
             const unit = str(get(r, 'normUnit')) || existing?.unit || '';
-            upsertNorm.run(code, name, unit, str(get(r, 'group')), normalizeText(`${code} ${name}`));
-            clearNR.run(code);
+            upsertNorm.run(dataset, code, name, unit, str(get(r, 'group')), normalizeText(`${code} ${name}`));
+            clearNR.run(dataset, code);
             norms.add(code);
           }
         }
@@ -250,11 +253,11 @@ export function applyImport(repo: Repo, f: ParsedFile, o: ApplyOptions): { messa
           type: o.mapping.resourceType !== undefined ? parseResourceType(str(get(r, 'resourceType')), rc, rname) : existing?.type ?? parseResourceType('', rc, rname),
           basePrice: price ?? existing?.basePrice ?? 0,
         });
-        insNR.run(current, rc, cons);
+        insNR.run(dataset, current, rc, cons);
         count++;
       }
     })();
-    return { message: `Đã nhập ${norms.size} định mức với ${count} dòng hao phí${skipped ? `, bỏ qua ${skipped} dòng thiếu dữ liệu` : ''}.`, count, skipped };
+    return { message: `Đã nhập vào bộ ${dataset}: ${norms.size} định mức với ${count} dòng hao phí${skipped ? `, bỏ qua ${skipped} dòng thiếu dữ liệu` : ''}.`, count, skipped };
   }
 
   if (o.target === 'prices') {

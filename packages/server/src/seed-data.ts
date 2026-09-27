@@ -1,7 +1,10 @@
 /**
  * SAMPLE norms/resources/prices for demonstration only (is_sample = 1).
- * Codes follow the style of Định mức 12/2021/TT-BXD but consumptions and prices are
- * approximate — replace with official data via the Excel importer.
+ * Two datasets are seeded from the same illustrative consumptions:
+ *  - TT12_2021 (historical): labour by cấp bậc thợ (e.g. "Nhân công bậc 3,5/7");
+ *  - TT38_2026 (current):    labour by nhóm nhân công (e.g. "Nhân công nhóm 3").
+ * The grade → group assignment below is ILLUSTRATIVE, not taken from TT 38/2026. Codes follow the
+ * style of the norm books but consumptions and prices are approximate — replace with official data.
  */
 import type { ResourceType } from '@dutoan/core';
 
@@ -33,6 +36,9 @@ export const SAMPLE_RESOURCES: R[] = [
   ['N.3.0', 'Nhân công bậc 3,0/7 - Nhóm I', 'công', 'NC', 245000],
   ['N.3.5', 'Nhân công bậc 3,5/7 - Nhóm I', 'công', 'NC', 262000],
   ['N.4.0', 'Nhân công bậc 4,0/7 - Nhóm I', 'công', 'NC', 280000],
+  ['N.NHOM2', 'Nhân công nhóm 2', 'công', 'NC', 255000],
+  ['N.NHOM3', 'Nhân công nhóm 3', 'công', 'NC', 272000],
+  ['N.NHOM4', 'Nhân công nhóm 4', 'công', 'NC', 290000],
   ['M.TRONBT250', 'Máy trộn bê tông 250 lít', 'ca', 'M', 320000],
   ['M.TRONVUA150', 'Máy trộn vữa 150 lít', 'ca', 'M', 280000],
   ['M.DAMDUI', 'Máy đầm dùi 1,5kW', 'ca', 'M', 250000],
@@ -49,8 +55,15 @@ export const SAMPLE_RESOURCES: R[] = [
 
 type N = [code: string, name: string, unit: string, group: string, resources: [string, number][]];
 
+/** Labour resource per illustrative skill level. */
+type Labour = Record<'3.0' | '3.5' | '4.0', string>;
+
+export const LABOUR_TT12: Labour = { '3.0': 'N.3.0', '3.5': 'N.3.5', '4.0': 'N.4.0' };
+export const LABOUR_TT38: Labour = { '3.0': 'N.NHOM2', '3.5': 'N.NHOM3', '4.0': 'N.NHOM4' };
+
+export function sampleNorms(L: Labour): N[] {
 /** Concrete mix per 1 m3 (sample): cement kg, sand m3, stone m3 */
-const MIX: Record<number, [number, number, number]> = {
+  const MIX: Record<number, [number, number, number]> = {
   100: [218, 0.531, 0.936],
   250: [415, 0.455, 0.887],
   300: [450, 0.455, 0.88],
@@ -70,7 +83,7 @@ function concrete(code: string, name: string, grade: 100 | 250 | 300, labour: nu
       ['V.CATV', +(cat * k).toFixed(4)],
       [stone, +(da * k).toFixed(4)],
       ['V.NUOC', 0.195],
-      ['N.3.5', labour],
+      [L['3.5'], labour],
       ['M.TRONBT250', 0.095],
       ...extra,
     ],
@@ -82,7 +95,7 @@ function rebar(code: string, name: string, dia: '10' | '18' | '18L', labour: num
   const res: [string, number][] = [
     [steel, dia === '10' ? 1005 : 1020],
     ['V.DAYTHEP', dia === '10' ? 21.42 : 14.28],
-    ['N.3.5', labour],
+    [L['3.5'], labour],
     ['M.CATUON', dia === '10' ? 0.4 : 0.32],
   ];
   if (dia !== '10') res.push(['V.QUEHAN', dia === '18' ? 4.64 : 5.3], ['M.HAN23', dia === '18' ? 1.1 : 1.3]);
@@ -90,23 +103,23 @@ function rebar(code: string, name: string, dia: '10' | '18' | '18L', labour: num
 }
 
 function formwork(code: string, name: string, labour: number): N {
-  return [code, name, '100m2', 'Ván khuôn', [['V.GOVAN', 0.792], ['V.GODA', 0.5], ['V.DINH', 12], ['N.4.0', labour]]];
+  return [code, name, '100m2', 'Ván khuôn', [['V.GOVAN', 0.792], ['V.GODA', 0.5], ['V.DINH', 12], [L['4.0'], labour]]];
 }
 
 const VIBRO: [string, number][] = [['M.DAMDUI', 0.18]];
 const LIFT: [string, number][] = [['M.DAMDUI', 0.18], ['M.VANTHANG', 0.11]];
 
-export const SAMPLE_NORMS: N[] = [
+  return [
   // Earthwork
-  ['AB.11312', 'Đào móng băng bằng thủ công, rộng ≤3m, sâu ≤1m, đất cấp II', 'm3', 'Đất', [['N.3.0', 0.82]]],
-  ['AB.25112', 'Đào móng công trình bằng máy đào ≤0,8m3, đất cấp II', '100m3', 'Đất', [['N.3.0', 5.5], ['M.DAO08', 0.35]]],
-  ['AB.13112', 'Đắp đất nền móng công trình bằng thủ công, độ chặt K=0,90', 'm3', 'Đất', [['N.3.0', 0.56]]],
-  ['AB.65120', 'Đắp đất nền móng bằng đầm cóc, độ chặt K=0,95', '100m3', 'Đất', [['N.3.0', 8.8], ['M.DAMCOC', 4.2]]],
-  ['AB.13411', 'Đắp cát nền móng công trình', 'm3', 'Đất', [['V.CATSL', 1.22], ['N.3.0', 0.5]]],
+  ['AB.11312', 'Đào móng băng bằng thủ công, rộng ≤3m, sâu ≤1m, đất cấp II', 'm3', 'Đất', [[L['3.0'], 0.82]]],
+  ['AB.25112', 'Đào móng công trình bằng máy đào ≤0,8m3, đất cấp II', '100m3', 'Đất', [[L['3.0'], 5.5], ['M.DAO08', 0.35]]],
+  ['AB.13112', 'Đắp đất nền móng công trình bằng thủ công, độ chặt K=0,90', 'm3', 'Đất', [[L['3.0'], 0.56]]],
+  ['AB.65120', 'Đắp đất nền móng bằng đầm cóc, độ chặt K=0,95', '100m3', 'Đất', [[L['3.0'], 8.8], ['M.DAMCOC', 4.2]]],
+  ['AB.13411', 'Đắp cát nền móng công trình', 'm3', 'Đất', [['V.CATSL', 1.22], [L['3.0'], 0.5]]],
   ['AB.41432', 'Vận chuyển đất bằng ô tô tự đổ 7T, phạm vi ≤1000m, đất cấp II', '100m3', 'Đất', [['M.OTO7', 0.83]]],
   // Piles
-  ['AC.26122', 'Ép trước cọc BTCT 25x25cm, chiều dài đoạn cọc >4m, đất cấp I', '100m', 'Cọc', [['V.COC25', 101], ['N.3.5', 11], ['M.EPCOC150', 2.9], ['M.CAU10', 2.9]]],
-  ['AC.29212', 'Nối cọc BTCT vuông 25x25cm', 'mối nối', 'Cọc', [['V.QUEHAN', 1.2], ['N.3.5', 0.36], ['M.HAN23', 0.2]]],
+  ['AC.26122', 'Ép trước cọc BTCT 25x25cm, chiều dài đoạn cọc >4m, đất cấp I', '100m', 'Cọc', [['V.COC25', 101], [L['3.5'], 11], ['M.EPCOC150', 2.9], ['M.CAU10', 2.9]]],
+  ['AC.29212', 'Nối cọc BTCT vuông 25x25cm', 'mối nối', 'Cọc', [['V.QUEHAN', 1.2], [L['3.5'], 0.36], ['M.HAN23', 0.2]]],
   // Concrete
   concrete('AF.11111', 'Bê tông lót móng, rộng ≤250cm', 100, 1.42, [['M.DAMBAN', 0.089]]),
   concrete('AF.11213', 'Bê tông móng, rộng ≤250cm', 250, 1.64, VIBRO),
@@ -136,15 +149,16 @@ export const SAMPLE_NORMS: N[] = [
   formwork('AF.81141', 'Ván khuôn gỗ xà dầm, giằng', 34.38),
   formwork('AF.81151', 'Ván khuôn gỗ sàn mái', 28.75),
   // Masonry
-  ['AE.22214', 'Xây tường thẳng gạch đặc 6,5x10,5x22cm, dày ≤11cm, cao ≤6m, vữa XM mác 75', 'm3', 'Xây', [['V.GACHDAC', 643], ['V.XM40', 74], ['V.CATM', 0.25], ['V.NUOC', 0.06], ['N.3.5', 2.43], ['M.TRONVUA150', 0.036], ['M.VANTHANG', 0.04]]],
-  ['AE.22224', 'Xây tường thẳng gạch đặc 6,5x10,5x22cm, dày ≤33cm, cao ≤6m, vữa XM mác 75', 'm3', 'Xây', [['V.GACHDAC', 550], ['V.XM40', 93], ['V.CATM', 0.32], ['V.NUOC', 0.075], ['N.3.5', 1.97], ['M.TRONVUA150', 0.045], ['M.VANTHANG', 0.04]]],
-  ['AE.62214', 'Xây tường thẳng gạch rỗng 2 lỗ 6,5x10,5x22cm, dày ≤11cm, cao ≤6m, vữa XM mác 75', 'm3', 'Xây', [['V.GACHLO', 643], ['V.XM40', 66], ['V.CATM', 0.22], ['V.NUOC', 0.055], ['N.3.5', 2.2], ['M.TRONVUA150', 0.032], ['M.VANTHANG', 0.04]]],
+  ['AE.22214', 'Xây tường thẳng gạch đặc 6,5x10,5x22cm, dày ≤11cm, cao ≤6m, vữa XM mác 75', 'm3', 'Xây', [['V.GACHDAC', 643], ['V.XM40', 74], ['V.CATM', 0.25], ['V.NUOC', 0.06], [L['3.5'], 2.43], ['M.TRONVUA150', 0.036], ['M.VANTHANG', 0.04]]],
+  ['AE.22224', 'Xây tường thẳng gạch đặc 6,5x10,5x22cm, dày ≤33cm, cao ≤6m, vữa XM mác 75', 'm3', 'Xây', [['V.GACHDAC', 550], ['V.XM40', 93], ['V.CATM', 0.32], ['V.NUOC', 0.075], [L['3.5'], 1.97], ['M.TRONVUA150', 0.045], ['M.VANTHANG', 0.04]]],
+  ['AE.62214', 'Xây tường thẳng gạch rỗng 2 lỗ 6,5x10,5x22cm, dày ≤11cm, cao ≤6m, vữa XM mác 75', 'm3', 'Xây', [['V.GACHLO', 643], ['V.XM40', 66], ['V.CATM', 0.22], ['V.NUOC', 0.055], [L['3.5'], 2.2], ['M.TRONVUA150', 0.032], ['M.VANTHANG', 0.04]]],
   // Finishing
-  ['AK.21124', 'Trát tường trong, dày 1,5cm, vữa XM mác 75', 'm2', 'Hoàn thiện', [['V.XM40', 5.6], ['V.CATM', 0.019], ['V.NUOC', 0.005], ['N.4.0', 0.2], ['M.TRONVUA150', 0.003]]],
-  ['AK.21224', 'Trát tường ngoài, dày 1,5cm, vữa XM mác 75', 'm2', 'Hoàn thiện', [['V.XM40', 5.6], ['V.CATM', 0.019], ['V.NUOC', 0.005], ['N.4.0', 0.26], ['M.TRONVUA150', 0.003]]],
-  ['AK.23114', 'Trát trần, vữa XM mác 75', 'm2', 'Hoàn thiện', [['V.XM40', 4.4], ['V.CATM', 0.015], ['V.NUOC', 0.004], ['N.4.0', 0.5], ['M.TRONVUA150', 0.003]]],
-  ['AK.51260', 'Lát nền, sàn gạch ceramic 600x600mm, vữa XM mác 75', 'm2', 'Hoàn thiện', [['V.GACH60', 1.02], ['V.XM40', 8], ['V.CATM', 0.025], ['N.4.0', 0.17]]],
-  ['AK.84114', 'Bả bột bả vào tường', 'm2', 'Hoàn thiện', [['V.BOTBA', 0.4], ['N.4.0', 0.17]]],
-  ['AK.83421', 'Sơn tường trong nhà đã bả, 1 nước lót, 2 nước phủ', 'm2', 'Hoàn thiện', [['V.SONLOT', 0.12], ['V.SONPHU', 0.21], ['N.4.0', 0.066]]],
-  ['AK.84424', 'Sơn tường ngoài nhà không bả, 1 nước lót, 2 nước phủ', 'm2', 'Hoàn thiện', [['V.SONLOT', 0.13], ['V.SONPHU', 0.23], ['N.4.0', 0.078]]],
+  ['AK.21124', 'Trát tường trong, dày 1,5cm, vữa XM mác 75', 'm2', 'Hoàn thiện', [['V.XM40', 5.6], ['V.CATM', 0.019], ['V.NUOC', 0.005], [L['4.0'], 0.2], ['M.TRONVUA150', 0.003]]],
+  ['AK.21224', 'Trát tường ngoài, dày 1,5cm, vữa XM mác 75', 'm2', 'Hoàn thiện', [['V.XM40', 5.6], ['V.CATM', 0.019], ['V.NUOC', 0.005], [L['4.0'], 0.26], ['M.TRONVUA150', 0.003]]],
+  ['AK.23114', 'Trát trần, vữa XM mác 75', 'm2', 'Hoàn thiện', [['V.XM40', 4.4], ['V.CATM', 0.015], ['V.NUOC', 0.004], [L['4.0'], 0.5], ['M.TRONVUA150', 0.003]]],
+  ['AK.51260', 'Lát nền, sàn gạch ceramic 600x600mm, vữa XM mác 75', 'm2', 'Hoàn thiện', [['V.GACH60', 1.02], ['V.XM40', 8], ['V.CATM', 0.025], [L['4.0'], 0.17]]],
+  ['AK.84114', 'Bả bột bả vào tường', 'm2', 'Hoàn thiện', [['V.BOTBA', 0.4], [L['4.0'], 0.17]]],
+  ['AK.83421', 'Sơn tường trong nhà đã bả, 1 nước lót, 2 nước phủ', 'm2', 'Hoàn thiện', [['V.SONLOT', 0.12], ['V.SONPHU', 0.21], [L['4.0'], 0.066]]],
+  ['AK.84424', 'Sơn tường ngoài nhà không bả, 1 nước lót, 2 nước phủ', 'm2', 'Hoàn thiện', [['V.SONLOT', 0.13], ['V.SONPHU', 0.23], [L['4.0'], 0.078]]],
 ];
+}

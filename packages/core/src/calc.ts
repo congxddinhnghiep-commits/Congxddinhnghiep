@@ -182,10 +182,23 @@ export interface CostLine {
   name: string;
   /** Human readable formula, e.g. "T × 6,5%" */
   formula: string;
+  /** Percentage applied on this line (shown in the "Tỷ lệ" column). */
   rate?: number;
+  /** Multiplier applied on this line (e.g. Knc, Km). */
+  coef?: number;
   value: number;
   /** Visual level: 0 = main total, 1 = sub-line */
   level: 0 | 1;
+  /** Roman numeral / number shown in the STT column (empty for unnumbered totals). */
+  stt?: string;
+  /** Legal source of the rate or method (document, table, bracket, status). */
+  source?: string;
+  /**
+   * Spreadsheet-agnostic expression used by the Excel export. Tokens: {CODE} = value of another
+   * line, {rate} / {coef} = this line's rate / coefficient cell, {rate:CODE} = another line's rate,
+   * {DT.VL} / {DT.NC} / {DT.M} = direct-cost totals of the detailed estimate sheet.
+   */
+  expr?: string;
 }
 
 export interface CostSummary {
@@ -193,12 +206,18 @@ export interface CostSummary {
   T: number;
   GT: number;
   TL: number;
+  /** Chi phí xây dựng trước thuế (G / GXDTT) */
   G: number;
   GTGT: number;
+  /** Chi phí xây dựng sau thuế (Gxd / GXD) */
   Gxd: number;
+  /** Nhà tạm shown as a separate line after VAT (TT36: GXDNT). 0 when included in GT (TT11). */
+  nhaTam?: number;
+  /** Total construction cost carried to the total estimate = Gxd + nhaTam. */
+  total?: number;
 }
 
-const pct = (r: number) => `${String(r).replace('.', ',')}%`;
+export const pct = (r: number) => `${String(r).replace('.', ',')}%`;
 
 export function computeCostSummary(direct: CostTriple, s: CostSettings, vatRate: number): CostSummary {
   const T = direct.vl + direct.nc + direct.m;
@@ -214,12 +233,12 @@ export function computeCostSummary(direct: CostTriple, s: CostSettings, vatRate:
   const Gxd = G + GTGT;
 
   const lines: CostLine[] = [
-    { code: 'VL', name: 'Chi phí vật liệu', formula: 'Σ VL (bảng dự toán chi tiết)', value: direct.vl, level: 1 },
-    { code: 'NC', name: 'Chi phí nhân công', formula: 'Σ NC (bảng dự toán chi tiết)', value: direct.nc, level: 1 },
-    { code: 'M', name: 'Chi phí máy và thiết bị thi công', formula: 'Σ M (bảng dự toán chi tiết)', value: direct.m, level: 1 },
-    { code: 'T', name: 'Chi phí trực tiếp', formula: 'VL + NC + M', value: T, level: 0 },
-    { code: 'C', name: 'Chi phí chung', formula: `${s.cBase} × ${pct(s.cRate)}`, rate: s.cRate, value: C, level: 1 },
-    { code: 'LT', name: 'Chi phí nhà tạm để ở và điều hành thi công', formula: `T × ${pct(s.ltRate)}`, rate: s.ltRate, value: LT, level: 1 },
+    { code: 'VL', name: 'Chi phí vật liệu', formula: 'Σ VL (bảng dự toán chi tiết)', value: direct.vl, level: 1, expr: '{DT.VL}' },
+    { code: 'NC', name: 'Chi phí nhân công', formula: 'Σ NC (bảng dự toán chi tiết)', value: direct.nc, level: 1, expr: '{DT.NC}' },
+    { code: 'M', name: 'Chi phí máy và thiết bị thi công', formula: 'Σ M (bảng dự toán chi tiết)', value: direct.m, level: 1, expr: '{DT.M}' },
+    { code: 'T', name: 'Chi phí trực tiếp', formula: 'VL + NC + M', value: T, level: 0, stt: 'I', expr: '{VL}+{NC}+{M}' },
+    { code: 'C', name: 'Chi phí chung', formula: `${s.cBase} × ${pct(s.cRate)}`, rate: s.cRate, value: C, level: 1, expr: `{${s.cBase}}*{rate}/100` },
+    { code: 'LT', name: 'Chi phí nhà tạm để ở và điều hành thi công', formula: `T × ${pct(s.ltRate)}`, rate: s.ltRate, value: LT, level: 1, expr: '{T}*{rate}/100' },
     {
       code: 'TT',
       name: 'Chi phí một số công việc không xác định được khối lượng từ thiết kế',
@@ -227,15 +246,16 @@ export function computeCostSummary(direct: CostTriple, s: CostSettings, vatRate:
       rate: s.ttRate,
       value: TT,
       level: 1,
+      expr: '{T}*{rate}/100',
     },
-    { code: 'GTk', name: 'Chi phí gián tiếp khác', formula: `T × ${pct(s.gtkRate)}`, rate: s.gtkRate, value: GTk, level: 1 },
-    { code: 'GT', name: 'Chi phí gián tiếp', formula: 'C + LT + TT + GTk', value: GT, level: 0 },
-    { code: 'TL', name: 'Thu nhập chịu thuế tính trước', formula: `(T + GT) × ${pct(s.tlRate)}`, rate: s.tlRate, value: TL, level: 0 },
-    { code: 'G', name: 'Chi phí xây dựng trước thuế', formula: 'T + GT + TL', value: G, level: 0 },
-    { code: 'GTGT', name: 'Thuế giá trị gia tăng', formula: `G × ${pct(vatRate)}`, rate: vatRate, value: GTGT, level: 0 },
-    { code: 'Gxd', name: 'Chi phí xây dựng sau thuế', formula: 'G + GTGT', value: Gxd, level: 0 },
+    { code: 'GTk', name: 'Chi phí gián tiếp khác', formula: `T × ${pct(s.gtkRate)}`, rate: s.gtkRate, value: GTk, level: 1, expr: '{T}*{rate}/100' },
+    { code: 'GT', name: 'Chi phí gián tiếp', formula: 'C + LT + TT + GTk', value: GT, level: 0, stt: 'II', expr: '{C}+{LT}+{TT}+{GTk}' },
+    { code: 'TL', name: 'Thu nhập chịu thuế tính trước', formula: `(T + GT) × ${pct(s.tlRate)}`, rate: s.tlRate, value: TL, level: 0, stt: 'III', expr: '({T}+{GT})*{rate}/100' },
+    { code: 'G', name: 'Chi phí xây dựng trước thuế', formula: 'T + GT + TL', value: G, level: 0, stt: 'IV', expr: '{T}+{GT}+{TL}' },
+    { code: 'GTGT', name: 'Thuế giá trị gia tăng', formula: `G × ${pct(vatRate)}`, rate: vatRate, value: GTGT, level: 0, stt: 'V', expr: '{G}*{rate}/100' },
+    { code: 'Gxd', name: 'Chi phí xây dựng sau thuế', formula: 'G + GTGT', value: Gxd, level: 0, stt: 'VI', expr: '{G}+{GTGT}' },
   ];
-  return { lines, T, GT, TL, G, GTGT, Gxd };
+  return { lines, T, GT, TL, G, GTGT, Gxd, nhaTam: 0, total: Gxd };
 }
 
 export interface TotalEstimateLine {
