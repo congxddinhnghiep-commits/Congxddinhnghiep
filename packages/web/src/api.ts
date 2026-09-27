@@ -82,6 +82,38 @@ export interface AutoAssignPlan {
   review: { itemId: number; line: number; name: string; best: { code: string; confidence: number } | null }[];
 }
 
+export type RowType = 'header' | 'category' | 'item' | 'subtotal' | 'note' | 'empty';
+
+export interface Analysis {
+  fileId: string;
+  fileName: string;
+  kind: 'estimate' | 'pricebook';
+  sheets: { index: number; name: string; rowCount: number; kind: string; kindLabel: string; detected: boolean }[];
+  sheetIndex: number;
+  preview: (string | number | null)[][];
+  header: { headerRow: number; headerRows: 1 | 2; labels: string[]; mapping: Record<string, number>; confidence: number } | null;
+  fingerprint: string | null;
+  template: { id: number; name: string } | null;
+  rows: {
+    index: number;
+    excelRow: number;
+    type: RowType;
+    stt: string;
+    code: string;
+    name: string;
+    unit: string;
+    quantity: number | null;
+    category: string | null;
+    warnings: string[];
+    codeKnown?: boolean;
+    suggestion?: { code: string; name: string; confidence: number; why: string } | null;
+  }[];
+  counts: Partial<Record<RowType, number>>;
+  fields: { key: string; label: string }[];
+  rowTypeLabels: Record<RowType, string>;
+  warnings: string[];
+}
+
 export interface LegalRegister {
   checkedAt: string;
   note: string;
@@ -105,7 +137,7 @@ export interface PriceRow extends Resource {
   used: boolean;
 }
 
-export type ImportTarget = 'norms' | 'prices' | 'items';
+export type ImportTarget = 'norms' | 'prices' | 'items' | 'estimate';
 export interface ImportPreview {
   fileId: string;
   fileName: string;
@@ -223,6 +255,9 @@ export const api = {
   importPath: (path: string, target: ImportTarget) => request<ImportPreview>('POST', '/import/upload', { path, target }),
   importDrive: (body: { fileId: string; accessToken: string; mimeType: string; name: string; target: ImportTarget }) =>
     request<ImportPreview>('POST', '/import/gdrive', body),
+  importAnalyze: (body: Record<string, unknown>) => request<Analysis>('POST', '/import/analyze', body),
+  importEstimate: (pid: number, body: Record<string, unknown>) =>
+    request<{ created: number; withCode: number; withoutCode: number; categories: number; skipped: number; message: string }>('POST', `/projects/${pid}/import-estimate`, body),
   importPreview: (fileId: string, sheetIndex: number, target: ImportTarget) =>
     request<ImportPreview>('POST', '/import/preview', { fileId, sheetIndex, target }),
   importApply: (body: Record<string, unknown>) => request<{ message: string; count: number }>('POST', '/import/apply', body),

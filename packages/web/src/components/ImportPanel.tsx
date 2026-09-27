@@ -1,9 +1,15 @@
 import { useState } from 'react';
-import { api, type AppConfig, type EstimateResponse, type ImportPreview, type ImportTarget, type User } from '../api';
+import { api, type Analysis, type AppConfig, type EstimateResponse, type ImportPreview, type ImportTarget, type User } from '../api';
+import { EstimateImportReview } from './EstimateImportReview';
 import { pickDriveFile } from './googleDrive';
 import { Modal } from './Modal';
 
 const TARGETS: { key: ImportTarget; label: string; hint: string; admin?: boolean }[] = [
+  {
+    key: 'estimate',
+    label: 'Dự toán / BOQ có sẵn (mọi mẫu Excel: F1, G8, Eta, GXD, mẫu công ty…)',
+    hint: 'Hệ thống tự nhận diện sheet, dòng tiêu đề (kể cả tiêu đề 2 dòng, song ngữ Việt–Trung), hạng mục, công việc và bỏ qua dòng Cộng/Tổng. Bạn xem lại ánh xạ trước khi nhập.',
+  },
   {
     key: 'items',
     label: 'Công tác dự toán (vào công trình này)',
@@ -36,7 +42,8 @@ export function ImportPanel({
   onImported: () => void;
 }) {
   const [source, setSource] = useState<'local' | 'drive'>('local');
-  const [target, setTarget] = useState<ImportTarget>('items');
+  const [target, setTarget] = useState<ImportTarget>('estimate');
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [path, setPath] = useState('');
   const [preview, setPreview] = useState<ImportPreview | null>(null);
@@ -51,7 +58,12 @@ export function ImportPanel({
   const [busy, setBusy] = useState(false);
 
   const isAdmin = user.role === 'admin';
-  const loaded = (p: ImportPreview) => {
+  const loaded = async (p: ImportPreview) => {
+    if (target === 'estimate') {
+      setAnalysis(await api.importAnalyze({ fileId: p.fileId, projectId: data.project.id }));
+      setPreview(null);
+      return;
+    }
     setPreview(p);
     setHeaderRow(p.headerRow);
     setMapping(p.mapping);
@@ -76,20 +88,20 @@ export function ImportPanel({
         const form = new FormData();
         form.append('file', file);
         form.append('target', target);
-        loaded(await api.importUpload(form));
-      } else if (path.trim()) loaded(await api.importPath(path.trim(), target));
+        await loaded(await api.importUpload(form));
+      } else if (path.trim()) await loaded(await api.importPath(path.trim(), target));
     });
 
   const fromDrive = () =>
     wrap(async () => {
       const picked = await pickDriveFile(config.googleDrive);
       if (!picked) return;
-      loaded(await api.importDrive({ fileId: picked.id, accessToken: picked.accessToken, mimeType: picked.mimeType, name: picked.name, target }));
+      await loaded(await api.importDrive({ fileId: picked.id, accessToken: picked.accessToken, mimeType: picked.mimeType, name: picked.name, target }));
     });
 
   const changeSheet = (i: number) =>
     wrap(async () => {
-      if (preview) loaded(await api.importPreview(preview.fileId, i, target));
+      if (preview) await loaded(await api.importPreview(preview.fileId, i, target));
     });
 
   const apply = () =>
@@ -138,6 +150,7 @@ export function ImportPanel({
             onChange={(e) => {
               setTarget(e.target.value as ImportTarget);
               setPreview(null);
+              setAnalysis(null);
             }}
           >
             {TARGETS.filter((t) => !t.admin || isAdmin).map((t) => (
@@ -152,8 +165,8 @@ export function ImportPanel({
         {source === 'local' ? (
           <>
             <label>
-              Chọn file (.xlsx, .csv)
-              <input type="file" accept=".xlsx,.csv,.txt" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              Chọn file (.xlsx, .xlsm, .xls, .csv)
+              <input type="file" accept=".xlsx,.xlsm,.xls,.csv,.txt" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
             </label>
             {config.localMode && (
               <label>
@@ -191,6 +204,20 @@ export function ImportPanel({
       </div>
 
       {error && <div className="error">{error}</div>}
+      {msg && !preview && <p className="ok">{msg}</p>}
+
+      {analysis && (
+        <EstimateImportReview
+          key={analysis.fileId}
+          projectId={data.project.id}
+          initial={analysis}
+          onImported={(m) => {
+            setMsg(m);
+            setAnalysis(null);
+            onImported();
+          }}
+        />
+      )}
 
       {preview && (
         <div className="import-preview">

@@ -18,6 +18,7 @@ import type { DB } from './db.js';
 import { buildWorkbook } from './excel.js';
 import { downloadDriveFile } from './gdrive.js';
 import { applyImport, getParsed, parseBuffer, previewOf, storeParsed, type ImportTarget } from './importer.js';
+import { analyze, importEstimate, listTemplates } from './estimate-import.js';
 import { LegalService, legalDocuments } from './legal.js';
 import { HttpError, Repo } from './repo.js';
 
@@ -532,6 +533,54 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
         priceScope: b.priceScope === 'project' ? 'project' : 'base',
         dataset: t === 'norms' ? dataset(b.dataset) : undefined,
       });
+    }),
+  );
+
+  // import existing estimate files (any layout) – Update 2, B
+  const mappingOf = (v: unknown) => (v && typeof v === 'object' ? (v as Record<string, number>) : undefined);
+  const headerOpts = (b: Record<string, unknown>) => ({
+    sheetIndex: b.sheetIndex !== undefined && b.sheetIndex !== null ? Number(b.sheetIndex) : undefined,
+    headerRow: b.headerRow !== undefined && b.headerRow !== null ? Number(b.headerRow) : undefined,
+    headerRows: (Number(b.headerRows) === 2 ? 2 : 1) as 1 | 2,
+    mapping: mappingOf(b.mapping),
+  });
+  api.post(
+    '/import/analyze',
+    h((req) => {
+      const b = req.body ?? {};
+      const f = getParsed(String(b.fileId), req.user!.id);
+      const projectId = b.projectId ? repo.requireProject(id(String(b.projectId)), req.user!.id, req.user!.role === 'admin').id : undefined;
+      return analyze(db, repo, f, { ...headerOpts(b), kind: b.kind === 'pricebook' ? 'pricebook' : 'estimate', projectId });
+    }),
+  );
+  api.post(
+    '/projects/:id/import-estimate',
+    h((req) => {
+      const p = proj(req);
+      const b = req.body ?? {};
+      const f = getParsed(String(b.fileId), req.user!.id);
+      const r = importEstimate(db, repo, f, p.id, { ...headerOpts(b), rowTypes: b.rowTypes, saveTemplate: b.saveTemplate ?? null }, req.user!.username);
+      if (r.created) assistant.record(p.id, req.user!.id, `Nhập ${r.created} công việc từ ${f.fileName}`, { tool: 'importEstimate', file: f.fileName }, r.undo);
+      let autoText = '';
+      const t = b.autoAssignThreshold;
+      if (t !== undefined && t !== null && r.created) {
+        const plan = autoAssignPlan(repo, p.id, threshold(t));
+        const mine = plan.assign.filter((a) => r.itemIds.includes(a.itemId));
+        if (mine.length) {
+          const res = assistant.confirm(p.id, req.user!.id, { tool: 'autoAssignCodes', params: { assignments: mine } }, `Gắn mã tự động sau khi nhập ${f.fileName}`);
+          autoText = ` ${res.text}`;
+        }
+      }
+      const { undo: _u, ...rest } = r;
+      return { ...rest, message: r.message + autoText };
+    }),
+  );
+  api.get('/import/templates', h((req) => listTemplates(db, req.query.kind === 'pricebook' ? 'pricebook' : req.query.kind === 'estimate' ? 'estimate' : undefined)));
+  api.delete(
+    '/import/templates/:tid',
+    requireAdmin,
+    h((req) => {
+      db.prepare('DELETE FROM import_templates WHERE id = ?').run(id(req.params.tid));
     }),
   );
 

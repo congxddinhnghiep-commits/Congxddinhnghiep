@@ -112,6 +112,19 @@ CREATE TABLE IF NOT EXISTS assistant_history (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS import_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('estimate', 'pricebook')),
+  fingerprint TEXT NOT NULL,
+  header_rows INTEGER NOT NULL DEFAULT 1,
+  mapping_json TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  used_count INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (kind, fingerprint)
+);
+
 CREATE INDEX IF NOT EXISTS idx_items_category ON estimate_items(category_id);
 CREATE INDEX IF NOT EXISTS idx_categories_project ON categories(project_id);
 `;

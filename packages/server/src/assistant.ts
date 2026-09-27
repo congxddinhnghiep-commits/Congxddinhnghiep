@@ -96,6 +96,13 @@ export class AssistantService {
     return { text: result.text };
   }
 
+  /** Record a change made outside the assistant (e.g. a file import) so it can be undone. */
+  record(projectId: number, userId: number, description: string, action: object, undo: UndoOp[]): void {
+    this.repo.db
+      .prepare('INSERT INTO assistant_history (project_id, user_id, description, action_json, undo_json) VALUES (?, ?, ?, ?, ?)')
+      .run(projectId, userId, description, JSON.stringify(action), JSON.stringify(undo));
+  }
+
   undo(projectId: number): { text: string } {
     const last = this.repo.db
       .prepare('SELECT id, description, undo_json FROM assistant_history WHERE project_id = ? AND undone = 0 ORDER BY id DESC LIMIT 1')
