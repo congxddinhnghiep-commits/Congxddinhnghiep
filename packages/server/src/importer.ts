@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
-import ExcelJS from 'exceljs';
 import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
+import type { Merge } from '@dutoan/core';
 import { evaluateFormula, isFormula, normalizeText, parseVnNumber, type ResourceType } from '@dutoan/core';
 import { HttpError, type Repo } from './repo.js';
 
@@ -8,6 +9,8 @@ export type CellValue = string | number | null;
 export interface ParsedSheet {
   name: string;
   rows: CellValue[][];
+  /** Merged ranges (0-based), used to read multi-row headers. */
+  merges?: Merge[];
 }
 export interface ParsedFile {
   id: string;
@@ -53,48 +56,42 @@ export const IMPORT_FIELDS: Record<ImportTarget, { key: string; label: string; r
 const store = new Map<string, ParsedFile>();
 const TTL = 60 * 60 * 1000;
 
-function cellToValue(v: ExcelJS.CellValue): CellValue {
+function cellToValue(v: unknown): CellValue {
   if (v === null || v === undefined) return null;
-  if (typeof v === 'number') return v;
-  if (typeof v === 'string') return v.trim() || null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   if (typeof v === 'boolean') return v ? 1 : 0;
   if (v instanceof Date) return v.toISOString().slice(0, 10);
-  if (typeof v === 'object') {
-    if ('result' in v) return cellToValue((v as ExcelJS.CellFormulaValue).result as ExcelJS.CellValue);
-    if ('richText' in v) return (v as ExcelJS.CellRichTextValue).richText.map((t) => t.text).join('').trim() || null;
-    if ('text' in v) return String((v as ExcelJS.CellHyperlinkValue).text).trim() || null;
-  }
-  return String(v);
+  const t = String(v).trim();
+  return t === '' ? null : t;
 }
 
+/**
+ * Read .xlsx / .xlsm / .xls (SheetJS: cached formula values, merged ranges) and .csv / .txt (Papa Parse,
+ * values kept as text so Vietnamese number formats can be interpreted later).
+ */
 export async function parseBuffer(buf: Buffer, fileName: string): Promise<ParsedSheet[]> {
   const lower = fileName.toLowerCase();
   if (lower.endsWith('.csv') || lower.endsWith('.txt')) {
-    const text = buf.toString('utf8').replace(/^﻿/, '');
-    const res = Papa.parse<string[]>(text, { skipEmptyLines: true });
+    const text = buf.toString('utf8').replace(/^\uFEFF/, '');
+    const res = Papa.parse<string[]>(text, { skipEmptyLines: false });
     const rows = res.data.map((r) => r.map((c) => (c.trim() === '' ? null : c.trim())));
-    return [{ name: 'CSV', rows }];
+    while (rows.length && rows[rows.length - 1].every((c) => c === null)) rows.pop();
+    return [{ name: 'CSV', rows, merges: [] }];
   }
-  if (lower.endsWith('.xls')) {
-    throw new HttpError(400, 'Định dạng .xls cũ chưa được hỗ trợ. Vui lòng mở bằng Excel và lưu lại thành .xlsx.');
-  }
-  const wb = new ExcelJS.Workbook();
+  if (!/\.(xlsx|xlsm|xls)$/.test(lower)) throw new HttpError(400, 'Chỉ hỗ trợ file .xlsx, .xlsm, .xls và .csv.');
+  let wb: XLSX.WorkBook;
   try {
-    await wb.xlsx.load(buf as unknown as ExcelJS.Buffer);
+    wb = XLSX.read(buf, { type: 'buffer', cellDates: true, cellFormula: false, cellStyles: false, dense: false });
   } catch {
-    throw new HttpError(400, 'Không đọc được file. Chỉ hỗ trợ .xlsx và .csv.');
+    throw new HttpError(400, 'Không đọc được file Excel (file hỏng hoặc có mật khẩu).');
   }
-  const sheets: ParsedSheet[] = [];
-  wb.eachSheet((ws) => {
-    const rows: CellValue[][] = [];
-    ws.eachRow({ includeEmpty: true }, (row, n) => {
-      const values = (row.values as ExcelJS.CellValue[]).slice(1).map(cellToValue);
-      rows[n - 1] = values;
-    });
-    for (let i = 0; i < rows.length; i++) rows[i] ??= [];
-    sheets.push({ name: ws.name, rows });
+  return wb.SheetNames.map((name) => {
+    const ws = wb.Sheets[name];
+    const raw = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: null, blankrows: true });
+    const rows = raw.map((r) => (Array.isArray(r) ? r.map(cellToValue) : []));
+    const merges = (ws['!merges'] ?? []).map((m) => ({ s: { r: m.s.r, c: m.s.c }, e: { r: m.e.r, c: m.e.c } }));
+    return { name, rows, merges };
   });
-  return sheets;
 }
 
 export function storeParsed(userId: number, fileName: string, sheets: ParsedSheet[]): ParsedFile {

@@ -12,3 +12,4 @@ export * from './words.js';
 export * from './legal.js';
 export * from './units.js';
 export * from './suggest.js';
+export * from './sheetdetect.js';
