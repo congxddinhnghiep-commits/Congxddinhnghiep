@@ -1,0 +1,36 @@
+{
+ "sha256": {
+  "PL1": "9a6b29a3021377d7fb714b89ed3f678ba31b1c86d0fe13f6b1e8566c3e78292e",
+  "PL2": "454ad108280159d4b041753efef0e248a989be02b26f8d1076eea19c42dd44fb",
+  "PL3": "8249a4e999c23522b6b26376a262b98ca24196ecb066490dc98e107b35b23c3b",
+  "PL4": "c64e09f7d03d80b7d918112244a7bd174182df723e9876b7e697cb86141aeb08",
+  "PL5": "0a70b321b6bbde0187d4a62b412e160580bd8b82187f084fe9e32238d819a493",
+  "PL6": "b440641b2a71edb72cca419ad38e67ea91e9697edf3603d6f600b890c6c61df8"
+ },
+ "stats": {
+  "PL1": {
+   "norms": 439,
+   "resources": 4147
+  },
+  "PL2": {
+   "norms": 4439,
+   "resources": 23231
+  },
+  "PL3": {
+   "norms": 2149,
+   "resources": 11886
+  },
+  "PL4": {
+   "norms": 517,
+   "resources": 7026
+  },
+  "PL5": {
+   "norms": 495,
+   "resources": 3643
+  },
+  "PL6": {
+   "norms": 973,
+   "resources": 3570
+  }
+ }
+}
