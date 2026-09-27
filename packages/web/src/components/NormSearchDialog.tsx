@@ -77,7 +77,19 @@ export function NormSearchDialog({
             <>
               <h4>
                 {detail.code} – {detail.name} ({detail.unit})
+                {detail.status && detail.status !== 'verified' && (
+                  <span className="vbadge warning" style={{ marginLeft: 8 }} title="Dữ liệu tách tự động từ PDF, chưa được người có chuyên môn đối chiếu với văn bản gốc">
+                    cần đối chiếu
+                  </span>
+                )}
               </h4>
+              {(detail.page || detail.sourceFile) && (
+                <p className="hint">
+                  Nguồn: {detail.appendix ? `${detail.appendix}, ` : ''}
+                  {detail.page ? `trang ${detail.page}` : ''}
+                  {detail.sourceFile ? ` – ${detail.sourceFile}` : ''}
+                </p>
+              )}
               <table className="table compact">
                 <thead>
                   <tr>

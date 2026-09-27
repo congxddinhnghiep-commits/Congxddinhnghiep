@@ -29,6 +29,18 @@ export interface Norm {
   name: string;
   unit: string;
   group?: string;
+  /** Phụ lục nguồn (TT 38/2026), e.g. "Phụ lục II". */
+  appendix?: string;
+  sectionCode?: string;
+  sectionTitle?: string;
+  work?: string;
+  variant?: string;
+  /** Trang trong file PDF nguồn. */
+  page?: number | null;
+  sourceFile?: string;
+  sourceSha256?: string;
+  /** 'imported_needs_review' | 'verified' | ... */
+  status?: string;
 }
 
 export interface NormResource {
@@ -37,6 +49,11 @@ export interface NormResource {
   consumption: number;
   /** Adjustment coefficient applied to the consumption (default 1). */
   coefficient?: number;
+  /**
+   * When set, `consumption` is a PERCENTAGE (0–100) applied to the norm's VL or M subtotal
+   * instead of a per-unit consumption (e.g. "Vật liệu khác 10%", "Máy khác 5%" – TT 38/2026).
+   */
+  pctBase?: 'VL' | 'M' | null;
 }
 
 export interface Category {

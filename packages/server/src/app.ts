@@ -22,7 +22,7 @@ import { buildWorkbook } from './excel.js';
 import { downloadDriveFile } from './gdrive.js';
 import { applyImport, getParsed, parseAndStore, previewOf, type ImportTarget } from './importer.js';
 import { analyze, importEstimate, listTemplates } from './estimate-import.js';
-import { PriceBookService, provinceMergers, regions, seedPriceBookExample } from './pricebooks.js';
+import { PriceBookService, provinceMergers, regions, seedPriceBookExample, seedTt38PriceBookAugust2026 } from './pricebooks.js';
 import { validateProject } from './validation.js';
 import { LegalService, legalDocuments } from './legal.js';
 import { HttpError, Repo } from './repo.js';
@@ -80,6 +80,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
   const priceBooks = new PriceBookService(db, repo);
   repo.priceResolver = (pid) => priceBooks.resolve(pid);
   seedPriceBookExample(db);
+  seedTt38PriceBookAugust2026(db);
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
 
   const app = express();

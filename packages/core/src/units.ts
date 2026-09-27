@@ -33,13 +33,24 @@ export const KNOWN_UNITS = new Set([
   'tb', 'thung', 'bao', 'lo', 'ht', 'goi', 'diem', 'vi tri', 'lan', 'thang', 'nam', 'ngay', 'kw', 'kwh', 'khoan', 'mau', 'bo',
 ]);
 
-/** Canonical unit, e.g. "m³" → "m3", "Tấn" → "tan", "100 m3" → "100m3", "md" → "m". */
+/**
+ * A measurement-basis qualifier trailing a base unit doesn't change its dimension (e.g. TT 38/2026
+ * "m3 đất nguyên thổ" = natural-ground m3, "m3 đá nguyên khai" = in-situ rock m3) so it's dropped for
+ * unit compatibility / conversion – but only when it's plain descriptive text right to the end of the
+ * string; a compound rate like ".../1km" or "công/đơn vị vật liệu" is a genuinely different unit and
+ * is left untouched (the qualifier regex requires letters only, anchored at the end).
+ */
+const QUALIFIER_SUFFIX = /^(m2|m3|m|tan|kg)(dat|da|bun)[a-z]*$/;
+
+/** Canonical unit, e.g. "m³" → "m3", "Tấn" → "tan", "100 m3" → "100m3", "md" → "m", "100m3 đất nguyên thổ" → "100m3". */
 export function canonicalUnit(u: string | null | undefined): string {
   if (!u) return '';
   let s = normalizeUnit(String(u)).replace(/[()]/g, '').replace(/\.$/, '');
   const m = /^(\d+)(.*)$/.exec(s);
   const prefix = m ? m[1] : '';
-  const base = m ? m[2] : s;
+  let base = m ? m[2] : s;
+  const q = QUALIFIER_SUFFIX.exec(base);
+  if (q) base = q[1];
   s = ALIASES[base] ?? base;
   return prefix + s;
 }

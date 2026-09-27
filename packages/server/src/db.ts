@@ -60,6 +60,16 @@ CREATE TABLE IF NOT EXISTS norms (
   grp TEXT NOT NULL DEFAULT '',
   name_search TEXT NOT NULL DEFAULT '',
   is_sample INTEGER NOT NULL DEFAULT 0,
+  -- Provenance (TT 38/2026 import): appendix/section/work breakdown, source PDF page and hash.
+  appendix TEXT,
+  section_code TEXT,
+  section_title TEXT,
+  work TEXT,
+  variant TEXT,
+  page INTEGER,
+  source_file TEXT,
+  source_sha256 TEXT,
+  status TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (dataset, code)
 );
 
@@ -79,6 +89,9 @@ CREATE TABLE IF NOT EXISTS norm_resources (
   resource_code TEXT NOT NULL REFERENCES resources(code),
   consumption REAL NOT NULL,
   is_sample INTEGER NOT NULL DEFAULT 0,
+  -- When set ('VL' or 'M'), consumption is a PERCENTAGE of the norm's pre-percentage VL/M subtotal
+  -- (e.g. "Vật liệu khác 10%", "Máy khác 5%" – TT 38/2026) instead of a per-unit consumption.
+  pct_base TEXT,
   PRIMARY KEY (dataset, norm_code, resource_code),
   FOREIGN KEY (dataset, norm_code) REFERENCES norms(dataset, code) ON DELETE CASCADE
 );
@@ -308,6 +321,22 @@ export function migrate(db: DB): void {
     db.pragma('foreign_keys = ON');
   }
   db.exec(`CREATE INDEX IF NOT EXISTS idx_norm_resources_norm ON norm_resources(dataset, norm_code)`);
+
+  // TT 38/2026 import – norm provenance columns and percentage-rule resources ("Vật liệu khác"/"Máy khác").
+  const ncols = columns(db, 'norms');
+  const normCols: [string, string][] = [
+    ['appendix', 'TEXT'],
+    ['section_code', 'TEXT'],
+    ['section_title', 'TEXT'],
+    ['work', 'TEXT'],
+    ['variant', 'TEXT'],
+    ['page', 'INTEGER'],
+    ['source_file', 'TEXT'],
+    ['source_sha256', 'TEXT'],
+    ['status', "TEXT NOT NULL DEFAULT ''"],
+  ];
+  for (const [c, t] of normCols) if (!ncols.includes(c)) db.exec(`ALTER TABLE norms ADD COLUMN ${c} ${t}`);
+  if (!columns(db, 'norm_resources').includes('pct_base')) db.exec(`ALTER TABLE norm_resources ADD COLUMN pct_base TEXT`);
 }
 
 export function openDb(file: string): DB {

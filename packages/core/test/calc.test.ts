@@ -3,6 +3,7 @@ import {
   computeCostSummary,
   computeEstimate,
   computeTotalEstimate,
+  computeUnitCost,
   DEFAULT_COST_SETTINGS,
   evaluateFormula,
   resolveDefaultRates,
@@ -78,6 +79,47 @@ describe('computeEstimate', () => {
     expect(r2.categories[0].items[0].unitCost.vl).toBe(350 * 1650 + 150000);
     const xm = r2.resourceSummary.find((s) => s.code === 'XM')!;
     expect(xm.difference).toBe(3500 * 150);
+  });
+});
+
+describe('percentage resource rows (TT 38/2026 "Vật liệu khác" / "Máy khác")', () => {
+  const pctResources = [
+    { code: 'XM', name: 'Xi măng PCB30', unit: 'kg', type: 'VL' as const, basePrice: 1500 },
+    { code: 'VLK', name: 'Vật liệu khác', unit: '%', type: 'VL' as const, basePrice: 0 },
+    { code: 'MTC', name: 'Máy trộn', unit: 'ca', type: 'M' as const, basePrice: 100000 },
+    { code: 'MK', name: 'Máy khác', unit: '%', type: 'M' as const, basePrice: 0 },
+  ];
+  // XM 100 kg × 1.500 = 150.000 VL; VLK 10% → +15.000 VL ⇒ VL = 165.000
+  // MTC 1 ca × 100.000 = 100.000 M; MK 5% → +5.000 M ⇒ M = 105.000
+  const pctNormResources = [
+    { normCode: 'P1', resourceCode: 'XM', consumption: 100 },
+    { normCode: 'P1', resourceCode: 'VLK', consumption: 10, pctBase: 'VL' as const },
+    { normCode: 'P1', resourceCode: 'MTC', consumption: 1 },
+    { normCode: 'P1', resourceCode: 'MK', consumption: 5, pctBase: 'M' as const },
+  ];
+
+  it('adds the percentage on top of the pre-percentage VL/M subtotal', () => {
+    const u = computeUnitCost(pctNormResources, new Map(pctResources.map((r) => [r.code, r])));
+    expect(u.vl).toBeCloseTo(165000, 6);
+    expect(u.m).toBeCloseTo(105000, 6);
+    expect(u.total).toBeCloseTo(270000, 6);
+  });
+
+  it('reflects the percentage rows in the item analysis and resource summary', () => {
+    const r = computeEstimate({
+      categories: [{ id: 1, name: 'HM', order: 1 }],
+      items: [{ id: 1, categoryId: 1, order: 1, normCode: 'P1', name: 'Công tác', unit: 'm3', quantity: 2 }],
+      normResources: pctNormResources,
+      resources: pctResources,
+    });
+    const item = r.categories[0].items[0];
+    expect(item.unitCost.vl).toBeCloseTo(165000, 6);
+    expect(item.amount.total).toBeCloseTo(540000, 6);
+    const vlk = item.analysis.find((a) => a.resourceCode === 'VLK')!;
+    expect(vlk.unitAmount).toBeCloseTo(15000, 6);
+    expect(vlk.amount).toBeCloseTo(30000, 6);
+    const mk = r.resourceSummary.find((s) => s.code === 'MK')!;
+    expect(mk.amount).toBeCloseTo(10000, 6);
   });
 });
 

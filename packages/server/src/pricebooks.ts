@@ -639,3 +639,26 @@ export function seedPriceBookExample(db: DB): void {
     'Công bố giá vật liệu xây dựng tháng 02/2026. Chỉ có thông tin văn bản (nguồn tóm tắt: dutoanf1.com.vn; trang chính thức: soxaydung.hochiminhcity.gov.vn) – chưa có dòng giá. Tải file công bố giá chính thức và nhập vào để sử dụng.',
   );
 }
+
+/** Metadata-only: Công bố giá VLXD TP. Hồ Chí Minh tháng 8/2026 (số 32431/TB-SXD-KTVLXD). No prices are invented. */
+export function seedTt38PriceBookAugust2026(db: DB): void {
+  const docNumber = '32431/TB-SXD-KTVLXD';
+  const exists = db.prepare(`SELECT 1 FROM price_books WHERE doc_number = ?`).get(docNumber);
+  if (exists) return;
+  const { start, end } = periodRange('month', 2026, 8);
+  db.prepare(
+    `INSERT INTO price_books (region, issuer, doc_number, doc_date, period_type, period_year, period_value, period_start, period_end, book_type,
+       vat, status, verification_status, note, created_by)
+     VALUES (?, ?, ?, ?, 'month', 2026, 8, ?, ?, 'VL', 'unknown', 'draft', 'needs_review', ?, ?)`,
+  ).run(
+    'TP. Hồ Chí Minh',
+    'Sở Xây dựng',
+    docNumber,
+    '2026-09-09',
+    start,
+    end,
+    `Công bố giá vật liệu xây dựng tháng 08/2026, số ${docNumber} ngày 09/09/2026. Ngày ban hành đọc từ dấu ký số (e-sign) trên file – verification_status = needs_review, cần đối chiếu bản gốc. ` +
+      'Chỉ có thông tin văn bản, chưa có dòng giá (0 dòng): cần nhập bổ sung Phụ lục 1-19 (giá VLXD theo khu vực) từ file công bố chính thức.',
+    'import:tt38',
+  );
+}

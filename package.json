@@ -16,6 +16,7 @@
     "build": "npm run build -w @dutoan/core && npm run build -w @dutoan/server && npm run build -w @dutoan/web",
     "dev": "npm run build -w @dutoan/core && concurrently -k -n server,web -c blue,green \"npm run dev -w @dutoan/server\" \"npm run dev -w @dutoan/web\"",
     "start": "node packages/server/dist/index.js",
+    "import:tt38": "tsx packages/server/src/scripts/import-tt38.ts",
     "test": "vitest run",
     "typecheck": "tsc -p packages/core && tsc -p packages/server --noEmit && tsc -p packages/web --noEmit"
   },

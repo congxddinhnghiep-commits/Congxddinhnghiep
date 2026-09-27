@@ -93,8 +93,10 @@ export function extractParams(norm: string): WorkParams {
   const grades = [...s.matchAll(/\bmac (\d{2,3})\b/g)].map((m) => m[1]).filter((g) => g !== p.mortar || !mortar);
   if (grades.length && p.work !== 'xay' && p.work !== 'trat' && p.work !== 'lat') p.grade = grades[0];
 
-  // Diameter of rebar
-  const dia = /\b(?:duong kinh|d)\s*(le|lt|gt|ge)?\s*(\d{1,2})\s*(?:mm)?\b/.exec(s);
+  // Diameter of rebar. TT 38/2026 often puts the noun between "đường kính" and the value
+  // ("đường kính cốt thép (mm) – ≤18"), so allow a short non-numeric filler there.
+  const dia =
+    /\bduong kinh\b[^0-9]{0,20}?(le|lt|gt|ge)?\s*(\d{1,2})\s*(?:mm)?\b/.exec(s) ?? /\bd\s*(le|lt|gt|ge)?\s*(\d{1,2})\s*(?:mm)?\b/.exec(s);
   if (dia && p.work === 'cot_thep') {
     const v = Number(dia[2]);
     const cmp = dia[1];
@@ -113,7 +115,9 @@ export function extractParams(norm: string): WorkParams {
   const height = /\bcao\s*(le|lt)?\s*(\d+(?:\.\d+)?)\s*m\b/.exec(s);
   if (height) p.height = height[2];
 
-  const soil = /\bdat\s*(?:cap\s*|c)(i{1,3}|iv|[1-4])\b/.exec(s) ?? /\bcap (i{1,3}|iv|[1-4])\b/.exec(s);
+  // TT 38/2026 names the grade before the noun ("Cấp đất – I") instead of "đất cấp II".
+  const soil =
+    /\bdat\s*(?:cap\s*|c)(i{1,3}|iv|[1-4])\b/.exec(s) ?? /\bcap (i{1,3}|iv|[1-4])\b/.exec(s) ?? /\bcap dat\b[^a-z0-9]{1,3}(i{1,3}|iv|[1-4])\b/.exec(s);
   if (soil && (p.work === 'dao' || p.work === 'dap' || p.work === 'van_chuyen' || p.work === 'ep_coc')) p.soil = ROMAN[soil[1]] ?? soil[1];
 
   const section = /\btiet dien\s*(le|lt|gt|ge)\s*0\.1(?!\d)/.exec(s);

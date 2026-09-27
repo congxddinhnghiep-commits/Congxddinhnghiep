@@ -27,13 +27,14 @@ describe('price books', () => {
   let bookId = 0;
   let pid = 0;
 
-  it('seeds one metadata-only HCMC book and the 34 provinces', async () => {
+  it('seeds the metadata-only HCMC books and the 34 provinces', async () => {
     const regions = (await request(app).get('/api/regions').set(A())).body;
     expect(regions).toHaveLength(34);
     expect(regions).toContain('TP. Hồ Chí Minh');
     const books = (await request(app).get('/api/price-books').set(A())).body;
-    expect(books).toHaveLength(1);
-    expect(books[0]).toMatchObject({
+    expect(books).toHaveLength(2);
+    const feb = books.find((b: { docNumber: string }) => b.docNumber === '7563/TB-SXD-KTVLXD');
+    expect(feb).toMatchObject({
       region: 'TP. Hồ Chí Minh',
       issuer: 'Sở Xây dựng TP. Hồ Chí Minh',
       docNumber: '7563/TB-SXD-KTVLXD',
@@ -42,9 +43,22 @@ describe('price books', () => {
       status: 'draft',
       rowCount: 0,
     });
-    expect(books[0].note).toMatch(/Tải file công bố giá chính thức/);
-    const bad = await request(app).post(`/api/price-books/${books[0].id}/status`).set(A()).send({ status: 'verified' });
+    expect(feb.note).toMatch(/Tải file công bố giá chính thức/);
+    const bad = await request(app).post(`/api/price-books/${feb.id}/status`).set(A()).send({ status: 'verified' });
     expect(bad.status).toBe(400);
+
+    const aug = books.find((b: { docNumber: string }) => b.docNumber === '32431/TB-SXD-KTVLXD');
+    expect(aug).toMatchObject({
+      region: 'TP. Hồ Chí Minh',
+      issuer: 'Sở Xây dựng',
+      docNumber: '32431/TB-SXD-KTVLXD',
+      docDate: '2026-09-09',
+      periodStart: '2026-08-01',
+      status: 'draft',
+      verificationStatus: 'needs_review',
+      rowCount: 0,
+    });
+    expect(aug.note).toMatch(/Phụ lục 1-19/);
   });
 
   it('creates a book and imports a price list with code / fuzzy matching and a review list', async () => {

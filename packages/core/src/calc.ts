@@ -88,20 +88,52 @@ export function priceOf(resource: Resource, projectPrices?: Record<string, numbe
   return p !== undefined && p !== null ? p : resource.basePrice;
 }
 
-/** Unit cost of one norm: VL = Σ(consumption × price) over VL resources, same for NC, M. */
-export function computeUnitCost(
-  normResources: NormResource[],
-  resources: Map<string, Resource>,
-  projectPrices?: Record<string, number>,
-): UnitCost {
-  const u = zero();
+interface PctContribution {
+  resourceCode: string;
+  type: ResourceType;
+  base: 'VL' | 'M';
+  pct: number;
+  /** VNĐ per unit of the item, computed from the pre-percentage VL/M subtotal. */
+  amount: number;
+}
+
+interface UnitCostBreakdown {
+  /** Subtotal before percentage rows ("Vật liệu khác", "Máy khác") are applied. */
+  pre: UnitCost;
+  unitCost: UnitCost;
+  pct: PctContribution[];
+}
+
+/**
+ * Unit cost of one norm: VL = Σ(consumption × price) over VL resources, same for NC, M.
+ * Resources with `pctBase` (e.g. "Vật liệu khác", "Máy khác" – TT 38/2026) are a PERCENTAGE of the
+ * pre-percentage VL or M subtotal, applied in a second pass and added to their own resource type.
+ */
+function breakdownUnitCost(normResources: NormResource[], resources: Map<string, Resource>, projectPrices?: Record<string, number>): UnitCostBreakdown {
+  const pre = zero();
+  const pctRows: Omit<PctContribution, 'amount'>[] = [];
   for (const nr of normResources) {
     const r = resources.get(nr.resourceCode);
     if (!r) continue;
-    u[typeKey[r.type]] += expandResource(1, nr.consumption, nr.coefficient ?? 1) * priceOf(r, projectPrices);
+    if (nr.pctBase) {
+      pctRows.push({ resourceCode: r.code, type: r.type, base: nr.pctBase, pct: nr.consumption });
+      continue;
+    }
+    pre[typeKey[r.type]] += expandResource(1, nr.consumption, nr.coefficient ?? 1) * priceOf(r, projectPrices);
   }
-  u.total = u.vl + u.nc + u.m;
-  return u;
+  pre.total = pre.vl + pre.nc + pre.m;
+  const unitCost = { ...pre };
+  const pct = pctRows.map((p) => {
+    const amount = ((p.base === 'VL' ? pre.vl : pre.m) * p.pct) / 100;
+    unitCost[typeKey[p.type]] += amount;
+    return { ...p, amount };
+  });
+  unitCost.total = unitCost.vl + unitCost.nc + unitCost.m;
+  return { pre, unitCost, pct };
+}
+
+export function computeUnitCost(normResources: NormResource[], resources: Map<string, Resource>, projectPrices?: Record<string, number>): UnitCost {
+  return breakdownUnitCost(normResources, resources, projectPrices).unitCost;
 }
 
 /**
@@ -127,6 +159,8 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
   }
 
   const summary = new Map<string, ResourceSummaryRow>();
+  /** Accumulated amount of percentage-rule resources (e.g. "Vật liệu khác"), which isn't quantity × price. */
+  const pctAmounts = new Map<string, number>();
   const total = zero();
   const categories: CategoryResult[] = [...input.categories]
     .sort((a, b) => a.order - b.order || a.id - b.id)
@@ -144,7 +178,8 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
             return { ...it, unitCost, amount, analysis: [], missingNorm: false };
           }
           const nrs = byNorm.get(it.normCode) ?? [];
-          const unitCost = computeUnitCost(nrs, resources, input.projectPrices);
+          const breakdown = breakdownUnitCost(nrs, resources, input.projectPrices);
+          const unitCost = breakdown.unitCost;
           const q = it.quantity || 0;
           const amount: UnitCost = {
             vl: unitCost.vl * q,
@@ -156,6 +191,16 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
           for (const nr of nrs) {
             const r = resources.get(nr.resourceCode);
             if (!r) continue;
+            if (nr.pctBase) {
+              const p = breakdown.pct.find((x) => x.resourceCode === r.code && x.base === nr.pctBase && x.pct === nr.consumption);
+              const unitAmount = p?.amount ?? 0;
+              analysis.push({ resourceCode: r.code, name: r.name, unit: r.unit, type: r.type, consumption: nr.consumption, quantity: q, price: 0, unitAmount, amount: unitAmount * q });
+              const s = summary.get(r.code) ?? { code: r.code, name: r.name, unit: r.unit, type: r.type, quantity: 0, basePrice: r.basePrice, price: 0, amount: 0, difference: 0 };
+              s.quantity += q;
+              summary.set(r.code, s);
+              pctAmounts.set(r.code, (pctAmounts.get(r.code) ?? 0) + unitAmount * q);
+              continue;
+            }
             const price = priceOf(r, input.projectPrices);
             const quantity = expandResource(q, nr.consumption, nr.coefficient ?? 1);
             analysis.push({
@@ -192,7 +237,7 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
 
   const order: Record<ResourceType, number> = { VL: 0, NC: 1, M: 2 };
   const resourceSummary = [...summary.values()]
-    .map((s) => ({ ...s, amount: s.quantity * s.price, difference: (s.price - s.basePrice) * s.quantity }))
+    .map((s) => (pctAmounts.has(s.code) ? { ...s, amount: pctAmounts.get(s.code)!, difference: 0 } : { ...s, amount: s.quantity * s.price, difference: (s.price - s.basePrice) * s.quantity }))
     .sort((a, b) => order[a.type] - order[b.type] || a.code.localeCompare(b.code));
 
   return { categories, total, resourceSummary };

@@ -693,22 +693,57 @@ export class Repo {
 
   // ---------------- norms & resources ----------------
   getNorm(code: string, dataset: string): Norm | undefined {
-    const r = this.db.prepare('SELECT code, name, unit, grp FROM norms WHERE dataset = ? AND code = ? COLLATE NOCASE').get(dataset, code) as
-      | { code: string; name: string; unit: string; grp: string }
+    const r = this.db
+      .prepare(
+        `SELECT code, name, unit, grp, appendix, section_code, section_title, work, variant, page, source_file, source_sha256, status
+         FROM norms WHERE dataset = ? AND code = ? COLLATE NOCASE`,
+      )
+      .get(dataset, code) as
+      | {
+          code: string;
+          name: string;
+          unit: string;
+          grp: string;
+          appendix: string | null;
+          section_code: string | null;
+          section_title: string | null;
+          work: string | null;
+          variant: string | null;
+          page: number | null;
+          source_file: string | null;
+          source_sha256: string | null;
+          status: string | null;
+        }
       | undefined;
-    return r && { code: r.code, name: r.name, unit: r.unit, group: r.grp };
+    return (
+      r && {
+        code: r.code,
+        name: r.name,
+        unit: r.unit,
+        group: r.grp,
+        appendix: r.appendix ?? undefined,
+        sectionCode: r.section_code ?? undefined,
+        sectionTitle: r.section_title ?? undefined,
+        work: r.work ?? undefined,
+        variant: r.variant ?? undefined,
+        page: r.page ?? undefined,
+        sourceFile: r.source_file ?? undefined,
+        sourceSha256: r.source_sha256 ?? undefined,
+        status: r.status || undefined,
+      }
+    );
   }
 
   getNormResources(code: string, dataset: string): (NormResource & Resource)[] {
     return (
       this.db
         .prepare(
-          `SELECT nr.norm_code, nr.resource_code, nr.consumption, r.* FROM norm_resources nr
+          `SELECT nr.norm_code, nr.resource_code, nr.consumption, nr.pct_base, r.* FROM norm_resources nr
            JOIN resources r ON r.code = nr.resource_code WHERE nr.dataset = ? AND nr.norm_code = ?
            ORDER BY CASE r.type WHEN 'VL' THEN 0 WHEN 'NC' THEN 1 ELSE 2 END, r.code`,
         )
-        .all(dataset, code) as (ResourceRow & { norm_code: string; resource_code: string; consumption: number })[]
-    ).map((r) => ({ ...toResource(r), normCode: r.norm_code, resourceCode: r.resource_code, consumption: r.consumption }));
+        .all(dataset, code) as (ResourceRow & { norm_code: string; resource_code: string; consumption: number; pct_base: 'VL' | 'M' | null })[]
+    ).map((r) => ({ ...toResource(r), normCode: r.norm_code, resourceCode: r.resource_code, consumption: r.consumption, pctBase: r.pct_base ?? undefined }));
   }
 
   /** Diacritic-insensitive search by code or name. */
@@ -804,10 +839,10 @@ export class Repo {
     const normResources: NormResource[] = [];
     const resourceCodes = new Set<string>();
     const legalSet = this.legal.get(project.legalSet);
-    const stmt = this.db.prepare('SELECT norm_code, resource_code, consumption FROM norm_resources WHERE dataset = ? AND norm_code = ?');
+    const stmt = this.db.prepare('SELECT norm_code, resource_code, consumption, pct_base FROM norm_resources WHERE dataset = ? AND norm_code = ?');
     for (const c of codes) {
-      for (const r of stmt.all(legalSet.normDataset, c) as { norm_code: string; resource_code: string; consumption: number }[]) {
-        normResources.push({ normCode: r.norm_code, resourceCode: r.resource_code, consumption: r.consumption });
+      for (const r of stmt.all(legalSet.normDataset, c) as { norm_code: string; resource_code: string; consumption: number; pct_base: 'VL' | 'M' | null }[]) {
+        normResources.push({ normCode: r.norm_code, resourceCode: r.resource_code, consumption: r.consumption, pctBase: r.pct_base ?? undefined });
         resourceCodes.add(r.resource_code);
       }
     }
