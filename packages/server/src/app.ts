@@ -22,7 +22,7 @@ import { buildWorkbook } from './excel.js';
 import { downloadDriveFile } from './gdrive.js';
 import { applyImport, getParsed, parseAndStore, previewOf, type ImportTarget } from './importer.js';
 import { analyze, importEstimate, listTemplates } from './estimate-import.js';
-import { PriceBookService, provinceMergers, regions, seedPriceBookExample, seedTt38PriceBookAugust2026 } from './pricebooks.js';
+import { PriceBookService, provinceMergers, regions, seedHcmJune2026PriceBook, seedPriceBookExample, seedTt38PriceBookAugust2026 } from './pricebooks.js';
 import { validateProject } from './validation.js';
 import { LegalService, legalDocuments } from './legal.js';
 import { HttpError, Repo } from './repo.js';
@@ -81,6 +81,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
   repo.priceResolver = (pid) => priceBooks.resolve(pid);
   seedPriceBookExample(db);
   seedTt38PriceBookAugust2026(db);
+  seedHcmJune2026PriceBook(db);
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
 
   const app = express();
@@ -667,7 +668,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
   api.get('/regions', h(() => regions()));
   const bid = (req: Request) => id(req.params.bid);
   api.get('/price-books', h((req) => priceBooks.list({ region: req.query.region ? String(req.query.region) : undefined, type: req.query.type ? String(req.query.type) : undefined })));
-  api.get('/price-books/:bid', h((req) => ({ ...priceBooks.get(bid(req)), rows: priceBooks.rows(bid(req)) })));
+  api.get('/price-books/:bid', h((req) => ({ ...priceBooks.get(bid(req)), rows: priceBooks.rows(bid(req)), suppliers: priceBooks.suppliers(bid(req)) })));
   api.post(
     '/price-books',
     requireAdmin,

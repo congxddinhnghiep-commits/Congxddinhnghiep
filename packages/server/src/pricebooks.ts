@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import Papa from 'papaparse';
 import {
   bookTitle,
   canonicalUnit,
@@ -220,6 +221,20 @@ export class PriceBookService {
 
   rows(bookId: number) {
     return (this.db.prepare('SELECT * FROM price_book_rows WHERE book_id = ? ORDER BY id').all(bookId) as RowRow[]).map(toRow);
+  }
+
+  /** Source register of suppliers cited in the notice (used when the book itself has no price rows yet). */
+  suppliers(bookId: number) {
+    return (
+      this.db.prepare('SELECT group_no, group_name, item_no, supplier, reference, status FROM price_book_suppliers WHERE book_id = ? ORDER BY sort_order').all(bookId) as {
+        group_no: string;
+        group_name: string;
+        item_no: string | null;
+        supplier: string;
+        reference: string | null;
+        status: string | null;
+      }[]
+    ).map((r) => ({ groupNo: r.group_no, groupName: r.group_name, itemNo: r.item_no, supplier: r.supplier, reference: r.reference, status: r.status }));
   }
 
   private validate(i: BookInput, cur?: ReturnType<PriceBookService['get']>) {
@@ -661,4 +676,59 @@ export function seedTt38PriceBookAugust2026(db: DB): void {
       'Chỉ có thông tin văn bản, chưa có dòng giá (0 dòng): cần nhập bổ sung Phụ lục 1-19 (giá VLXD theo khu vực) từ file công bố chính thức.',
     'import:tt38',
   );
+}
+
+interface SupplierCsvRow {
+  nhom: string;
+  ten_nhom: string;
+  stt: string;
+  don_vi: string;
+  can_cu: string;
+  trang_thai: string;
+}
+
+/**
+ * Metadata-only: Công bố giá VLXD TP. Hồ Chí Minh tháng 6/2026 (trước 01/07/2026, căn cứ NĐ 10/2021 +
+ * TT 11/2021). The notice's own number isn't in the PDF text layer (likely a scanned stamp) – flagged
+ * needs_review instead of guessed. No price rows; imports its supplier source register instead
+ * (data/pricebooks/hcm_2026_06/hcm_2026_06_suppliers.csv – 25 material groups, 49 supplier letters).
+ */
+export function seedHcmJune2026PriceBook(db: DB): void {
+  const { start, end } = periodRange('month', 2026, 6);
+  const exists = db.prepare(`SELECT id FROM price_books WHERE region = ? AND period_start = ? AND period_end = ? AND book_type = 'VL'`).get('TP. Hồ Chí Minh', start, end) as
+    | { id: number }
+    | undefined;
+  if (exists) return;
+  const info = db
+    .prepare(
+      `INSERT INTO price_books (region, issuer, doc_number, doc_date, period_type, period_year, period_value, period_start, period_end, book_type,
+         vat, status, verification_status, note, created_by)
+       VALUES (?, ?, ?, NULL, 'month', 2026, 6, ?, ?, 'VL', 'unknown', 'draft', 'needs_review', ?, ?)`,
+    )
+    .run(
+      'TP. Hồ Chí Minh',
+      'Sở Xây dựng',
+      '',
+      start,
+      end,
+      'Công bố giá vật liệu xây dựng tháng 06/2026. Căn cứ pháp lý ghi trong thông báo: Nghị định số 10/2021/NĐ-CP và Thông tư số 11/2021/TT-BXD ' +
+        '(trước ngày 01/07/2026, chưa theo địa giới/quy định hợp nhất từ 01/07/2026). Số hiệu thông báo không có trong lớp văn bản (text layer) của file – ' +
+        'verification_status = needs_review, cần đối chiếu bản gốc để lấy số hiệu. Chưa có dòng giá (0 dòng): phụ lục là bản scan độ phân giải thấp, chưa trích được số liệu – ' +
+        'xem danh sách đơn vị công bố giá (nguồn) bên dưới; cần trích giá từ bản scan gốc.',
+      'import:hcm-2026-06',
+    );
+  const bookId = Number(info.lastInsertRowid);
+
+  const file = path.join(DATA_DIR, 'pricebooks/hcm_2026_06/hcm_2026_06_suppliers.csv');
+  const raw = fs.readFileSync(file, 'utf8').replace(/^﻿/, '');
+  const parsed = Papa.parse<SupplierCsvRow>(raw, { header: true, skipEmptyLines: true });
+  const insSupplier = db.prepare(
+    `INSERT INTO price_book_suppliers (book_id, group_no, group_name, item_no, supplier, reference, status, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  parsed.data.forEach((r, i) => {
+    const groupNo = (r.nhom ?? '').trim();
+    const supplier = (r.don_vi ?? '').trim();
+    if (!groupNo || !supplier) return;
+    insSupplier.run(bookId, groupNo, (r.ten_nhom ?? '').trim(), (r.stt ?? '').trim() || null, supplier, (r.can_cu ?? '').trim() || null, (r.trang_thai ?? '').trim() || null, i);
+  });
 }

@@ -168,6 +168,21 @@ CREATE TABLE IF NOT EXISTS price_book_rows (
 CREATE INDEX IF NOT EXISTS idx_price_book_rows_book ON price_book_rows(book_id);
 CREATE INDEX IF NOT EXISTS idx_price_book_rows_res ON price_book_rows(resource_code);
 
+-- Source register of suppliers cited in a metadata-only price book notice (no price rows yet), e.g.
+-- "Công bố giá VLXD TP. Hồ Chí Minh tháng 6/2026": material group, supplier and their reference letter.
+CREATE TABLE IF NOT EXISTS price_book_suppliers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  book_id INTEGER NOT NULL REFERENCES price_books(id) ON DELETE CASCADE,
+  group_no TEXT NOT NULL,
+  group_name TEXT NOT NULL,
+  item_no TEXT,
+  supplier TEXT NOT NULL,
+  reference TEXT,
+  status TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_price_book_suppliers_book ON price_book_suppliers(book_id);
+
 CREATE TABLE IF NOT EXISTS project_price_books (
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   book_id INTEGER NOT NULL REFERENCES price_books(id) ON DELETE CASCADE,

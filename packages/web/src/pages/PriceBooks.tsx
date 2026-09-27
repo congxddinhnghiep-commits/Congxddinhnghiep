@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { BOOK_TYPE_LABELS } from '@dutoan/core';
-import { api, type Analysis, type AppConfig, type PriceBookInfo, type PriceBookRowInfo, type User } from '../api';
+import { api, type Analysis, type AppConfig, type PriceBookInfo, type PriceBookRowInfo, type PriceBookSupplierInfo, type User } from '../api';
 import { Modal } from '../components/Modal';
 import { money } from '../format';
 
@@ -201,7 +201,7 @@ function ResourcePicker({ onPick }: { onPick: (code: string) => void }) {
 }
 
 function BookDetail({ bookId, user, onChanged }: { bookId: number; user: User; onChanged: () => void }) {
-  const [book, setBook] = useState<(PriceBookInfo & { rows: PriceBookRowInfo[] }) | null>(null);
+  const [book, setBook] = useState<(PriceBookInfo & { rows: PriceBookRowInfo[]; suppliers: PriceBookSupplierInfo[] }) | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [mapping, setMapping] = useState<Record<string, number>>({});
   const [filter, setFilter] = useState<'all' | 'unmatched'>('all');
@@ -408,6 +408,35 @@ function BookDetail({ bookId, user, onChanged }: { bookId: number; user: User; o
         </table>
       </div>
       {book.rows.length === 0 && <p className="hint">Chưa có dòng giá. Tải file công bố giá chính thức và nhập vào để sử dụng.</p>}
+      {book.suppliers.length > 0 && (
+        <div className="table-scroll">
+          <h4>Danh sách đơn vị công bố giá (nguồn) – {book.suppliers.length} đơn vị</h4>
+          <table className="table compact">
+            <thead>
+              <tr>
+                <th>Nhóm</th>
+                <th>STT</th>
+                <th>Đơn vị</th>
+                <th>Căn cứ</th>
+                <th>Trạng thái</th>
+              </tr>
+            </thead>
+            <tbody>
+              {book.suppliers.map((s, i) => (
+                <tr key={i}>
+                  <td>
+                    {s.groupNo} – {s.groupName}
+                  </td>
+                  <td>{s.itemNo}</td>
+                  <td>{s.supplier}</td>
+                  <td>{s.reference}</td>
+                  <td className="hint">{s.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {records && (
         <Modal title={`Bản ghi theo data-contract.md (${records.length})`} onClose={() => setRecords(null)} wide>
           <div className="table-scroll" style={{ maxHeight: 460 }}>

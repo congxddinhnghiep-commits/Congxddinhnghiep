@@ -130,6 +130,15 @@ export interface PriceBookRowInfo {
   matchNote: string | null;
 }
 
+export interface PriceBookSupplierInfo {
+  groupNo: string;
+  groupName: string;
+  itemNo: string | null;
+  supplier: string;
+  reference: string | null;
+  status: string | null;
+}
+
 export interface BookSel {
   bookId: number;
   resourceType: 'VL' | 'NC' | 'M';
@@ -365,7 +374,7 @@ export const api = {
 
   priceBooks: (q: { region?: string; type?: string } = {}) =>
     request<PriceBookInfo[]>('GET', `/price-books?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString()}`),
-  priceBook: (bid: number) => request<PriceBookInfo & { rows: PriceBookRowInfo[] }>('GET', `/price-books/${bid}`),
+  priceBook: (bid: number) => request<PriceBookInfo & { rows: PriceBookRowInfo[]; suppliers: PriceBookSupplierInfo[] }>('GET', `/price-books/${bid}`),
   createPriceBook: (b: Partial<PriceBookInfo>) => request<PriceBookInfo>('POST', '/price-books', b),
   updatePriceBook: (bid: number, b: Partial<PriceBookInfo>) => request<PriceBookInfo>('PUT', `/price-books/${bid}`, b),
   deletePriceBook: (bid: number) => request('DELETE', `/price-books/${bid}`),

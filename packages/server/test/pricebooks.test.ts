@@ -32,7 +32,7 @@ describe('price books', () => {
     expect(regions).toHaveLength(34);
     expect(regions).toContain('TP. Hồ Chí Minh');
     const books = (await request(app).get('/api/price-books').set(A())).body;
-    expect(books).toHaveLength(2);
+    expect(books).toHaveLength(3);
     const feb = books.find((b: { docNumber: string }) => b.docNumber === '7563/TB-SXD-KTVLXD');
     expect(feb).toMatchObject({
       region: 'TP. Hồ Chí Minh',
@@ -59,6 +59,15 @@ describe('price books', () => {
       rowCount: 0,
     });
     expect(aug.note).toMatch(/Phụ lục 1-19/);
+
+    const jun = books.find((b: { periodStart: string }) => b.periodStart === '2026-06-01');
+    expect(jun).toMatchObject({ region: 'TP. Hồ Chí Minh', issuer: 'Sở Xây dựng', docNumber: '', status: 'draft', verificationStatus: 'needs_review', rowCount: 0 });
+    expect(jun.note).toMatch(/Nghị định số 10\/2021.*Thông tư số 11\/2021/);
+    expect(jun.note).toMatch(/không có trong lớp văn bản/);
+    const junDetail = (await request(app).get(`/api/price-books/${jun.id}`).set(A())).body;
+    expect(junDetail.suppliers.length).toBeGreaterThan(40);
+    expect(new Set(junDetail.suppliers.map((s: { groupNo: string }) => s.groupNo)).size).toBe(25);
+    expect(junDetail.suppliers[0]).toMatchObject({ groupName: 'THÉP XÂY DỰNG', status: 'Chưa trích giá (phụ lục là bản scan)' });
   });
 
   it('creates a book and imports a price list with code / fuzzy matching and a review list', async () => {
