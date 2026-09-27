@@ -145,3 +145,13 @@ describe('evaluateFormula', () => {
     expect(() => evaluateFormula('1/0')).toThrow();
   });
 });
+
+import { amountInWords } from '@dutoan/core';
+describe('amountInWords', () => {
+  it.each([
+    [1250000, 'Một triệu hai trăm năm mươi nghìn đồng'],
+    [105, 'Một trăm lẻ năm đồng'],
+    [2021, 'Hai nghìn không trăm hai mươi mốt đồng'],
+    [15, 'Mười lăm đồng'],
+  ])('%d', (n, s) => expect(amountInWords(n)).toBe(s));
+});

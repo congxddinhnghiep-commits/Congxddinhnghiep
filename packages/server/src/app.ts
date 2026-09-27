@@ -1,0 +1,372 @@
+import express, { type NextFunction, type Request, type Response } from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
+import multer from 'multer';
+import { BUILDING_TYPE_LABELS, evaluateFormula, FormulaError, isFormula, type BuildingType, type CostSettings } from '@dutoan/core';
+import { AssistantService } from './assistant.js';
+import { AuthService, requireAdmin, requirePasswordChanged } from './auth.js';
+import { config, WEB_DIST } from './config.js';
+import type { DB } from './db.js';
+import { buildWorkbook } from './excel.js';
+import { downloadDriveFile } from './gdrive.js';
+import { applyImport, getParsed, parseBuffer, previewOf, storeParsed, type ImportTarget } from './importer.js';
+import { HttpError, ratesTable, Repo } from './repo.js';
+
+type Handler = (req: Request, res: Response) => unknown | Promise<unknown>;
+/** Wrap a handler: JSON-serialise the return value and forward errors. */
+const h =
+  (fn: Handler) =>
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const out = await fn(req, res);
+      if (!res.headersSent) res.json(out ?? { ok: true });
+    } catch (e) {
+      next(e);
+    }
+  };
+
+const id = (v: string | undefined) => {
+  const n = Number(v);
+  if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'Mã không hợp lệ');
+  return n;
+};
+
+const BUILDING_TYPES = Object.keys(BUILDING_TYPE_LABELS) as BuildingType[];
+
+/** Parse quantity input: either a number or a "diễn giải" formula. */
+function quantityFromBody(body: { quantity?: unknown; quantityFormula?: unknown }): { quantity?: number; quantityFormula?: string | null } {
+  const out: { quantity?: number; quantityFormula?: string | null } = {};
+  if (typeof body.quantityFormula === 'string') {
+    const f = body.quantityFormula.trim();
+    if (!f) out.quantityFormula = null;
+    else {
+      try {
+        out.quantity = evaluateFormula(f);
+        out.quantityFormula = isFormula(f) ? f : null;
+      } catch (e) {
+        throw new HttpError(400, `Diễn giải khối lượng không hợp lệ: ${(e as FormulaError).message}`);
+      }
+    }
+  }
+  if (body.quantity !== undefined && out.quantity === undefined) {
+    const q = Number(body.quantity);
+    if (!Number.isFinite(q)) throw new HttpError(400, 'Khối lượng không hợp lệ');
+    out.quantity = q;
+    if (body.quantityFormula === undefined) out.quantityFormula = null;
+  }
+  return out;
+}
+
+export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
+  const repo = new Repo(db);
+  const auth = new AuthService(db, config.jwtSecret, config.jwtExpiresIn);
+  const assistant = new AssistantService(repo);
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
+
+  const app = express();
+  app.disable('x-powered-by');
+  app.use(express.json({ limit: '5mb' }));
+
+  const api = express.Router();
+
+  // ---------------------------------------------------------------- public
+  api.post(
+    '/auth/login',
+    h((req) => {
+      const { username, password } = req.body ?? {};
+      if (!username || !password) throw new HttpError(400, 'Nhập tên đăng nhập và mật khẩu');
+      return auth.login(String(username), String(password));
+    }),
+  );
+  api.get('/health', h(() => ({ ok: true })));
+
+  // ---------------------------------------------------------------- authenticated
+  api.use(auth.middleware);
+  api.get('/auth/me', h((req) => req.user));
+  api.post(
+    '/auth/change-password',
+    h((req) => {
+      const user = auth.changePassword(req.user!.id, String(req.body?.oldPassword ?? ''), String(req.body?.newPassword ?? ''));
+      return { user, token: auth.sign(user) };
+    }),
+  );
+  api.use(requirePasswordChanged);
+
+  api.get(
+    '/config',
+    h(() => ({
+      localMode: config.localMode,
+      assistantProvider: assistant.providerName,
+      sampleData: repo.hasSampleData(),
+      googleDrive: {
+        configured: !!(config.google.clientId && config.google.apiKey),
+        clientId: config.google.clientId,
+        apiKey: config.google.apiKey,
+        appId: config.google.appId,
+      },
+      buildingTypes: BUILDING_TYPE_LABELS,
+      rates: ratesTable(),
+    })),
+  );
+
+  // users (admin)
+  api.get('/users', requireAdmin, h(() => auth.listUsers()));
+  api.post(
+    '/users',
+    requireAdmin,
+    h((req) => {
+      const b = req.body ?? {};
+      return auth.createUser(String(b.username ?? '').trim(), String(b.password ?? ''), String(b.fullName ?? ''), b.role === 'admin' ? 'admin' : 'user');
+    }),
+  );
+
+  // projects
+  const proj = (req: Request) => repo.requireProject(id(req.params.id), req.user!.id, req.user!.role === 'admin');
+  api.get('/projects', h((req) => repo.listProjects(req.user!.id, req.user!.role === 'admin')));
+  api.post(
+    '/projects',
+    h((req) => {
+      const b = req.body ?? {};
+      if (b.buildingType && !BUILDING_TYPES.includes(b.buildingType)) throw new HttpError(400, 'Loại công trình không hợp lệ');
+      const p = repo.createProject(req.user!.id, b);
+      repo.createCategory(p.id, 'Hạng mục chung');
+      return p;
+    }),
+  );
+  api.get('/projects/:id', h((req) => proj(req)));
+  api.put(
+    '/projects/:id',
+    h((req) => {
+      const p = proj(req);
+      const b = req.body ?? {};
+      if (b.buildingType && !BUILDING_TYPES.includes(b.buildingType)) throw new HttpError(400, 'Loại công trình không hợp lệ');
+      if (b.vatRate !== undefined && !(Number(b.vatRate) >= 0 && Number(b.vatRate) <= 100)) throw new HttpError(400, 'Thuế suất không hợp lệ');
+      return repo.updateProject(p.id, {
+        name: b.name ?? p.name,
+        ownerName: b.ownerName ?? p.ownerName,
+        location: b.location ?? p.location,
+        buildingType: b.buildingType ?? p.buildingType,
+        priceBaseDate: b.priceBaseDate ?? p.priceBaseDate,
+        vatRate: b.vatRate !== undefined ? Number(b.vatRate) : p.vatRate,
+      });
+    }),
+  );
+  api.delete(
+    '/projects/:id',
+    h((req) => {
+      repo.deleteProject(proj(req).id);
+    }),
+  );
+  api.post('/projects/:id/copy', h((req) => repo.copyProject(proj(req).id, req.user!.id)));
+  api.put(
+    '/projects/:id/settings',
+    h((req) => {
+      const p = proj(req);
+      const b = (req.body?.costSettings ?? {}) as Partial<CostSettings>;
+      const numeric: (keyof CostSettings)[] = ['cRate', 'ltRate', 'ttRate', 'gtkRate', 'tlRate', 'equipment', 'qlda', 'tuVan', 'other', 'contingencyQtyRate', 'contingencyPriceRate'];
+      const clean: Partial<CostSettings> = { autoRates: !!b.autoRates, cBase: b.cBase === 'NC' ? 'NC' : 'T' };
+      for (const k of numeric) {
+        if (b[k] === undefined) continue;
+        const v = Number(b[k]);
+        if (!Number.isFinite(v) || v < 0) throw new HttpError(400, `Giá trị không hợp lệ: ${k}`);
+        (clean as Record<string, number>)[k] = v;
+      }
+      const vat = req.body?.vatRate !== undefined ? Number(req.body.vatRate) : p.vatRate;
+      return repo.updateProject(p.id, { costSettings: clean, vatRate: vat });
+    }),
+  );
+  api.get('/projects/:id/estimate', h((req) => repo.calculate(proj(req).id)));
+
+  // categories
+  api.post('/projects/:id/categories', h((req) => repo.createCategory(proj(req).id, String(req.body?.name ?? ''))));
+  api.put(
+    '/projects/:id/categories/:catId',
+    h((req) => {
+      repo.updateCategory(proj(req).id, id(req.params.catId), { name: req.body?.name, order: req.body?.order });
+    }),
+  );
+  api.delete(
+    '/projects/:id/categories/:catId',
+    h((req) => {
+      repo.deleteCategory(proj(req).id, id(req.params.catId));
+    }),
+  );
+
+  // items
+  api.post(
+    '/projects/:id/items',
+    h((req) => {
+      const p = proj(req);
+      const b = req.body ?? {};
+      return repo.createItem(p.id, {
+        categoryId: id(String(b.categoryId)),
+        normCode: b.normCode,
+        name: b.name,
+        unit: b.unit,
+        note: b.note,
+        ...quantityFromBody(b),
+      });
+    }),
+  );
+  api.put(
+    '/projects/:id/items/:itemId',
+    h((req) => {
+      const p = proj(req);
+      const b = req.body ?? {};
+      const data: Record<string, unknown> = { ...quantityFromBody(b) };
+      for (const k of ['normCode', 'name', 'unit', 'note', 'order', 'categoryId'] as const) if (b[k] !== undefined) data[k] = b[k];
+      return repo.updateItem(p.id, id(req.params.itemId), data);
+    }),
+  );
+  api.delete(
+    '/projects/:id/items/:itemId',
+    h((req) => {
+      repo.deleteItem(proj(req).id, id(req.params.itemId));
+    }),
+  );
+
+  // prices
+  api.get(
+    '/projects/:id/prices',
+    h((req) => {
+      const p = proj(req);
+      const prices = repo.projectPrices(p.id);
+      const used = new Set(repo.calculate(p.id).resourceSummary.map((r) => r.code));
+      return repo
+        .listResources()
+        .map((r) => ({ ...r, projectPrice: prices[r.code] ?? null, used: used.has(r.code) }))
+        .filter((r) => req.query.all === '1' || r.used || r.projectPrice !== null);
+    }),
+  );
+  api.put(
+    '/projects/:id/prices/:code',
+    h((req) => {
+      const p = proj(req);
+      const code = String(req.params.code);
+      if (!repo.getResource(code)) throw new HttpError(404, 'Không tìm thấy tài nguyên');
+      const raw = req.body?.price;
+      const price = raw === null || raw === '' || raw === undefined ? null : Number(raw);
+      if (price !== null && (!Number.isFinite(price) || price < 0)) throw new HttpError(400, 'Giá không hợp lệ');
+      repo.setProjectPrice(p.id, code, price);
+    }),
+  );
+
+  // norms & resources library
+  api.get('/norms', h((req) => repo.searchNorms(String(req.query.q ?? ''), Math.min(Number(req.query.limit) || 50, 200))));
+  api.get(
+    '/norms/:code',
+    h((req) => {
+      const n = repo.getNorm(String(req.params.code));
+      if (!n) throw new HttpError(404, 'Không tìm thấy định mức');
+      return { ...n, resources: repo.getNormResources(n.code) };
+    }),
+  );
+  api.get('/resources', h((req) => (req.query.q ? repo.searchResources(String(req.query.q), 50) : repo.listResources())));
+
+  // export
+  api.get(
+    '/projects/:id/export.xlsx',
+    h(async (req, res) => {
+      const calc = repo.calculate(proj(req).id);
+      const wb = await buildWorkbook(calc, req.user!.fullName || req.user!.username);
+      const safe = calc.project.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^\w-]+/g, '_');
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="DuToan_${safe || 'CongTrinh'}.xlsx"`);
+      await wb.xlsx.write(res);
+      res.end();
+    }),
+  );
+
+  // import
+  const target = (v: unknown): ImportTarget => (v === 'prices' || v === 'items' ? v : 'norms');
+  api.post(
+    '/import/upload',
+    upload.single('file'),
+    h(async (req) => {
+      let buffer: Buffer;
+      let fileName: string;
+      if (req.file) {
+        buffer = req.file.buffer;
+        fileName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+      } else if (req.body?.path) {
+        if (!config.localMode) throw new HttpError(403, 'Nhập theo đường dẫn chỉ dùng khi chạy trên máy cá nhân (LOCAL_MODE=true).');
+        const p = String(req.body.path);
+        if (!path.isAbsolute(p)) throw new HttpError(400, 'Cần đường dẫn tuyệt đối, ví dụ C:\\DuLieu\\dinhmuc.xlsx');
+        if (!/\.(xlsx|csv|txt)$/i.test(p)) throw new HttpError(400, 'Chỉ hỗ trợ file .xlsx hoặc .csv');
+        try {
+          buffer = fs.readFileSync(p);
+        } catch {
+          throw new HttpError(404, 'Không đọc được file theo đường dẫn đã nhập');
+        }
+        fileName = path.basename(p);
+      } else throw new HttpError(400, 'Chưa chọn file');
+      const parsed = storeParsed(req.user!.id, fileName, await parseBuffer(buffer, fileName));
+      return previewOf(parsed, 0, target(req.body?.target));
+    }),
+  );
+  api.post(
+    '/import/gdrive',
+    h(async (req) => {
+      if (!config.google.clientId) throw new HttpError(400, 'Google Drive chưa được cấu hình (xem docs/google-drive-setup.md)');
+      const b = req.body ?? {};
+      const { buffer, fileName } = await downloadDriveFile(String(b.fileId), String(b.accessToken), String(b.mimeType ?? ''), String(b.name ?? ''));
+      const parsed = storeParsed(req.user!.id, fileName, await parseBuffer(buffer, fileName));
+      return previewOf(parsed, 0, target(b.target));
+    }),
+  );
+  api.post(
+    '/import/preview',
+    h((req) => previewOf(getParsed(String(req.body?.fileId), req.user!.id), Number(req.body?.sheetIndex) || 0, target(req.body?.target))),
+  );
+  api.post(
+    '/import/apply',
+    h((req) => {
+      const b = req.body ?? {};
+      const f = getParsed(String(b.fileId), req.user!.id);
+      const projectId = b.projectId ? repo.requireProject(id(String(b.projectId)), req.user!.id, req.user!.role === 'admin').id : undefined;
+      const t = target(b.target);
+      if ((t === 'norms' || (t === 'prices' && b.priceScope !== 'project')) && req.user!.role !== 'admin') {
+        throw new HttpError(403, 'Chỉ quản trị viên được cập nhật thư viện định mức/giá gốc');
+      }
+      return applyImport(repo, f, {
+        fileId: f.id,
+        sheetIndex: Number(b.sheetIndex) || 0,
+        headerRow: Number(b.headerRow) || 0,
+        target: t,
+        mapping: b.mapping ?? {},
+        projectId,
+        categoryId: b.categoryId ? Number(b.categoryId) : undefined,
+        priceScope: b.priceScope === 'project' ? 'project' : 'base',
+      });
+    }),
+  );
+
+  // assistant
+  api.post('/projects/:id/assistant', h((req) => assistant.message(proj(req).id, req.body ?? {})));
+  api.post(
+    '/projects/:id/assistant/confirm',
+    h((req) => {
+      if (!req.body?.action?.tool) throw new HttpError(400, 'Thiếu thao tác');
+      return assistant.confirm(proj(req).id, req.user!.id, req.body.action, String(req.body.description ?? ''));
+    }),
+  );
+  api.post('/projects/:id/assistant/undo', h((req) => assistant.undo(proj(req).id)));
+  api.get('/projects/:id/assistant/history', h((req) => assistant.history(proj(req).id)));
+
+  app.use('/api', api);
+  app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Không tìm thấy API')));
+
+  if (opts.serveWeb !== false && fs.existsSync(WEB_DIST)) {
+    app.use(express.static(WEB_DIST, { index: false, maxAge: '1h' }));
+    app.get('*', (_req, res) => res.sendFile(path.join(WEB_DIST, 'index.html')));
+  }
+
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
+    if (err instanceof multer.MulterError) return res.status(400).json({ error: `Lỗi tải file: ${err.message}` });
+    console.error(err);
+    res.status(500).json({ error: 'Lỗi máy chủ' });
+  });
+
+  return app;
+}

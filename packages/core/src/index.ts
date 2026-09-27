@@ -8,3 +8,4 @@ export * from './search.js';
 export * from './assistant/intents.js';
 export * from './assistant/parser.js';
 export * from './assistant/engine.js';
+export * from './words.js';
