@@ -40,6 +40,17 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
     reload();
   }, [reload]);
 
+  const approve = async (on: boolean) => {
+    setError('');
+    try {
+      if (on) await api.approve(projectId);
+      else await api.unapprove(projectId);
+      await reload();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   const exportExcel = async () => {
     setExporting(true);
     try {
@@ -72,9 +83,23 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
             {data.legalSet.label}
           </a>
           <span className="spacer" />
+          {data.project.status === 'approved' ? (
+            <span className="status verified" title={`Duyệt bởi ${data.project.approvedBy} lúc ${data.project.approvedAt}`}>
+              ✓ Đã duyệt
+            </span>
+          ) : (
+            <span className="status provisional">Nháp</span>
+          )}
           <span className="kpi">
             Chi phí xây dựng: <b>{money(data.costSummary.total ?? data.costSummary.Gxd)}</b> đ
           </span>
+          {data.project.status === 'approved' ? (
+            <button onClick={() => approve(false)}>Hủy duyệt</button>
+          ) : (
+            <button onClick={() => approve(true)} title="Không duyệt được khi còn mã gắn tự động chưa xác nhận">
+              Duyệt dự toán
+            </button>
+          )}
           <button onClick={() => setShowImport(true)}>⤓ Nhập dữ liệu</button>
           <button onClick={exportExcel} disabled={exporting}>
             {exporting ? 'Đang xuất…' : '⤒ Xuất Excel'}

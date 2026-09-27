@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { Norm } from '@dutoan/core';
-import { api, type EstimateResponse } from '../api';
+import { api, type EstimateResponse, type SuggestionCandidate } from '../api';
+import { AutoAssignDialog, SuggestionCell } from './CodeAssist';
 import { money, parseInputNumber, qty, ROMAN } from '../format';
 import { NormSearchDialog } from './NormSearchDialog';
 
@@ -93,6 +94,18 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
   const [editingCat, setEditingCat] = useState<number | null>(null);
   const [confirmCat, setConfirmCat] = useState<number | null>(null);
   const [newCat, setNewCat] = useState('');
+  const [suggestions, setSuggestions] = useState<Map<number, SuggestionCandidate[]>>(new Map());
+  const [autoOpen, setAutoOpen] = useState(false);
+  const [confirmAll, setConfirmAll] = useState(false);
+
+  useEffect(() => {
+    api
+      .suggestions(pid)
+      .then((list) => setSuggestions(new Map(list.map((s) => [s.itemId, s.candidates]))))
+      .catch(() => setSuggestions(new Map()));
+  }, [pid, data]);
+
+  const autoItems = data.categories.flatMap((c) => c.items).filter((i) => i.codeStatus === 'auto');
 
   const run = async (fn: () => Promise<unknown>) => {
     setError('');
@@ -116,6 +129,28 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
   return (
     <div className="grid-wrap">
       {error && <div className="error">{error}</div>}
+      <div className="toolbar">
+        <button onClick={() => setAutoOpen(true)} disabled={suggestions.size === 0} title="Gợi ý và gắn mã cho các công việc chưa có mã">
+          ⚙ Gắn mã tự động{suggestions.size ? ` (${suggestions.size} chưa có mã)` : ''}
+        </button>
+        {autoItems.length > 0 &&
+          (confirmAll ? (
+            <span className="warn-box">
+              Xác nhận {autoItems.length} mã gắn tự động là đúng?{' '}
+              <button
+                className="small primary"
+                onClick={() => (setConfirmAll(false), run(() => api.confirmCodes(pid, autoItems.map((i) => i.id))))}
+              >
+                Xác nhận
+              </button>{' '}
+              <button className="small" onClick={() => setConfirmAll(false)}>
+                Hủy
+              </button>
+            </span>
+          ) : (
+            <button onClick={() => setConfirmAll(true)}>✓ Xác nhận {autoItems.length} mã tự động</button>
+          ))}
+      </div>
       <div className="grid-help">
         Gõ <b>mã hiệu</b> rồi Enter để tự điền tên, đơn vị · <b>F3</b> hoặc nút 🔍 để tra định mức · Enter xuống dòng · Diễn giải khối lượng nhập công thức như <code>2*3,5*0,3</code>
       </div>
@@ -128,6 +163,9 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
               </th>
               <th rowSpan={2} style={{ width: 120 }}>
                 Mã hiệu
+              </th>
+              <th rowSpan={2} style={{ width: 150 }}>
+                Gợi ý / trạng thái mã
               </th>
               <th rowSpan={2}>Tên công tác</th>
               <th rowSpan={2} style={{ width: 70 }}>
@@ -161,7 +199,7 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
                 <Fragment key={cat.id}>
                   <tr className="cat-row">
                     <td>{ROMAN[ci] ?? ci + 1}</td>
-                    <td colSpan={5}>
+                    <td colSpan={6}>
                       {editingCat === cat.id ? (
                         <input
                           className="cell"
@@ -222,6 +260,29 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
                           </div>
                         </td>
                         <td>
+                          {suggestions.has(it.id) ? (
+                            <SuggestionCell projectId={pid} itemId={it.id} candidates={suggestions.get(it.id)!} onDone={reload} />
+                          ) : it.codeStatus === 'auto' ? (
+                            <button
+                              className="code-state auto"
+                              title={`Gắn tự động (${Math.round((it.codeConfidence ?? 0) * 100)}%) – bấm để xác nhận`}
+                              onClick={() => run(() => api.confirmCode(pid, it.id))}
+                            >
+                              tự động · xác nhận
+                            </button>
+                          ) : it.codeStatus === 'confirmed' ? (
+                            <span className="code-state ok">✓ đã xác nhận</span>
+                          ) : it.codeStatus === 'imported' ? (
+                            <span className="code-state imported">từ file</span>
+                          ) : null}
+                        </td>
+                        <td
+                          title={
+                            it.source
+                              ? `Diễn giải gốc: ${it.source.description ?? ''}\nKL gốc: ${it.source.quantity ?? ''} ${it.source.unit ?? ''}${it.source.file ? `\nNguồn: ${it.source.file} / ${it.source.sheet} / dòng ${it.source.row}` : ''}`
+                              : undefined
+                          }
+                        >
                           <Cell value={it.name} r={r} col="name" onCommit={(v) => upd({ name: v })} />
                         </td>
                         <td>
@@ -268,6 +329,7 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
                         </button>
                       </div>
                     </td>
+                    <td />
                     <td>
                       <Cell
                         value=""
@@ -285,7 +347,7 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
             })}
             <tr className="add-cat-row">
               <td />
-              <td colSpan={10}>
+              <td colSpan={11}>
                 <input
                   className="cell"
                   placeholder="+ Thêm hạng mục mới (gõ tên rồi Enter)"
@@ -305,7 +367,7 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
           <tfoot>
             <tr className="total-row">
               <td />
-              <td colSpan={5}>TỔNG CỘNG CHI PHÍ TRỰC TIẾP</td>
+              <td colSpan={6}>TỔNG CỘNG CHI PHÍ TRỰC TIẾP</td>
               <td className="num">{money(data.total.vl)}</td>
               <td className="num">{money(data.total.nc)}</td>
               <td className="num">{money(data.total.m)}</td>
@@ -315,6 +377,7 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
           </tfoot>
         </table>
       </div>
+      {autoOpen && <AutoAssignDialog projectId={pid} onClose={() => setAutoOpen(false)} onDone={reload} />}
       {search && (
         <NormSearchDialog
           initial={search.q}

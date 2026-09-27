@@ -11,7 +11,7 @@ import {
   type BuildingType,
   type ProjectCostSettings,
 } from '@dutoan/core';
-import { AssistantService } from './assistant.js';
+import { AssistantService, autoAssignPlan } from './assistant.js';
 import { AuthService, requireAdmin, requirePasswordChanged } from './auth.js';
 import { config, WEB_DIST } from './config.js';
 import type { DB } from './db.js';
@@ -320,6 +320,94 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
     '/projects/:id/items/:itemId',
     h((req) => {
       repo.deleteItem(proj(req).id, id(req.params.itemId));
+    }),
+  );
+
+  // code suggestions / auto-assignment (Update 2 – C)
+  api.get(
+    '/projects/:id/suggestions',
+    h((req) => {
+      const p = proj(req);
+      return repo.unassignedItems(p.id).map((item) => ({
+        itemId: item.id,
+        candidates: repo.suggestFor(p.id, item, 5).map((s) => ({
+          code: s.norm.code,
+          name: s.norm.name,
+          unit: s.norm.unit,
+          confidence: s.confidence,
+          why: s.why,
+          unitFactor: s.unitFactor,
+        })),
+      }));
+    }),
+  );
+  const threshold = (v: unknown) => {
+    const t = v === undefined ? 0.8 : Number(v);
+    if (!(t > 0 && t <= 1)) throw new HttpError(400, 'Ngưỡng độ tin cậy phải trong khoảng (0; 1]');
+    return t;
+  };
+  api.post(
+    '/projects/:id/auto-assign/preview',
+    h((req) => autoAssignPlan(repo, proj(req).id, threshold(req.body?.threshold))),
+  );
+  api.post(
+    '/projects/:id/auto-assign',
+    h((req) => {
+      const p = proj(req);
+      const list = req.body?.assignments;
+      if (!Array.isArray(list) || !list.length) throw new HttpError(400, 'Không có công việc nào để gắn mã');
+      const action = {
+        tool: 'autoAssignCodes' as const,
+        params: { assignments: list.map((a: { itemId: unknown; normCode: unknown; confidence: unknown }) => ({ itemId: id(String(a.itemId)), normCode: String(a.normCode), confidence: Number(a.confidence) || 0 })) },
+      };
+      return assistant.confirm(p.id, req.user!.id, action, `Gắn mã tự động cho ${list.length} công việc`);
+    }),
+  );
+  api.post(
+    '/projects/:id/items/:itemId/assign-code',
+    h((req) => repo.assignCode(proj(req).id, id(req.params.itemId), String(req.body?.normCode ?? ''), 'confirmed')),
+  );
+  api.post(
+    '/projects/:id/items/:itemId/confirm-code',
+    h((req) => {
+      const p = proj(req);
+      const item = repo.getItem(p.id, id(req.params.itemId));
+      if (!item.normCode) throw new HttpError(400, 'Công việc chưa có mã');
+      return repo.updateItem(p.id, item.id, { codeStatus: 'confirmed' });
+    }),
+  );
+  api.post(
+    '/projects/:id/confirm-codes',
+    h((req) => {
+      const p = proj(req);
+      const ids: number[] = Array.isArray(req.body?.itemIds) ? req.body.itemIds.map((x: unknown) => id(String(x))) : [];
+      let n = 0;
+      db.transaction(() => {
+        for (const i of ids) {
+          const item = repo.getItem(p.id, i);
+          if (item.codeStatus === 'auto') {
+            repo.updateItem(p.id, i, { codeStatus: 'confirmed' });
+            n++;
+          }
+        }
+      })();
+      return { confirmed: n };
+    }),
+  );
+  api.post(
+    '/projects/:id/approve',
+    h((req) => {
+      const p = proj(req);
+      repo.approveProject(p.id, req.user!.username);
+      return repo.getProject(p.id);
+    }),
+  );
+  api.post(
+    '/projects/:id/unapprove',
+    h((req) => {
+      const p = proj(req);
+      repo.unapproveProject(p.id);
+      return repo.getProject(p.id);
     }),
   );
 

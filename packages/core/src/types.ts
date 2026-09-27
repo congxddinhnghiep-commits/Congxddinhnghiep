@@ -55,6 +55,24 @@ export interface EstimateItem {
   quantity: number;
   quantityFormula?: string | null;
   note?: string | null;
+  /**
+   * How the norm code was set: '' none, 'manual' typed by the user, 'imported' from a source file,
+   * 'auto' assigned by the suggestion engine (needs confirmation), 'confirmed' accepted by the user.
+   */
+  codeStatus?: '' | 'manual' | 'imported' | 'auto' | 'confirmed';
+  codeConfidence?: number | null;
+  /** Provenance of imported/assigned items – never overwritten. */
+  source?: ItemSource | null;
+}
+
+export interface ItemSource {
+  file?: string | null;
+  sheet?: string | null;
+  row?: number | null;
+  description?: string | null;
+  quantity?: number | null;
+  unit?: string | null;
+  code?: string | null;
 }
 
 /** Cost settings stored per project. All rates are percentages (e.g. 6.5 means 6.5%). */

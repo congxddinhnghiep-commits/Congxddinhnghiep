@@ -129,6 +129,16 @@ export function parseCommand(input: string): Intent {
     return { kind: 'importFile' };
   }
 
+  if (/\b(gan|dat|tu dong gan|goi y)\s+ma\b|\bgan ma tu dong\b/.test(n)) {
+    const th = /\bnguong\s*(\d+(?:[.,]\d+)?)\s*%?/.exec(n);
+    let threshold: number | undefined;
+    if (th) {
+      threshold = Number(th[1].replace(',', '.'));
+      if (threshold > 1) threshold /= 100;
+    }
+    return threshold !== undefined ? { kind: 'autoAssign', threshold } : { kind: 'autoAssign' };
+  }
+
   let m: RegExpExecArray | null;
 
   m = exec(t, new RegExp(String.raw`^${POLITE}(?:tao|them|lap|tao moi|them moi)\s+(?:moi\s+)?(?:hang muc|hm)\s*(?:moi\s*)?(?:(?:ten|co ten)\s+(?:la\s+)?)?(.*)$`));

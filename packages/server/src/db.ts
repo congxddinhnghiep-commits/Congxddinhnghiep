@@ -134,6 +134,24 @@ export function migrate(db: DB): void {
   // Update 2
   if (!columns(db, 'projects').includes('gxdtt_tmdt')) db.exec(`ALTER TABLE projects ADD COLUMN gxdtt_tmdt REAL`);
   if (!columns(db, 'categories').includes('tt_rate')) db.exec(`ALTER TABLE categories ADD COLUMN tt_rate REAL`);
+  const icols = columns(db, 'estimate_items');
+  const itemCols: [string, string][] = [
+    ['code_status', "TEXT NOT NULL DEFAULT ''"],
+    ['code_confidence', 'REAL'],
+    ['source_file', 'TEXT'],
+    ['source_sheet', 'TEXT'],
+    ['source_row', 'INTEGER'],
+    ['source_description', 'TEXT'],
+    ['source_quantity', 'REAL'],
+    ['source_unit', 'TEXT'],
+    ['source_code', 'TEXT'],
+  ];
+  for (const [c, t] of itemCols) if (!icols.includes(c)) db.exec(`ALTER TABLE estimate_items ADD COLUMN ${c} ${t}`);
+  db.exec(`UPDATE estimate_items SET code_status = 'manual' WHERE code_status = '' AND norm_code <> ''`);
+  const pc = columns(db, 'projects');
+  if (!pc.includes('status')) db.exec(`ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'`);
+  if (!pc.includes('approved_by')) db.exec(`ALTER TABLE projects ADD COLUMN approved_by TEXT`);
+  if (!pc.includes('approved_at')) db.exec(`ALTER TABLE projects ADD COLUMN approved_at TEXT`);
 
   if (!columns(db, 'norms').includes('dataset')) {
     db.pragma('foreign_keys = OFF');

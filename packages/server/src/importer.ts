@@ -257,6 +257,7 @@ export function applyImport(repo: Repo, f: ParsedFile, o: ApplyOptions): { messa
         count++;
       }
     })();
+    repo.invalidateNormIndex();
     return { message: `Đã nhập vào bộ ${dataset}: ${norms.size} định mức với ${count} dòng hao phí${skipped ? `, bỏ qua ${skipped} dòng thiếu dữ liệu` : ''}.`, count, skipped };
   }
 

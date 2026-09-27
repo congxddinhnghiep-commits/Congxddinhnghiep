@@ -133,7 +133,7 @@ code { background: var(--line-soft); padding: 1px 4px; border-radius: 4px; }
 
 /* ---------- estimate grid ---------- */
 .grid-help { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-.grid { border-collapse: collapse; width: 100%; min-width: 1320px; background: #fff; table-layout: fixed; }
+.grid { border-collapse: collapse; width: 100%; min-width: 1470px; background: #fff; table-layout: fixed; }
 .grid th { position: sticky; top: 0; background: #f0f3f7; border: 1px solid var(--line); padding: 4px; font-size: 12px; z-index: 1; }
 .grid td { border: 1px solid var(--line-soft); padding: 0 4px; height: 28px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .grid tr.cat-row td { background: var(--cat); font-weight: 700; }
@@ -231,3 +231,16 @@ code { background: var(--line-soft); padding: 1px 4px; border-radius: 4px; }
 .banner-legal .note { color: #1d4f91; }
 .schedule { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
 .schedule label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); width: 80px; }
+
+/* ---------- code suggestions ---------- */
+.suggest { display: inline-flex; align-items: center; gap: 2px; }
+.chip-sug { font-size: 11px; padding: 1px 6px; border-radius: 10px; border: 1px solid; }
+.chip-sug.hi { background: #e3f1e8; color: #1f6b3a; border-color: #9fd3b3; }
+.chip-sug.lo { background: #fff6d6; color: #7a5a00; border-color: #f0dc9a; }
+.code-state { font-size: 11px; padding: 1px 6px; border-radius: 10px; white-space: nowrap; }
+button.code-state { cursor: pointer; }
+.code-state.auto { background: #e7eef8; color: #1d4f91; border: 1px dashed #1d4f91; }
+.code-state.ok { color: #0b6b36; }
+.code-state.review { background: #fdecea; color: #b42318; }
+.code-state.imported { background: #f1e9ff; color: #5b2a9a; }
+tr.muted td { color: var(--muted); }

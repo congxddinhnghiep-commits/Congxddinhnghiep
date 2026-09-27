@@ -3,7 +3,9 @@ import {
   computeProjectCost,
   defaultLegalSetFor,
   legalSetDateWarning,
+  NormIndex,
   normalizeText,
+  unitFactor,
   searchByCodeOrName,
   type BuildingType,
   type Category,
@@ -41,6 +43,9 @@ export interface ProjectRow {
   legal_set: LegalSetId | null;
   price_date: string | null;
   gxdtt_tmdt: number | null;
+  status: 'draft' | 'approved' | null;
+  approved_by: string | null;
+  approved_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -61,6 +66,9 @@ export interface Project {
   priceDate: string | null;
   /** Chi phí XD trước thuế của công trình trong TMĐT được duyệt (tỷ đồng) – bracket base for Bảng 3.3/3.7. */
   gxdttTmdt: number | null;
+  status: 'draft' | 'approved';
+  approvedBy: string | null;
+  approvedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -78,6 +86,9 @@ export const toProject = (r: ProjectRow): Project => ({
   legalSet: r.legal_set ?? 'TT11_2021',
   priceDate: r.price_date,
   gxdttTmdt: r.gxdtt_tmdt,
+  status: r.status ?? 'draft',
+  approvedBy: r.approved_by,
+  approvedAt: r.approved_at,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -92,6 +103,15 @@ interface ItemRow {
   quantity: number;
   quantity_formula: string | null;
   note: string | null;
+  code_status: EstimateItem['codeStatus'] | null;
+  code_confidence: number | null;
+  source_file: string | null;
+  source_sheet: string | null;
+  source_row: number | null;
+  source_description: string | null;
+  source_quantity: number | null;
+  source_unit: string | null;
+  source_code: string | null;
 }
 const toItem = (r: ItemRow): EstimateItem => ({
   id: r.id,
@@ -103,7 +123,25 @@ const toItem = (r: ItemRow): EstimateItem => ({
   quantity: r.quantity,
   quantityFormula: r.quantity_formula,
   note: r.note,
+  codeStatus: r.code_status ?? '',
+  codeConfidence: r.code_confidence,
+  source:
+    r.source_description !== null || r.source_file !== null
+      ? {
+          file: r.source_file,
+          sheet: r.source_sheet,
+          row: r.source_row,
+          description: r.source_description,
+          quantity: r.source_quantity,
+          unit: r.source_unit,
+          code: r.source_code,
+        }
+      : null,
 });
+
+export type ItemSnapshot = Pick<EstimateItem, 'normCode' | 'name' | 'unit' | 'quantity' | 'quantityFormula' | 'codeStatus' | 'codeConfidence'> & {
+  source: EstimateItem['source'];
+};
 
 interface ResourceRow {
   code: string;
@@ -198,8 +236,23 @@ export class Repo {
     return this.getProject(id)!;
   }
 
+  /** Any change invalidates an approval: the estimate goes back to draft and must be approved again. */
   touchProject(id: number): void {
-    this.db.prepare(`UPDATE projects SET updated_at = datetime('now') WHERE id = ?`).run(id);
+    this.db.prepare(`UPDATE projects SET updated_at = datetime('now'), status = 'draft', approved_by = NULL, approved_at = NULL WHERE id = ?`).run(id);
+  }
+
+  approveProject(id: number, user: string): void {
+    const auto = (
+      this.db
+        .prepare(`SELECT COUNT(*) AS n FROM estimate_items i JOIN categories c ON c.id = i.category_id WHERE c.project_id = ? AND i.code_status = 'auto'`)
+        .get(id) as { n: number }
+    ).n;
+    if (auto > 0) throw new HttpError(409, `Còn ${auto} công việc gắn mã tự động chưa được xác nhận – không thể duyệt dự toán.`);
+    this.db.prepare(`UPDATE projects SET status = 'approved', approved_by = ?, approved_at = datetime('now') WHERE id = ?`).run(user, id);
+  }
+
+  unapproveProject(id: number): void {
+    this.db.prepare(`UPDATE projects SET status = 'draft', approved_by = NULL, approved_at = NULL WHERE id = ?`).run(id);
   }
 
   deleteProject(id: number): void {
@@ -290,7 +343,18 @@ export class Repo {
 
   createItem(
     projectId: number,
-    data: { categoryId: number; normCode?: string; name?: string; unit?: string; quantity?: number; quantityFormula?: string | null; note?: string | null; order?: number },
+    data: {
+      categoryId: number;
+      normCode?: string;
+      name?: string;
+      unit?: string;
+      quantity?: number;
+      quantityFormula?: string | null;
+      note?: string | null;
+      order?: number;
+      codeStatus?: EstimateItem['codeStatus'];
+      source?: EstimateItem['source'];
+    },
   ): EstimateItem {
     this.getCategory(projectId, data.categoryId);
     const code = (data.normCode ?? '').trim().toUpperCase();
@@ -298,8 +362,9 @@ export class Repo {
     const max = (this.db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM estimate_items WHERE category_id = ?').get(data.categoryId) as { m: number }).m;
     const info = this.db
       .prepare(
-        `INSERT INTO estimate_items (category_id, sort_order, norm_code, name, unit, quantity, quantity_formula, note)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO estimate_items (category_id, sort_order, norm_code, name, unit, quantity, quantity_formula, note, code_status,
+           source_file, source_sheet, source_row, source_description, source_quantity, source_unit, source_code)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         data.categoryId,
@@ -310,6 +375,14 @@ export class Repo {
         data.quantity ?? 0,
         data.quantityFormula ?? null,
         data.note ?? null,
+        data.codeStatus ?? (code ? 'manual' : ''),
+        data.source?.file ?? null,
+        data.source?.sheet ?? null,
+        data.source?.row ?? null,
+        data.source?.description ?? null,
+        data.source?.quantity ?? null,
+        data.source?.unit ?? null,
+        data.source?.code ?? null,
       );
     this.touchProject(projectId);
     return this.getItem(projectId, Number(info.lastInsertRowid));
@@ -321,6 +394,8 @@ export class Repo {
     // Changing the norm code re-fills name and unit from the norm library.
     if (data.normCode !== undefined && data.normCode.trim().toUpperCase() !== cur.normCode) {
       next.normCode = data.normCode.trim().toUpperCase();
+      next.codeStatus = data.codeStatus ?? (next.normCode ? 'manual' : '');
+      next.codeConfidence = data.codeConfidence ?? null;
       const norm = this.getNorm(next.normCode, this.datasetOf(projectId));
       if (norm) {
         next.normCode = norm.code;
@@ -332,9 +407,21 @@ export class Repo {
     this.db
       .prepare(
         `UPDATE estimate_items SET category_id = ?, sort_order = ?, norm_code = ?, name = ?, unit = ?, quantity = ?,
-         quantity_formula = ?, note = ? WHERE id = ?`,
+         quantity_formula = ?, note = ?, code_status = ?, code_confidence = ? WHERE id = ?`,
       )
-      .run(next.categoryId, next.order, next.normCode, next.name, next.unit, next.quantity, next.quantityFormula ?? null, next.note ?? null, id);
+      .run(
+        next.categoryId,
+        next.order,
+        next.normCode,
+        next.name,
+        next.unit,
+        next.quantity,
+        next.quantityFormula ?? null,
+        next.note ?? null,
+        next.codeStatus ?? '',
+        next.codeConfidence ?? null,
+        id,
+      );
     this.touchProject(projectId);
     return this.getItem(projectId, id);
   }
@@ -343,6 +430,109 @@ export class Repo {
     this.getItem(projectId, id);
     this.db.prepare('DELETE FROM estimate_items WHERE id = ?').run(id);
     this.touchProject(projectId);
+  }
+
+  // ---------------- code suggestion ----------------
+  private indexes = new Map<string, NormIndex<Norm>>();
+
+  /** Suggestion index for a norm dataset (rebuilt after imports). */
+  normIndex(dataset: string): NormIndex<Norm> {
+    let idx = this.indexes.get(dataset);
+    if (!idx) {
+      const rows = this.db.prepare('SELECT code, name, unit, grp FROM norms WHERE dataset = ?').all(dataset) as { code: string; name: string; unit: string; grp: string }[];
+      idx = new NormIndex(rows.map((r) => ({ code: r.code, name: r.name, unit: r.unit, group: r.grp })));
+      this.indexes.set(dataset, idx);
+    }
+    return idx;
+  }
+
+  invalidateNormIndex(): void {
+    this.indexes.clear();
+  }
+
+  /** Items that still need a norm code (no code, or code not in the project's norm dataset). */
+  unassignedItems(projectId: number): EstimateItem[] {
+    const ds = this.datasetOf(projectId);
+    return this.listItems(projectId).filter((i) => !i.normCode || !this.getNorm(i.normCode, ds));
+  }
+
+  suggestFor(projectId: number, item: EstimateItem, limit = 5) {
+    const text = item.source?.description || item.name;
+    const unit = item.source?.unit || item.unit || undefined;
+    return this.normIndex(this.datasetOf(projectId)).suggest(text, unit, limit);
+  }
+
+  snapshotItem(projectId: number, itemId: number): ItemSnapshot {
+    const i = this.getItem(projectId, itemId);
+    return {
+      normCode: i.normCode,
+      name: i.name,
+      unit: i.unit,
+      quantity: i.quantity,
+      quantityFormula: i.quantityFormula ?? null,
+      codeStatus: i.codeStatus,
+      codeConfidence: i.codeConfidence ?? null,
+      source: i.source ?? null,
+    };
+  }
+
+  restoreItem(projectId: number, itemId: number, snap: ItemSnapshot): void {
+    this.getItem(projectId, itemId);
+    this.db
+      .prepare(
+        `UPDATE estimate_items SET norm_code = ?, name = ?, unit = ?, quantity = ?, quantity_formula = ?, code_status = ?, code_confidence = ?,
+         source_description = ?, source_quantity = ?, source_unit = ? WHERE id = ?`,
+      )
+      .run(
+        snap.normCode,
+        snap.name,
+        snap.unit,
+        snap.quantity,
+        snap.quantityFormula,
+        snap.codeStatus ?? '',
+        snap.codeConfidence,
+        snap.source?.description ?? null,
+        snap.source?.quantity ?? null,
+        snap.source?.unit ?? null,
+        itemId,
+      );
+    this.touchProject(projectId);
+  }
+
+  /**
+   * Set the norm code of an item. The original description, quantity and unit are kept in the
+   * source_* columns (filled from the current values the first time), and the quantity is
+   * converted into the norm unit (e.g. 250 m3 → 2,5 100m3).
+   */
+  assignCode(projectId: number, itemId: number, normCode: string, status: 'auto' | 'confirmed' | 'manual', confidence: number | null = null): EstimateItem {
+    const item = this.getItem(projectId, itemId);
+    const norm = this.getNorm(normCode, this.datasetOf(projectId));
+    if (!norm) throw new HttpError(404, `Không tìm thấy mã định mức ${normCode}`);
+    const srcDesc = item.source?.description ?? item.name;
+    const srcUnit = item.source?.unit ?? item.unit;
+    const srcQty = item.source?.quantity ?? item.quantity;
+    const factor = srcUnit ? unitFactor(srcUnit, norm.unit) : 1;
+    const quantity = factor === null ? item.quantity : srcQty * factor;
+    this.db
+      .prepare(
+        `UPDATE estimate_items SET norm_code = ?, name = ?, unit = ?, quantity = ?, quantity_formula = ?, code_status = ?, code_confidence = ?,
+         source_description = ?, source_quantity = ?, source_unit = ? WHERE id = ?`,
+      )
+      .run(
+        norm.code,
+        norm.name,
+        norm.unit,
+        quantity,
+        factor !== null && factor !== 1 ? null : item.quantityFormula ?? null,
+        status,
+        confidence,
+        srcDesc,
+        srcQty,
+        srcUnit,
+        itemId,
+      );
+    this.touchProject(projectId);
+    return this.getItem(projectId, itemId);
   }
 
   // ---------------- norms & resources ----------------
@@ -366,7 +556,23 @@ export class Repo {
   }
 
   /** Diacritic-insensitive search by code or name. */
+  /**
+   * Norm search: code prefixes ("AF.1", "af11"), then relevance ranking of the description
+   * (abbreviations, parameters, no diacritics); falls back to plain token search.
+   */
   searchNorms(query: string, dataset: string, limit = 30): Norm[] {
+    const idx = this.normIndex(dataset);
+    const byCode = idx.byCodePrefix(query.trim());
+    if (byCode.length) return byCode.slice(0, limit);
+    const ranked = idx.suggest(query, null, limit);
+    if (ranked.length) {
+      const top = ranked[0].score;
+      return ranked.filter((r) => r.score >= top * 0.5).map((r) => r.norm);
+    }
+    return this.plainSearchNorms(query, dataset, limit);
+  }
+
+  private plainSearchNorms(query: string, dataset: string, limit: number): Norm[] {
     const all = this.db.prepare('SELECT code, name, unit, grp FROM norms WHERE dataset = ?').all(dataset) as { code: string; name: string; unit: string; grp: string }[];
     return searchByCodeOrName(all, query, limit).map((h) => ({ code: h.item.code, name: h.item.name, unit: h.item.unit, group: h.item.grp }));
   }

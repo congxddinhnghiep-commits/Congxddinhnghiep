@@ -47,6 +47,8 @@ describe('RuleBasedProvider – Vietnamese commands', () => {
     ['nhập file từ máy tính', { kind: 'importFile' }],
     ['hoàn tác', { kind: 'undo' }],
     ['hướng dẫn', { kind: 'help' }],
+    ['gắn mã cho các công việc chưa có mã', { kind: 'autoAssign' }],
+    ['gan ma tu dong nguong 70%', { kind: 'autoAssign', threshold: 0.7 }],
   ];
 
   it.each(cases)('%s', (text, expected) => {

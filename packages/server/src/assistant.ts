@@ -22,6 +22,8 @@ export function contextFor(repo: Repo, projectId: number): AssistantContext {
   const dataset = repo.datasetOf(projectId);
   return {
     searchNorms: (q, limit) => repo.searchNorms(q, dataset, limit),
+    suggestNorms: (q, unit) => repo.normIndex(dataset).suggest(q, unit, 8).map((s) => ({ ...s.norm, confidence: s.confidence })),
+    autoAssignPreview: (threshold) => autoAssignPlan(repo, projectId, threshold),
     getNorm: (code) => repo.getNorm(code, dataset),
     listCategories: () => repo.listCategories(projectId).map((c) => ({ id: c.id, name: c.name })),
     searchResources: (q, limit) => repo.searchResources(q, limit).map((r) => ({ ...r, price: repo.effectivePrice(projectId, r.code) })),
@@ -42,6 +44,23 @@ export function contextFor(repo: Repo, projectId: number): AssistantContext {
       }));
     },
   };
+}
+
+/** Best suggestion per unassigned item, split by the confidence threshold. */
+export function autoAssignPlan(repo: Repo, projectId: number, threshold: number) {
+  const lines = new Map(repo.listItems(projectId).map((i, idx) => [i.id, idx + 1]));
+  const assign: { itemId: number; line: number; name: string; normCode: string; normName: string; confidence: number; why: string }[] = [];
+  const review: { itemId: number; line: number; name: string; best: { code: string; confidence: number } | null }[] = [];
+  for (const item of repo.unassignedItems(projectId)) {
+    const s = repo.suggestFor(projectId, item, 2)[0];
+    const name = item.source?.description || item.name;
+    if (s && s.confidence >= threshold) {
+      assign.push({ itemId: item.id, line: lines.get(item.id)!, name, normCode: s.norm.code, normName: s.norm.name, confidence: s.confidence, why: s.why });
+    } else {
+      review.push({ itemId: item.id, line: lines.get(item.id)!, name, best: s ? { code: s.norm.code, confidence: s.confidence } : null });
+    }
+  }
+  return { assign, below: review.length, review };
 }
 
 export class AssistantService {

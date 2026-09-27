@@ -16,8 +16,18 @@ export interface ContextItem {
 }
 
 /** Read-only lookups the engine needs. Implemented by the server on top of the database. */
+export interface AutoAssignPreview {
+  assign: { itemId: number; line: number; name: string; normCode: string; normName: string; confidence: number }[];
+  /** Items without a code whose best suggestion is below the threshold. */
+  below: number;
+}
+
 export interface AssistantContext {
   searchNorms(query: string, limit?: number): Norm[];
+  /** Ranked suggestions with confidence (0–1) for a description and unit. */
+  suggestNorms?(query: string, unit?: string): (Norm & { confidence: number })[];
+  /** Proposed code assignments for items without a code. */
+  autoAssignPreview?(threshold: number): AutoAssignPreview;
   getNorm(code: string): Norm | undefined;
   listCategories(): { id: number; name: string }[];
   searchResources(query: string, limit?: number): (Resource & { price: number })[];
@@ -37,6 +47,7 @@ export const HELP_TEXT = [
   '• Đổi giá: "đổi giá xi măng PCB40 thành 1.650.000 đ/tấn"',
   '• Sửa khối lượng: "sửa khối lượng dòng 3 thành 2*3,5*0,3"',
   '• Tạo hạng mục: "tạo hạng mục phần móng"',
+  '• Gắn mã tự động: "gắn mã cho các công việc chưa có mã" (có thể thêm "ngưỡng 70%")',
   '• "tính lại", "xuất excel", "nhập file", "hoàn tác"',
 ].join('\n');
 
@@ -130,6 +141,8 @@ export class AssistantEngine {
         return this.resolveUpdateQuantity(intent, ctx);
       case 'createCategory':
         return this.resolveCreateCategory(intent, ctx);
+      case 'autoAssign':
+        return this.resolveAutoAssign(intent.threshold ?? 0.8, ctx);
       case 'recalc':
         return { type: 'command', command: 'recalc', text: 'Đã tính lại toàn bộ dự toán.' };
       case 'exportExcel':
@@ -184,6 +197,27 @@ export class AssistantEngine {
           pending: { intent: { ...intent, normCode: undefined }, field: 'normQuery' },
         };
       }
+    } else if (intent.normQuery && ctx.suggestNorms) {
+      const found = ctx.suggestNorms(intent.normQuery, intent.unit);
+      if (found.length === 0) {
+        return {
+          type: 'question',
+          text: `Không tìm thấy định mức phù hợp với "${intent.normQuery}"${intent.unit ? ` (đơn vị ${intent.unit})` : ''}. Bạn nhập lại mã hoặc tên công tác:`,
+          options: [],
+          pending: { intent, field: 'normQuery' },
+        };
+      }
+      if (found[0].confidence < 0.8) {
+        return {
+          type: 'question',
+          text: `Có nhiều định mức gần với "${intent.normQuery}". Bạn chọn mã nào?`,
+          options: found.slice(0, MAX_OPTIONS).map((n) => ({
+            label: `${n.code} – ${n.name} (${n.unit}) · ${Math.round(n.confidence * 100)}%`,
+            intent: { ...intent, normCode: n.code, normQuery: undefined },
+          })),
+        };
+      }
+      norm = found[0];
     } else if (intent.normQuery) {
       let found = ctx.searchNorms(intent.normQuery, 30);
       if (intent.unit) {
@@ -396,6 +430,33 @@ export class AssistantEngine {
       type: 'preview',
       text: `Sửa khối lượng dòng ${item.line}: ${item.normCode} – ${item.name}: ${fmt(item.quantity)} → ${fmt(quantity)} ${item.unit}${formulaNote}. Xác nhận?`,
       action: { tool: 'updateQuantity', params: { itemId: item.id, quantity, quantityFormula: intent.quantityFormula } },
+    };
+  }
+
+  private resolveAutoAssign(threshold: number, ctx: AssistantContext): Reply {
+    if (!ctx.autoAssignPreview) return { type: 'message', text: 'Chức năng gắn mã tự động chưa sẵn sàng.' };
+    const p = ctx.autoAssignPreview(threshold);
+    const pctTxt = `${Math.round(threshold * 100)}%`;
+    if (!p.assign.length) {
+      return {
+        type: 'message',
+        text: p.below
+          ? `Không có công việc nào đạt độ tin cậy ≥ ${pctTxt}. ${p.below} công việc cần xem lại thủ công (xem cột gợi ý trong bảng dự toán).`
+          : 'Tất cả công việc đều đã có mã định mức.',
+      };
+    }
+    const list = p.assign
+      .slice(0, 12)
+      .map((a) => `• Dòng ${a.line}: ${a.name} → ${a.normCode} (${Math.round(a.confidence * 100)}%)`)
+      .join('\n');
+    const more = p.assign.length > 12 ? `\n… và ${p.assign.length - 12} công việc khác` : '';
+    return {
+      type: 'preview',
+      text:
+        `Tôi sẽ gắn mã tự động (độ tin cậy ≥ ${pctTxt}) cho ${p.assign.length} công việc:\n${list}${more}\n` +
+        `${p.below ? `${p.below} công việc dưới ngưỡng giữ trạng thái "cần xem lại". ` : ''}` +
+        'Các mã gắn tự động được đánh dấu "tự động" và phải được xác nhận trước khi duyệt dự toán. Xác nhận?',
+      action: { tool: 'autoAssignCodes', params: { assignments: p.assign.map((a) => ({ itemId: a.itemId, normCode: a.normCode, confidence: a.confidence })) } },
     };
   }
 

@@ -31,6 +31,8 @@ export type Intent =
       quantityFormula?: string;
     }
   | { kind: 'createCategory'; name?: string }
+  /** Gắn mã định mức tự động cho các công việc chưa có mã (threshold 0–1). */
+  | { kind: 'autoAssign'; threshold?: number }
   | { kind: 'recalc' }
   | { kind: 'exportExcel' }
   | { kind: 'importFile' }
@@ -54,7 +56,8 @@ export type Action =
     }
   | { tool: 'updateQuantity'; params: { itemId: number; quantity: number; quantityFormula?: string } }
   | { tool: 'setPrice'; params: { resourceCode: string; price: number } }
-  | { tool: 'createCategory'; params: { name: string } };
+  | { tool: 'createCategory'; params: { name: string } }
+  | { tool: 'autoAssignCodes'; params: { assignments: { itemId: number; normCode: string; confidence: number }[] } };
 
 export interface ReplyOption {
   label: string;

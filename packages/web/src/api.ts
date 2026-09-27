@@ -39,6 +39,9 @@ export interface Project {
   legalSet: LegalSetId;
   priceDate: string | null;
   gxdttTmdt: number | null;
+  status: 'draft' | 'approved';
+  approvedBy: string | null;
+  approvedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -62,6 +65,21 @@ export interface EstimateResponse {
   totalEstimate: { lines: TotalEstimateLine[]; total: number };
   warnings: string[];
   notes: string[];
+}
+
+export interface SuggestionCandidate {
+  code: string;
+  name: string;
+  unit: string;
+  confidence: number;
+  why: string;
+  unitFactor: number;
+}
+
+export interface AutoAssignPlan {
+  assign: { itemId: number; line: number; name: string; normCode: string; normName: string; confidence: number; why: string }[];
+  below: number;
+  review: { itemId: number; line: number; name: string; best: { code: string; confidence: number } | null }[];
 }
 
 export interface LegalRegister {
@@ -175,6 +193,15 @@ export const api = {
   createItem: (pid: number, data: Record<string, unknown>) => request('POST', `/projects/${pid}/items`, data),
   updateItem: (pid: number, itemId: number, data: Record<string, unknown>) => request('PUT', `/projects/${pid}/items/${itemId}`, data),
   deleteItem: (pid: number, itemId: number) => request('DELETE', `/projects/${pid}/items/${itemId}`),
+
+  suggestions: (pid: number) => request<{ itemId: number; candidates: SuggestionCandidate[] }[]>('GET', `/projects/${pid}/suggestions`),
+  autoAssignPreview: (pid: number, threshold: number) => request<AutoAssignPlan>('POST', `/projects/${pid}/auto-assign/preview`, { threshold }),
+  autoAssign: (pid: number, assignments: AutoAssignPlan['assign']) => request<{ text: string }>('POST', `/projects/${pid}/auto-assign`, { assignments }),
+  assignCode: (pid: number, itemId: number, normCode: string) => request('POST', `/projects/${pid}/items/${itemId}/assign-code`, { normCode }),
+  confirmCode: (pid: number, itemId: number) => request('POST', `/projects/${pid}/items/${itemId}/confirm-code`),
+  confirmCodes: (pid: number, itemIds: number[]) => request<{ confirmed: number }>('POST', `/projects/${pid}/confirm-codes`, { itemIds }),
+  approve: (pid: number) => request<Project>('POST', `/projects/${pid}/approve`),
+  unapprove: (pid: number) => request<Project>('POST', `/projects/${pid}/unapprove`),
 
   prices: (pid: number, all: boolean) => request<PriceRow[]>('GET', `/projects/${pid}/prices${all ? '?all=1' : ''}`),
   setPrice: (pid: number, code: string, price: number | null) => request('PUT', `/projects/${pid}/prices/${encodeURIComponent(code)}`, { price }),

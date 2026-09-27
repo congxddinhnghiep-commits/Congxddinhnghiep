@@ -1,12 +1,13 @@
 import { evaluateFormula, formatNumber, type Action } from '@dutoan/core';
-import type { Repo } from './repo.js';
+import type { ItemSnapshot, Repo } from './repo.js';
 
 /** Inverse operations recorded so an assistant action can be undone. */
 export type UndoOp =
   | { op: 'deleteItem'; itemId: number }
   | { op: 'deleteCategory'; categoryId: number }
   | { op: 'setQuantity'; itemId: number; quantity: number; quantityFormula: string | null }
-  | { op: 'setPrice'; resourceCode: string; price: number | null };
+  | { op: 'setPrice'; resourceCode: string; price: number | null }
+  | { op: 'restoreItem'; itemId: number; snapshot: ItemSnapshot };
 
 export interface ActionResult {
   text: string;
@@ -52,6 +53,19 @@ export function executeAction(repo: Repo, projectId: number, action: Action): Ac
           undo: [{ op: 'setQuantity', itemId: cur.id, quantity: cur.quantity, quantityFormula: cur.quantityFormula ?? null }],
         };
       }
+      case 'autoAssignCodes': {
+        const undo: UndoOp[] = [];
+        let n = 0;
+        for (const a of action.params.assignments) {
+          const item = repo.getItem(projectId, a.itemId);
+          // Skip items that got a valid code since the preview was built.
+          if (item.normCode && repo.getNorm(item.normCode, repo.datasetOf(projectId))) continue;
+          undo.push({ op: 'restoreItem', itemId: a.itemId, snapshot: repo.snapshotItem(projectId, a.itemId) });
+          repo.assignCode(projectId, a.itemId, a.normCode, 'auto', a.confidence);
+          n++;
+        }
+        return { text: `Đã gắn mã tự động cho ${n} công việc (trạng thái "tự động" – cần xác nhận trước khi duyệt).`, undo };
+      }
       case 'setPrice': {
         const p = action.params;
         const res = repo.getResource(p.resourceCode);
@@ -90,6 +104,9 @@ export function applyUndo(repo: Repo, projectId: number, ops: UndoOp[]): void {
           break;
         case 'setPrice':
           repo.setProjectPrice(projectId, u.resourceCode, u.price);
+          break;
+        case 'restoreItem':
+          repo.restoreItem(projectId, u.itemId, u.snapshot);
           break;
       }
     }
