@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { PRICING_METHOD_LABELS, type ItemResult } from '@dutoan/core';
-import { api, type PricingDTO, type QuantityLineDTO } from '../api';
+import { isMixResourceName, PRICING_METHOD_LABELS, type ItemResult, type MixDesign, type MixKind } from '@dutoan/core';
+import { api, type MixDesignSummary, type PricingDTO, type QuantityLineDTO } from '../api';
 import { money, parseInputNumber, qty } from '../format';
 import { Modal } from './Modal';
 
@@ -236,8 +236,127 @@ function Pricing({ projectId, item, onSaved }: { projectId: number; item: Item; 
   );
 }
 
+/**
+ * Cấp phối (TT 38/2026 Phụ lục VII): chọn mã cấp phối cho tài nguyên "Vữa..." của định mức, để bóc
+ * tách ra xi măng/cát/đá/nước theo mác và cỡ đá thay vì để nguyên một dòng "Vữa..." chưa có giá.
+ */
+function MixDesignBox({ projectId, item, onSaved }: { projectId: number; item: Item; onSaved: () => void }) {
+  const [kind, setKind] = useState<MixKind>('concrete');
+  const [grade, setGrade] = useState('');
+  const [options, setOptions] = useState<MixDesignSummary[]>([]);
+  const [detail, setDetail] = useState<MixDesign | null>(null);
+  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (item.mixCode) api.mixDesign(item.mixCode).then(setDetail);
+    else setDetail(null);
+  }, [item.mixCode]);
+
+  useEffect(() => {
+    const t = setTimeout(() => api.mixDesigns({ kind, grade: grade.trim() || undefined }).then(setOptions), 200);
+    return () => clearTimeout(t);
+  }, [kind, grade]);
+
+  const choose = async (code: string | null) => {
+    setError('');
+    setMsg('');
+    try {
+      await api.setMix(projectId, item.id, code);
+      setMsg(code ? `Đã chọn cấp phối ${code}.` : 'Đã bỏ chọn cấp phối.');
+      onSaved();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  return (
+    <div className="form">
+      <p className="hint">
+        Định mức {item.normCode} dùng tài nguyên "Vữa..." (cấp phối vật liệu) – hao phí xi măng/cát/đá/nước phụ thuộc mác và cỡ đá, chọn theo Phụ lục VII TT
+        38/2026.
+      </p>
+      {item.mixCode && (
+        <p>
+          Đang dùng mã cấp phối: <b>{item.mixCode}</b>{' '}
+          <button onClick={() => choose(null)}>Bỏ chọn</button>
+        </p>
+      )}
+      <div className="row2">
+        <label>
+          Loại
+          <select value={kind} onChange={(e) => setKind(e.target.value as MixKind)}>
+            <option value="concrete">Bê tông</option>
+            <option value="mortar">Vữa xây, trát</option>
+          </select>
+        </label>
+        <label>
+          Mác (VD: 250)
+          <input value={grade} onChange={(e) => setGrade(e.target.value)} />
+        </label>
+      </div>
+      <table className="table compact">
+        <thead>
+          <tr>
+            <th>Mã</th>
+            <th>Mục</th>
+            <th>Quy cách</th>
+            <th>Trang</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {options.map((o) => (
+            <tr key={o.code} className={o.code === item.mixCode ? 'sel' : ''}>
+              <td>{o.code}</td>
+              <td>{o.section}</td>
+              <td>{o.spec}</td>
+              <td>{o.page}</td>
+              <td>
+                <button className={o.code === item.mixCode ? '' : 'primary'} disabled={o.code === item.mixCode} onClick={() => choose(o.code)}>
+                  {o.code === item.mixCode ? 'Đang dùng' : 'Chọn'}
+                </button>
+              </td>
+            </tr>
+          ))}
+          {!options.length && (
+            <tr>
+              <td colSpan={5} className="hint">
+                Không có mã cấp phối phù hợp.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      {detail && (
+        <table className="table compact">
+          <thead>
+            <tr>
+              <th>Vật liệu (cấp phối {detail.code})</th>
+              <th>ĐV</th>
+              <th className="num">Định mức /1m3</th>
+            </tr>
+          </thead>
+          <tbody>
+            {detail.materials.map((m) => (
+              <tr key={`${m.material}-${m.unit}`}>
+                <td>{m.material}</td>
+                <td>{m.unit}</td>
+                <td className="num">{qty(m.qty)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {error && <div className="error">{error}</div>}
+      {msg && <p className="ok">{msg}</p>}
+    </div>
+  );
+}
+
 export function ItemDialog({ projectId, item, onClose, onSaved }: { projectId: number; item: Item; onClose: () => void; onSaved: () => void }) {
-  const [tab, setTab] = useState<'qty' | 'price' | 'source'>('qty');
+  const [tab, setTab] = useState<'qty' | 'price' | 'mix' | 'source'>('qty');
+  const hasMixResource = item.mixCode || item.analysis.some((a) => isMixResourceName(a.name));
   return (
     <Modal title={`${item.normCode || '(chưa có mã)'} – ${item.name}`} onClose={onClose} wide>
       <div className="tabs small">
@@ -247,12 +366,18 @@ export function ItemDialog({ projectId, item, onClose, onSaved }: { projectId: n
         <button className={tab === 'price' ? 'active' : ''} onClick={() => setTab('price')}>
           Cách tính giá
         </button>
+        {hasMixResource && (
+          <button className={tab === 'mix' ? 'active' : ''} onClick={() => setTab('mix')}>
+            Cấp phối
+          </button>
+        )}
         <button className={tab === 'source' ? 'active' : ''} onClick={() => setTab('source')}>
           Nguồn gốc
         </button>
       </div>
       {tab === 'qty' && <QuantityLines projectId={projectId} item={item} onSaved={onSaved} />}
       {tab === 'price' && <Pricing projectId={projectId} item={item} onSaved={onSaved} />}
+      {tab === 'mix' && hasMixResource && <MixDesignBox projectId={projectId} item={item} onSaved={onSaved} />}
       {tab === 'source' && (
         <table className="table compact">
           <tbody>

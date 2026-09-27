@@ -22,10 +22,11 @@
  */
 import { normalizeText } from '@dutoan/core';
 import { config } from '../config.js';
-import { openDb } from '../db.js';
+import { openDb, type DB } from '../db.js';
 import { loadTt38Manifest, loadTt38Norms, loadTt38Resources, manifestKeyFor, tt38ResourceCode, TT38_DATASET } from './tt38-data.js';
 
-function main() {
+/** Runs the import against an already-open database (used by the CLI entry point and by tests). */
+export function runImportTt38(db: DB): { normCount: number; resourceCount: number; normResourceCount: number; pctCount: number } {
   const normRows = loadTt38Norms();
   const resRows = loadTt38Resources();
   if (normRows.length < 1000 || resRows.length < 1000) {
@@ -44,7 +45,6 @@ function main() {
     if (!resourceMap.has(key)) resourceMap.set(key, { code: tt38ResourceCode(type, name, unit), type, name, unit });
   }
 
-  const db = openDb(config.dbPath);
   let normCount = 0;
   let normResourceCount = 0;
   let pctCount = 0;
@@ -112,11 +112,18 @@ function main() {
     }
   })();
 
+  return { normCount, resourceCount: resourceMap.size, normResourceCount, pctCount };
+}
+
+function main() {
+  const db = openDb(config.dbPath);
+  const r = runImportTt38(db);
   console.log(
-    `[import:tt38] Đã nạp ${normCount} mã định mức, ${resourceMap.size} tài nguyên (VL/NC/M dùng chung), ` +
-      `${normResourceCount} dòng hao phí (${pctCount} dòng theo tỷ lệ % trên VL/M) vào bộ ${TT38_DATASET} – trạng thái imported_needs_review.`,
+    `[import:tt38] Đã nạp ${r.normCount} mã định mức, ${r.resourceCount} tài nguyên (VL/NC/M dùng chung), ` +
+      `${r.normResourceCount} dòng hao phí (${r.pctCount} dòng theo tỷ lệ % trên VL/M) vào bộ ${TT38_DATASET} – trạng thái imported_needs_review.`,
   );
   db.close();
 }
 
-main();
+// Only run as a CLI script, not when imported by tests.
+if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) main();

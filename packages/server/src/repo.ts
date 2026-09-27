@@ -4,6 +4,8 @@ import {
   defaultLegalSetFor,
   legalSetDateWarning,
   computeQuantityLines,
+  expandMixDesign,
+  isMixResourceName,
   NormIndex,
   normalizeText,
   type QuantityLineInput,
@@ -13,6 +15,8 @@ import {
   type Category,
   type EstimateItem,
   type LegalSetId,
+  type MixDesign,
+  type MixKind,
   type Norm,
   type NormResource,
   type ProjectCostSettings,
@@ -136,6 +140,7 @@ interface ItemRow {
   quote_vat: 'before_vat' | 'including_vat' | 'not_stated' | null;
   quote_vat_rate: number | null;
   quantity_source: string | null;
+  mix_code: string | null;
 }
 const toItem = (r: ItemRow): EstimateItem & { sourceRawText: string | null; sourceFlags: string[] } => ({
   id: r.id,
@@ -171,6 +176,7 @@ const toItem = (r: ItemRow): EstimateItem & { sourceRawText: string | null; sour
       ? { supplier: r.quote_supplier, number: r.quote_no, date: r.quote_date, validUntil: r.quote_valid_until, vatStatus: r.quote_vat, vatRate: r.quote_vat_rate }
       : null,
   quantitySource: r.quantity_source ?? 'MANUAL',
+  mixCode: r.mix_code,
 });
 
 export interface PricingInput {
@@ -489,6 +495,51 @@ export class Repo {
       );
     if (touch) this.touchProject(projectId);
     return this.getItem(projectId, itemId);
+  }
+
+  /** Selected TT 38/2026 Phụ lục VII mix design for this item's "Vữa..." resource (null clears it). */
+  setMixCode(projectId: number, itemId: number, mixCode: string | null): EstimateItem {
+    this.getItem(projectId, itemId);
+    if (mixCode && !this.getMixDesign(mixCode)) throw new HttpError(404, 'Không tìm thấy mã cấp phối');
+    this.db.prepare('UPDATE estimate_items SET mix_code = ? WHERE id = ?').run(mixCode, itemId);
+    this.touchProject(projectId);
+    return this.getItem(projectId, itemId);
+  }
+
+  // ---------------- mix designs (TT 38/2026 Phụ lục VII) ----------------
+  listMixDesigns(filter: { kind?: MixKind; grade?: string; q?: string } = {}): Pick<MixDesign, 'code' | 'section' | 'spec' | 'kind' | 'grade' | 'page' | 'status'>[] {
+    const conds: string[] = [];
+    const args: unknown[] = [];
+    if (filter.kind) {
+      conds.push('kind = ?');
+      args.push(filter.kind);
+    }
+    if (filter.grade) {
+      conds.push('grade = ?');
+      args.push(filter.grade);
+    }
+    if (filter.q) {
+      conds.push('(code LIKE ? OR section LIKE ? OR spec LIKE ?)');
+      args.push(`%${filter.q}%`, `%${filter.q}%`, `%${filter.q}%`);
+    }
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    return this.db
+      .prepare(`SELECT code, section, spec, kind, grade, page, status FROM mix_designs ${where} ORDER BY code LIMIT 200`)
+      .all(...args) as Pick<MixDesign, 'code' | 'section' | 'spec' | 'kind' | 'grade' | 'page' | 'status'>[];
+  }
+
+  getMixDesign(code: string): MixDesign | undefined {
+    const d = this.db.prepare('SELECT code, section, spec, kind, grade, page, status FROM mix_designs WHERE code = ?').get(code) as
+      | Pick<MixDesign, 'code' | 'section' | 'spec' | 'kind' | 'grade' | 'page' | 'status'>
+      | undefined;
+    if (!d) return undefined;
+    const materials = this.db.prepare('SELECT material, unit, qty, resource_code FROM mix_design_materials WHERE mix_code = ? ORDER BY sort_order').all(code) as {
+      material: string;
+      unit: string;
+      qty: number;
+      resource_code: string | null;
+    }[];
+    return { ...d, materials: materials.map((m) => ({ material: m.material, unit: m.unit, qty: m.qty, resourceCode: m.resource_code })) };
   }
 
   // ---------------- quantity lines ----------------
@@ -840,20 +891,47 @@ export class Repo {
     const resourceCodes = new Set<string>();
     const legalSet = this.legal.get(project.legalSet);
     const stmt = this.db.prepare('SELECT norm_code, resource_code, consumption, pct_base FROM norm_resources WHERE dataset = ? AND norm_code = ?');
+    const byNormCode = new Map<string, NormResource[]>();
     for (const c of codes) {
+      const list: NormResource[] = [];
       for (const r of stmt.all(legalSet.normDataset, c) as { norm_code: string; resource_code: string; consumption: number; pct_base: 'VL' | 'M' | null }[]) {
-        normResources.push({ normCode: r.norm_code, resourceCode: r.resource_code, consumption: r.consumption, pctBase: r.pct_base ?? undefined });
+        const nr: NormResource = { normCode: r.norm_code, resourceCode: r.resource_code, consumption: r.consumption, pctBase: r.pct_base ?? undefined };
+        normResources.push(nr);
+        list.push(nr);
         resourceCodes.add(r.resource_code);
       }
+      byNormCode.set(c, list);
     }
     const resStmt = this.db.prepare('SELECT * FROM resources WHERE code = ?');
-    const resources = [...resourceCodes]
-      .map((c) => resStmt.get(c) as ResourceRow | undefined)
-      .filter((r): r is ResourceRow => !!r)
-      .map(toResource);
+    const resourceRows = new Map<string, ResourceRow>();
+    for (const c of resourceCodes) {
+      const row = resStmt.get(c) as ResourceRow | undefined;
+      if (row) resourceRows.set(c, row);
+    }
+
+    // Mix-design expansion (TT 38/2026 Phụ lục VII): an item with a chosen mix code gets its norm's
+    // "Vữa..." resource line replaced by cement/sand/stone/water, scaled by the vữa consumption.
+    const itemsForCalc = items.map((it) => {
+      if (!it.mixCode || !it.normCode) return it;
+      const nrs = byNormCode.get(it.normCode);
+      if (!nrs) return it;
+      const vuaLines = nrs.filter((nr) => !nr.pctBase && isMixResourceName(resourceRows.get(nr.resourceCode)?.name ?? ''));
+      if (vuaLines.length !== 1) return it;
+      const mix = this.getMixDesign(it.mixCode);
+      if (!mix) return it;
+      const expanded = expandMixDesign(nrs, vuaLines[0].resourceCode, vuaLines[0].consumption, mix);
+      for (const nr of expanded) {
+        if (!resourceRows.has(nr.resourceCode)) {
+          const row = resStmt.get(nr.resourceCode) as ResourceRow | undefined;
+          if (row) resourceRows.set(nr.resourceCode, row);
+        }
+      }
+      return { ...it, normResourcesOverride: expanded };
+    });
+    const resources = [...resourceRows.values()].map(toResource);
     const resolved = this.priceResolver?.(projectId);
     const effective = resolved ? Object.fromEntries(Object.entries(resolved).map(([k, v]) => [k, v.price])) : this.projectPrices(projectId);
-    const estimate = computeEstimate({ categories, items, normResources, resources, projectPrices: effective });
+    const estimate = computeEstimate({ categories, items: itemsForCalc, normResources, resources, projectPrices: effective });
     const priceSources = Object.fromEntries(
       estimate.resourceSummary.map((r) => [r.code, resolved?.[r.code]?.source ?? { kind: 'base', label: 'Giá gốc thư viện' }]),
     );

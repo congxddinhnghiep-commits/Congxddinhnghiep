@@ -91,6 +91,13 @@ export interface EstimateItem {
   quote?: ItemQuote | null;
   /** 'MANUAL' | 'FORMULA' | 'LINES' | 'IMPORTED' */
   quantitySource?: string | null;
+  /** Selected TT 38/2026 Phụ lục VII mix design code for this item's "Vữa..." resource, if any. */
+  mixCode?: string | null;
+  /**
+   * Calculation-only, not persisted: when set, computeEstimate uses this instead of the norm's own
+   * resource list (mix-design expansion of a "Vữa..." resource into cement/sand/stone/water).
+   */
+  normResourcesOverride?: NormResource[] | null;
 }
 
 export interface ItemQuote {

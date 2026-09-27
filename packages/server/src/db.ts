@@ -223,6 +223,30 @@ CREATE TABLE IF NOT EXISTS import_templates (
 
 CREATE INDEX IF NOT EXISTS idx_items_category ON estimate_items(category_id);
 CREATE INDEX IF NOT EXISTS idx_categories_project ON categories(project_id);
+
+-- TT 38/2026 Phụ lục VII – cấp phối vật liệu (mix design): expands a "Vữa..." resource into
+-- cement/sand/stone/water, selectable per estimate item (see packages/core/src/mixdesign.ts).
+CREATE TABLE IF NOT EXISTS mix_designs (
+  code TEXT PRIMARY KEY,
+  section TEXT NOT NULL DEFAULT '',
+  spec TEXT,
+  kind TEXT NOT NULL DEFAULT 'other' CHECK (kind IN ('concrete', 'mortar', 'other')),
+  grade TEXT,
+  page INTEGER,
+  status TEXT NOT NULL DEFAULT 'imported_needs_review',
+  raw_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_mix_designs_kind_grade ON mix_designs(kind, grade);
+
+CREATE TABLE IF NOT EXISTS mix_design_materials (
+  mix_code TEXT NOT NULL REFERENCES mix_designs(code) ON DELETE CASCADE,
+  material TEXT NOT NULL,
+  unit TEXT NOT NULL,
+  qty REAL NOT NULL,
+  resource_code TEXT REFERENCES resources(code),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (mix_code, material, unit)
+);
 `;
 
 const columns = (db: DB, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
@@ -269,6 +293,7 @@ export function migrate(db: DB): void {
     ['quote_vat', 'TEXT'],
     ['quote_vat_rate', 'REAL'],
     ['quantity_source', "TEXT NOT NULL DEFAULT 'MANUAL'"],
+    ['mix_code', 'TEXT'],
   ];
   for (const [c, t] of itemCols) if (!icols.includes(c)) db.exec(`ALTER TABLE estimate_items ADD COLUMN ${c} ${t}`);
   db.exec(`UPDATE estimate_items SET code_status = 'manual' WHERE code_status = '' AND norm_code <> ''`);

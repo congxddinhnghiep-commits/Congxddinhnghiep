@@ -177,7 +177,7 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
             add(catTotal, amount);
             return { ...it, unitCost, amount, analysis: [], missingNorm: false };
           }
-          const nrs = byNorm.get(it.normCode) ?? [];
+          const nrs = it.normResourcesOverride ?? byNorm.get(it.normCode) ?? [];
           const breakdown = breakdownUnitCost(nrs, resources, input.projectPrices);
           const unitCost = breakdown.unitCost;
           const q = it.quantity || 0;

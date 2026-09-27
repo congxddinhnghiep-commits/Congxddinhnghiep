@@ -553,6 +553,37 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
   );
   api.get('/resources', h((req) => (req.query.q ? repo.searchResources(String(req.query.q), 50) : repo.listResources())));
 
+  // mix designs (TT 38/2026 Phụ lục VII – cấp phối vật liệu)
+  api.get(
+    '/mix-designs',
+    h((req) => {
+      const kind = req.query.kind;
+      if (kind !== undefined && !['concrete', 'mortar', 'other'].includes(String(kind))) throw new HttpError(400, 'Loại cấp phối không hợp lệ');
+      return repo.listMixDesigns({
+        kind: kind as 'concrete' | 'mortar' | 'other' | undefined,
+        grade: req.query.grade ? String(req.query.grade) : undefined,
+        q: req.query.q ? String(req.query.q) : undefined,
+      });
+    }),
+  );
+  api.get(
+    '/mix-designs/:code',
+    h((req) => {
+      const m = repo.getMixDesign(String(req.params.code));
+      if (!m) throw new HttpError(404, 'Không tìm thấy mã cấp phối');
+      return m;
+    }),
+  );
+  api.put(
+    '/projects/:id/items/:itemId/mix',
+    h((req) => {
+      const p = proj(req);
+      const mixCode = req.body?.mixCode;
+      if (mixCode !== null && typeof mixCode !== 'string') throw new HttpError(400, 'Mã cấp phối không hợp lệ');
+      return repo.setMixCode(p.id, id(req.params.itemId), mixCode ? mixCode.trim() : null);
+    }),
+  );
+
   // export
   api.get(
     '/projects/:id/export.xlsx',

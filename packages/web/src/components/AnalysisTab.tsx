@@ -31,7 +31,10 @@ export function AnalysisTab({ data }: { data: EstimateResponse }) {
                   <tr className="item-head">
                     <td>{++stt}</td>
                     <td>{it.normCode}</td>
-                    <td>{it.name}</td>
+                    <td>
+                      {it.name}
+                      {it.mixCode && <span className="hint"> · cấp phối {it.mixCode}</span>}
+                    </td>
                     <td>{it.unit}</td>
                     <td />
                     <td className="num">{qty(it.quantity)}</td>

@@ -7,6 +7,7 @@ import type {
   LegalDocument,
   LegalSet,
   LegalSetId,
+  MixDesign,
   Norm,
   PendingField,
   ProjectCostSettings,
@@ -69,6 +70,8 @@ export interface EstimateResponse {
   notes: string[];
   priceSources: Record<string, PriceSourceInfo>;
 }
+
+export type MixDesignSummary = Pick<MixDesign, 'code' | 'section' | 'spec' | 'kind' | 'grade' | 'page' | 'status'>;
 
 export interface PriceSourceInfo {
   kind: 'manual' | 'book' | 'base';
@@ -392,6 +395,10 @@ export const api = {
   evaluateQuantity: (lines: QuantityLineDTO[], itemUnit: string) =>
     request<{ total: number; lines: QuantityLineDTO[]; errors: number }>('POST', '/quantity/evaluate', { lines, itemUnit }),
   setPricing: (pid: number, itemId: number, body: PricingDTO) => request('PUT', `/projects/${pid}/items/${itemId}/pricing`, body),
+  mixDesigns: (params: { kind?: string; grade?: string; q?: string } = {}) =>
+    request<MixDesignSummary[]>('GET', `/mix-designs?${new URLSearchParams(params as Record<string, string>).toString()}`),
+  mixDesign: (code: string) => request<MixDesign>('GET', `/mix-designs/${encodeURIComponent(code)}`),
+  setMix: (pid: number, itemId: number, mixCode: string | null) => request('PUT', `/projects/${pid}/items/${itemId}/mix`, { mixCode }),
   transport: (pid: number) => request<Record<string, TransportLegDTO[]>>('GET', `/projects/${pid}/transport`),
   saveTransport: (pid: number, code: string, legs: TransportLegDTO[]) => request<TransportLegDTO[]>('PUT', `/projects/${pid}/transport/${encodeURIComponent(code)}`, { legs }),
   validation: (pid: number) => request<ValidationReport>('GET', `/projects/${pid}/validation`),
