@@ -1,0 +1,169 @@
+{
+ "sheet_building": "NHÀ XƯỞNG A厂房 (50mx40m)",
+ "blocks": [
+  {
+   "total": 788454000.0,
+   "rows": [
+    {
+     "type": "category",
+     "stt": "I"
+    },
+    {
+     "type": "item",
+     "stt": "1a",
+     "qty": 2,
+     "vl": 12000000,
+     "nc": null,
+     "tt": 24000000,
+     "details": 0
+    },
+    {
+     "type": "item",
+     "stt": "1b",
+     "qty": 400,
+     "vl": 450000,
+     "nc": 90000,
+     "tt": 216000000,
+     "details": 2
+    },
+    {
+     "type": "item",
+     "stt": "1c",
+     "qty": 20,
+     "vl": null,
+     "nc": 70000,
+     "tt": 1400000,
+     "details": 2
+    },
+    {
+     "type": "item",
+     "stt": "1",
+     "qty": 86.4,
+     "vl": null,
+     "nc": 25000,
+     "tt": 2160000.0,
+     "details": 1
+    },
+    {
+     "type": "item",
+     "stt": "2",
+     "qty": 7.2,
+     "vl": 1250000,
+     "nc": 220000,
+     "tt": 10584000.0,
+     "details": 0
+    },
+    {
+     "type": "item",
+     "stt": "3",
+     "qty": 1.85,
+     "vl": 16500000,
+     "nc": 3200000,
+     "tt": 36445000.0,
+     "details": 0
+    },
+    {
+     "type": "category",
+     "stt": "II"
+    },
+    {
+     "type": "item",
+     "stt": "4",
+     "qty": 120.5,
+     "vl": 1500000,
+     "nc": 230000,
+     "tt": 208465000.0,
+     "details": 0
+    },
+    {
+     "type": "item",
+     "stt": "5",
+     "qty": 640,
+     "vl": 130000,
+     "nc": 130000,
+     "tt": 166400000,
+     "details": 0
+    },
+    {
+     "type": "item",
+     "stt": "6",
+     "qty": 300,
+     "vl": 260000,
+     "nc": 150000,
+     "tt": 123000000,
+     "details": 0
+    },
+    {
+     "type": "item",
+     "stt": "7",
+     "qty": 200,
+     "vl": 0,
+     "nc": 0,
+     "tt": 0,
+     "details": 0
+    }
+   ]
+  },
+  {
+   "total": 195500000.0,
+   "rows": [
+    {
+     "type": "category",
+     "stt": "I"
+    },
+    {
+     "type": "item",
+     "stt": "1",
+     "qty": 8.5,
+     "vl": 17000000,
+     "nc": 6000000,
+     "tt": 195500000.0,
+     "details": 0
+    }
+   ]
+  }
+ ],
+ "sheet_mep": "01-Điện trung thế ",
+ "mep_total": 447000000,
+ "mep_rows": [
+  {
+   "stt": "1",
+   "tt": 395000000
+  },
+  {
+   "stt": "2",
+   "tt": 25000000
+  },
+  {
+   "stt": "3",
+   "tt": 27000000
+  }
+ ],
+ "grand_total": 1430954000.0,
+ "names_expected": {
+  "1b": "Ép cọc Φ400  L=20m",
+  "1c": "Đập đầu cọc",
+  "1": "Đào đất móng",
+  "3": "Cốt thép móng D<=10",
+  "4": "Bê tông đá 1x2 M300",
+  "5": "Lắp dựng , tháo dỡ ván khuôn"
+ },
+ "units_expected": {
+  "1c": "cái",
+  "3": "tấn",
+  "1a": "tim"
+ },
+ "chinese_expected": {
+  "1": "挖土基础"
+ },
+ "expected_code_family": {
+  "1b": "AC.2",
+  "1c": "AA.2",
+  "1": "AB.",
+  "2": "AF.1",
+  "3": "AF.61",
+  "4": "AF.",
+  "5": "AF.8",
+  "6": "AE."
+ }
+}
