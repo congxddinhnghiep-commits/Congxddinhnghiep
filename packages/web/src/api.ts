@@ -45,6 +45,7 @@ export interface Project {
   approvedAt: string | null;
   region: string | null;
   subArea: string | null;
+  autoPriceUpdate: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -184,6 +185,40 @@ export interface ReconciliationDTO {
   subtotals: { excelRow: number; name: string; fileAmount: number; computed: number; diff: number; ok: boolean }[];
   grand: { fileAmount: number | null; computed: number; diff: number | null; ok: boolean | null };
   allOk: boolean;
+}
+
+export interface RegionalUpdateBody {
+  region: string;
+  subArea?: string | null;
+  auto?: boolean;
+  period?: { type: 'month' | 'quarter'; year: number; value: number } | null;
+  types?: ('VL' | 'NC' | 'M')[];
+  remapCodes?: boolean;
+  codeChoices?: Record<string, string | null>;
+}
+export interface RegionalPreview {
+  region: string;
+  subArea: string | null;
+  projectStatus: 'draft' | 'approved';
+  canApply: boolean;
+  books: { id: number; title: string; type: 'VL' | 'NC' | 'M'; status: string; verificationStatus?: string; rowCount: number }[];
+  totals: { before: { direct: number; gxdtt: number; gxd: number }; after: { direct: number; gxdtt: number; gxd: number }; delta: { direct: number; gxdtt: number; gxd: number } };
+  resources: { code: string; name: string; unit: string; type: 'VL' | 'NC' | 'M'; quantity: number; oldPrice: number; newPrice: number; oldSource: string; newSource: string; delta: number; note: string | null }[];
+  unpriced: { code: string; name: string; unit: string; type: 'VL' | 'NC' | 'M'; price: number; source: string }[];
+  items: { itemId: number; name: string; normCode: string; oldUnit: number; newUnit: number; delta: number; missingPrices: number }[];
+  normSet: { dataset: string; label: string; total: number; sample: number; needsReview: number };
+  remap: { itemId: number; name: string; normCode: string; unit: string; resolution: CodeResolutionDTO }[];
+  warnings: string[];
+}
+export interface RevisionDTO {
+  id: number;
+  kind: string;
+  description: string;
+  createdBy: string;
+  createdAt: string;
+  totalBefore: number | null;
+  totalAfter: number | null;
+  undone: boolean;
 }
 
 export interface Analysis {
@@ -470,6 +505,12 @@ export const api = {
   importPath: (path: string, target: ImportTarget) => request<ImportPreview>('POST', '/import/upload', { path, target }),
   importDrive: (body: { fileId: string; accessToken: string; mimeType: string; name: string; target: ImportTarget }) =>
     request<ImportPreview>('POST', '/import/gdrive', body),
+  regionalPreview: (pid: number, body: RegionalUpdateBody) => request<RegionalPreview>('POST', `/projects/${pid}/regional-update/preview`, body),
+  regionalApply: (pid: number, body: RegionalUpdateBody) => request<{ revisionId: number; applied: { resources: number; items: number; codes: number } }>('POST', `/projects/${pid}/regional-update/apply`, body),
+  revisions: (pid: number) => request<RevisionDTO[]>('GET', `/projects/${pid}/revisions`),
+  undoRevision: (pid: number, rid: number) => request('POST', `/projects/${pid}/revisions/${rid}/undo`),
+  priceUpdateStatus: (pid: number) => request<{ enabled: boolean; count: number; books: { id: number; title: string; type: string }[] }>('GET', `/projects/${pid}/price-update-status`),
+  setAutoPriceUpdate: (pid: number, enabled: boolean) => request('PUT', `/projects/${pid}/auto-price-update`, { enabled }),
   importAnalyze: (body: Record<string, unknown>) => request<Analysis>('POST', '/import/analyze', body),
   importEstimate: (pid: number, body: Record<string, unknown>) =>
     request<{ created: number; withCode: number; withoutCode: number; categories: number; skipped: number; message: string }>('POST', `/projects/${pid}/import-estimate`, body),

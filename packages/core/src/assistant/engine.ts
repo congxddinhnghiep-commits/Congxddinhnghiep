@@ -145,6 +145,8 @@ export class AssistantEngine {
         return this.resolveAutoAssign(intent.threshold ?? 0.8, ctx);
       case 'recalc':
         return { type: 'command', command: 'recalc', text: 'Đã tính lại toàn bộ dự toán.' };
+      case 'regionalUpdate':
+        return { type: 'command', command: 'regionalUpdate', text: 'Mở hộp thoại cập nhật định mức & đơn giá theo khu vực (xem trước trước khi áp dụng).' };
       case 'exportExcel':
         return { type: 'command', command: 'exportExcel', text: 'Đang xuất file Excel dự toán…' };
       case 'importFile':

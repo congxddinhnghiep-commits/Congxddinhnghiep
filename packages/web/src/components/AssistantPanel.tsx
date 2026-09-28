@@ -22,12 +22,14 @@ export function AssistantPanel({
   provider,
   onChanged,
   onOpenImport,
+  onOpenRegional,
   onClose,
 }: {
   projectId: number;
   provider: string;
   onChanged: () => Promise<void>;
   onOpenImport: () => void;
+  onOpenRegional: () => void;
   onClose: () => void;
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([
@@ -54,6 +56,7 @@ export function AssistantPanel({
         if (reply.command === 'recalc') await onChanged();
         else if (reply.command === 'exportExcel') await downloadExcel(projectId);
         else if (reply.command === 'importFile') onOpenImport();
+        else if (reply.command === 'regionalUpdate') onOpenRegional();
         else if (reply.command === 'undo') {
           const r = await api.undo(projectId);
           push({ from: 'info', text: r.text });

@@ -36,6 +36,8 @@ export type Intent =
   | { kind: 'recalc' }
   | { kind: 'exportExcel' }
   | { kind: 'importFile' }
+  /** Mở hộp thoại "Cập nhật định mức & đơn giá theo khu vực". */
+  | { kind: 'regionalUpdate' }
   | { kind: 'undo' }
   | { kind: 'help' }
   | { kind: 'unknown'; text: string };
@@ -75,7 +77,7 @@ export type Reply =
     }
   | { type: 'preview'; text: string; action: Action }
   /** Non-mutating commands executed by the client/server directly (recalc, export, import, undo). */
-  | { type: 'command'; text: string; command: 'recalc' | 'exportExcel' | 'importFile' | 'undo' };
+  | { type: 'command'; text: string; command: 'recalc' | 'exportExcel' | 'importFile' | 'regionalUpdate' | 'undo' };
 
 /** Pluggable intent source: rule-based parser (offline) or an LLM with tool calling. */
 export interface IntentProvider {

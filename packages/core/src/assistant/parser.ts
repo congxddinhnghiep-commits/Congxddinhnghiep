@@ -125,6 +125,7 @@ export function parseCommand(input: string): Intent {
   if (/^(hoan tac|undo|quay lai|huy thao tac( vua roi)?|huy buoc)\b/.test(n)) return { kind: 'undo' };
   if (/^(huong dan|tro giup|giup do|help|\?)$|lam (duoc )?(nhung )?gi\b|co the lam gi/.test(n)) return { kind: 'help' };
   if (/\b(xuat|export|in)\s+(ra\s+)?(file\s+|tep\s+)?(excel|xlsx|bao cao|file|tep)\b/.test(n)) return { kind: 'exportExcel' };
+  if (/\b(cap nhat|doi|chuyen)\b.*\b(don gia|gia|dinh muc)\b.*\b(khu vuc|tinh|thanh pho|tp|dia phuong)\b|\b(don gia|gia|dinh muc)\b.*\btheo (khu vuc|tinh|dia phuong)\b/.test(n)) return { kind: 'regionalUpdate' };
   if (new RegExp(String.raw`^${POLITE}(nhap|import|tai len|mo|doc)\s+(du lieu|file|tep|tu|excel|csv)\b`).test(n)) {
     return { kind: 'importFile' };
   }

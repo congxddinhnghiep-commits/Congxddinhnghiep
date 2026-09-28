@@ -65,6 +65,7 @@ const TOOLS: Anthropic.Tool[] = [
   { name: 'recalc', description: 'Recalculate the estimate.', input_schema: { type: 'object', properties: {} } },
   { name: 'exportExcel', description: 'Export the estimate workbook to Excel.', input_schema: { type: 'object', properties: {} } },
   { name: 'importFile', description: 'Open the data import panel.', input_schema: { type: 'object', properties: {} } },
+  { name: 'regionalUpdate', description: 'Open the dialog that updates norms and unit prices for a province/region (with preview).', input_schema: { type: 'object', properties: {} } },
 ];
 
 const SYSTEM = `You are the command interpreter of a Vietnamese construction cost-estimating application (dự toán xây dựng).

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, downloadExcel, type AppConfig, type EstimateResponse, type User } from '../api';
 import { AnalysisTab } from '../components/AnalysisTab';
 import { AssistantPanel } from '../components/AssistantPanel';
+import { RegionalUpdateDialog } from '../components/RegionalUpdateDialog';
 import { CostSummaryTab } from '../components/CostSummaryTab';
 import { EstimateGrid } from '../components/EstimateGrid';
 import { ImportPanel } from '../components/ImportPanel';
@@ -28,6 +29,9 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
   const [tab, setTab] = useState<Tab>('estimate');
   const [showAssistant, setShowAssistant] = useState(true);
   const [showImport, setShowImport] = useState(false);
+  const [showRegional, setShowRegional] = useState(false);
+  const [newBooks, setNewBooks] = useState(0);
+  const [notice, setNotice] = useState('');
   const [exporting, setExporting] = useState(false);
 
   const reload = useCallback(async () => {
@@ -38,9 +42,16 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
     }
   }, [projectId]);
 
+  const refreshBadge = useCallback(() => {
+    api
+      .priceUpdateStatus(projectId)
+      .then((s) => setNewBooks(s.enabled ? s.count : 0))
+      .catch(() => undefined);
+  }, [projectId]);
+
   useEffect(() => {
-    reload();
-  }, [reload]);
+    reload().then(refreshBadge);
+  }, [reload, refreshBadge]);
 
   const approve = async (on: boolean) => {
     setError('');
@@ -103,6 +114,14 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
             </button>
           )}
           <button onClick={() => setShowImport(true)}>⤓ Nhập dữ liệu</button>
+          <button data-testid="open-regional" onClick={() => setShowRegional(true)} title="Chọn tỉnh/thành, kỳ giá, xem trước rồi áp dụng">
+            Cập nhật định mức &amp; đơn giá theo khu vực
+          </button>
+          {newBooks > 0 && (
+            <button className="primary" data-testid="new-books-badge" onClick={() => setShowRegional(true)}>
+              Có bộ giá mới – Cập nhật?
+            </button>
+          )}
           <button onClick={exportExcel} disabled={exporting}>
             {exporting ? 'Đang xuất…' : '⤒ Xuất Excel'}
           </button>
@@ -113,6 +132,11 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
           )}
         </div>
         {error && <div className="error">{error}</div>}
+        {notice && (
+          <div className="notice" data-testid="notice" onClick={() => setNotice('')}>
+            ✓ {notice}
+          </div>
+        )}
         {(data.warnings.length > 0 || data.notes.length > 0) && (
           <div className={`banner-legal ${data.provisionalRates ? 'provisional' : ''}`} role="status">
             {data.warnings.map((w, i) => (
@@ -153,7 +177,26 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
           provider={config.assistantProvider}
           onChanged={reload}
           onOpenImport={() => setShowImport(true)}
+          onOpenRegional={() => setShowRegional(true)}
           onClose={() => setShowAssistant(false)}
+        />
+      )}
+      {showRegional && (
+        <RegionalUpdateDialog
+          projectId={projectId}
+          config={config}
+          initialRegion={data.project.region}
+          initialSubArea={data.project.subArea}
+          approved={data.project.status === 'approved'}
+          autoUpdate={data.project.autoPriceUpdate}
+          onClose={() => {
+            setShowRegional(false);
+            refreshBadge();
+          }}
+          onApplied={async (m) => {
+            setNotice(m);
+            await reload();
+          }}
         />
       )}
       {showImport && <ImportPanel config={config} user={user} data={data} onClose={() => setShowImport(false)} onImported={reload} />}
