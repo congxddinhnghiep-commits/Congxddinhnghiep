@@ -5,7 +5,9 @@ import {
   detectHeader,
   ESTIMATE_FIELDS,
   evaluateFormula,
+  isSumFormula,
   headerFingerprint,
+  headerTexts,
   IMPORT_FIELD_LABELS,
   isFormula,
   normalizeText,
@@ -20,6 +22,7 @@ import {
 import type { UndoOp } from './actions.js';
 import type { DB } from './db.js';
 import type { ParsedFile } from './importer.js';
+import { resolveImportCode, type CodeResolution } from './import-codes.js';
 import { HttpError, type Repo } from './repo.js';
 
 export type ImportKind = 'estimate' | 'pricebook';
@@ -32,7 +35,28 @@ export interface AnalyzeOptions {
   kind?: ImportKind;
   /** Project whose norm dataset is used to check codes and suggest (estimate imports). */
   projectId?: number;
+  /** Data range as Excel row numbers (1-based, inclusive); default = everything below the header. */
+  firstRow?: number;
+  lastRow?: number;
+  /** Per-row overrides of the detected type (0-based row index → type). */
+  rowTypes?: Record<string, RowType | 'skip'>;
+  /**
+   * 'file' – keep the unit prices found in the file as item-level manual prices (source: file, cell);
+   * 'norm' – recompute from the norms and price books of the project (file prices are ignored).
+   */
+  pricingOption?: 'file' | 'norm';
 }
+
+export const colLetter = (c: number): string => {
+  let n = c + 1;
+  let s = '';
+  while (n > 0) {
+    const m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+};
 
 interface TemplateRow {
   id: number;
@@ -60,27 +84,6 @@ export function saveTemplate(db: DB, kind: ImportKind, name: string, fingerprint
   ).run(name.trim() || 'Mẫu nhập', kind, fingerprint, headerRows, JSON.stringify(mapping), user);
 }
 
-function labelsAt(rows: (string | number | null)[][], merges: ParsedFile['sheets'][number]['merges'], headerRow: number, headerRows: number) {
-  // Recompute labels for an explicit header position (same rules as detectHeader).
-  const width = Math.max(0, ...rows.slice(headerRow, headerRow + headerRows + 1).map((r) => r?.length ?? 0));
-  const val = (r: number, c: number) => {
-    const v = rows[r]?.[c];
-    if (v !== null && v !== undefined && v !== '') return v;
-    for (const m of merges ?? []) if (r >= m.s.r && r <= m.e.r && c >= m.s.c && c <= m.e.c) return rows[m.s.r]?.[m.s.c] ?? null;
-    return null;
-  };
-  const raw: string[] = [];
-  const labels: string[] = [];
-  for (let c = 0; c < width; c++) {
-    const top = val(headerRow, c);
-    const sub = headerRows === 2 ? val(headerRow + 1, c) : null;
-    const text = [top, sub !== top ? sub : null].filter((x) => x !== null && typeof x !== 'number').map(String).join(' ').trim();
-    raw.push(text);
-    labels.push(normalizeText(text.replace(/[\r\n]+/g, ' ').replace(/[()（）:：.]/g, ' ')));
-  }
-  return { raw, labels };
-}
-
 export interface AnalyzedRow extends ClassifiedRow {
   /** 1-based row number as shown in Excel. */
   excelRow: number;
@@ -93,7 +96,27 @@ export interface AnalyzedRow extends ClassifiedRow {
   flags?: string[];
   codeKnown?: boolean;
   suggestion?: { code: string; name: string; confidence: number; why: string } | null;
+  /** Section B: check of the file code against the active norm set + top-3 proposals. */
+  resolution?: CodeResolution;
+  /** Excel cell of each mapped field, e.g. { vl: 'F6', nc: 'G6' }. */
+  cells?: Record<string, string>;
+  /** Unit price used by the file (VL + NC + M, or the combined unit price). */
+  fileUnitPrice?: number | null;
+  /** Thành tiền recomputed as quantity × unit price (file option) or from the norm (norm option). */
+  computedAmount?: number | null;
+  /** Norm-based unit cost of the resolved code ("giá theo định mức"). */
+  normUnit?: number | null;
 }
+
+export interface Reconciliation {
+  items: { excelRow: number; name: string; quantity: number | null; unitPrice: number | null; fileAmount: number | null; computed: number | null; diff: number | null; ok: boolean | null }[];
+  subtotals: { excelRow: number; name: string; fileAmount: number; computed: number; diff: number; ok: boolean }[];
+  grand: { fileAmount: number | null; computed: number; diff: number | null; ok: boolean | null };
+  allOk: boolean;
+}
+
+const TOL = 1;
+const GRAND_RE = /^(tong cong|tong|tong gia tri|tong so|tong chi phi|total|grand total)\b|总计|合计/;
 
 /** Analyse one sheet: sheet kinds, header (detected, template or user mapping), classified rows. */
 export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
@@ -113,7 +136,7 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
   let header: HeaderDetection | null = detected;
   if (o.headerRow !== undefined) {
     const headerRows = o.headerRows ?? 1;
-    const { raw, labels } = labelsAt(sheet.rows, sheet.merges, o.headerRow, headerRows);
+    const { raw, labels } = headerTexts(sheet.rows, sheet.merges ?? [], o.headerRow, headerRows);
     header = { headerRow: o.headerRow, headerRows, labels, rawLabels: raw, mapping: detected?.mapping ?? {}, confidence: detected?.confidence ?? 0 };
   }
   const fingerprint = header ? headerFingerprint(header.labels, header.headerRows) : null;
@@ -148,47 +171,142 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
     };
   }
 
-  const classified = classifyRows(sheet.rows, header);
+  const m = header.mapping;
+  const sumRows = new Set<number>();
+  if (m.amount !== undefined) {
+    for (const [key, formula] of Object.entries(sheet.formulas ?? {})) {
+      const [r, c] = key.split(':').map(Number);
+      if (c === m.amount && isSumFormula(formula)) sumRows.add(r);
+    }
+  }
+  let classified = classifyRows(sheet.rows, header, sumRows);
+  const first0 = o.firstRow !== undefined ? o.firstRow - 1 : -Infinity;
+  const last0 = o.lastRow !== undefined ? o.lastRow - 1 : Infinity;
+  classified = classified.filter((r) => r.index >= first0 && r.index <= last0);
   const dataset = o.projectId ? repo.datasetOf(o.projectId) : null;
-  const index = dataset ? repo.normIndex(dataset) : null;
   const issuesByRow = new Map<number, NonNullable<typeof sheet.issues>>();
   for (const is of sheet.issues ?? []) issuesByRow.set(is.row, [...(issuesByRow.get(is.row) ?? []), is]);
-  const colLetter = (c: number) => (c < 26 ? String.fromCharCode(65 + c) : `C${c + 1}`);
+  const resolutions = new Map<string, CodeResolution>();
+  const cellRef = (field: ImportField, index: number) => (m[field] === undefined ? undefined : `${colLetter(m[field]!)}${index + 1}`);
   const rows: AnalyzedRow[] = classified.map((r) => {
     const out: AnalyzedRow = { ...r, excelRow: r.index + 1 };
-    const nameCol = header!.mapping.name;
+    if (o.rowTypes?.[String(r.index)] && o.rowTypes[String(r.index)] !== 'skip') out.type = o.rowTypes[String(r.index)] as RowType;
+    const nameCol = m.name;
     out.rawName = nameCol !== undefined ? sheet.raw?.[`${r.index}:${nameCol}`] ?? null : null;
     const issues = issuesByRow.get(r.index) ?? [];
     if (issues.length) {
       out.flags = [...new Set(issues.map((i) => i.flag))];
       out.warnings = [
         ...out.warnings,
-        ...issues.map((i) => (i.kind === 'external_link' ? `Ô ${colLetter(i.col)}${i.row + 1} liên kết workbook khác (${i.value})` : `Ô ${colLetter(i.col)}${i.row + 1} lỗi ${i.value}`)),
+        ...issues.map((i) =>
+          i.kind === 'external_link'
+            ? `Ô ${colLetter(i.col)}${i.row + 1} liên kết workbook khác (${i.value})`
+            : i.kind === 'formula_not_evaluated'
+              ? `Ô ${colLetter(i.col)}${i.row + 1} có công thức ${i.value} không có giá trị lưu sẵn và không tính được – KHÔNG nhập bằng 0`
+              : `Ô ${colLetter(i.col)}${i.row + 1} lỗi ${i.value}`,
+        ),
       ];
+    }
+    if (sheet.evaluated && m.amount !== undefined && sheet.evaluated[`${r.index}:${m.amount}`] !== undefined && out.type === 'item') {
+      out.warnings = [...out.warnings, `Thành tiền ô ${colLetter(m.amount)}${r.index + 1} là công thức chưa có giá trị lưu sẵn – đã tính lại (=${sheet.evaluated[`${r.index}:${m.amount}`]})`];
     }
     const cc = canonicalNormCode(r.code);
     out.normalizedCode = cc.normalized;
     out.pricingMethod = cc.kind === 'custom' ? 'CUSTOM_GTT' : cc.kind === 'norm' ? 'NORM_BASED' : null;
-    if (kind === 'estimate' && r.type === 'item' && cc.kind === 'custom') {
-      out.codeKnown = false;
-      out.warnings = [...out.warnings, 'Mã GTT: tính theo giá tạm tính/tự lập (CUSTOM_GTT) – cần nguồn giá'];
-    } else if (kind === 'estimate' && r.type === 'item' && dataset && index) {
-      out.codeKnown = !!(cc.normalized && repo.getNorm(cc.normalized, dataset));
-      if (r.code && !out.codeKnown) out.warnings = [...out.warnings, `Mã "${r.code}" không có trong bộ định mức ${dataset}`];
-      else if (out.codeKnown && cc.normalized !== r.code.trim().toUpperCase()) out.warnings = [...out.warnings, `Mã chuẩn hóa ${r.code} → ${cc.normalized}`];
-      if (!out.codeKnown) {
-        const s = index.suggest(r.name, r.unit || null, 1)[0];
-        out.suggestion = s ? { code: s.norm.code, name: s.norm.name, confidence: s.confidence, why: s.why } : null;
-      }
+    const cells: Record<string, string> = {};
+    for (const [key, field] of [['code', 'code'], ['name', 'name'], ['unit', 'unit'], ['quantity', 'quantity'], ['vl', 'priceVL'], ['nc', 'priceNC'], ['m', 'priceM'], ['unitPrice', 'unitPrice'], ['amount', 'amount'], ['note', 'note']] as [string, ImportField][]) {
+      const ref = cellRef(field, r.index);
+      if (ref) cells[key] = ref;
     }
+    out.cells = cells;
+    const p = r.prices;
+    out.fileUnitPrice = p.vl !== null || p.nc !== null || p.m !== null ? (p.vl ?? 0) + (p.nc ?? 0) + (p.m ?? 0) : p.unit;
+    if (kind === 'estimate' && out.type === 'item' && dataset) {
+      const rk = `${r.code}|${r.name}|${r.unit}`;
+      const res = resolutions.get(rk) ?? resolveImportCode(repo, dataset, { code: r.code, name: r.name, unit: r.unit });
+      resolutions.set(rk, res);
+      out.resolution = res;
+      out.codeKnown = res.status === 'match' || res.status === 'mismatch';
+      if (res.status === 'gtt') out.warnings = [...out.warnings, 'Mã GTT: tính theo giá tạm tính/tự lập (CUSTOM_GTT) – cần nguồn giá'];
+      else if (r.code && !out.codeKnown) out.warnings = [...out.warnings, `Mã "${r.code}" không có trong bộ định mức ${dataset}`];
+      else if (out.codeKnown && cc.normalized !== r.code.trim().toUpperCase()) out.warnings = [...out.warnings, `Mã chuẩn hóa ${r.code} → ${cc.normalized}`];
+      if (res.status === 'mismatch') out.warnings = [...out.warnings, res.message];
+      const s0 = res.candidates[0];
+      if (!out.codeKnown && s0) out.suggestion = { code: s0.code, name: s0.name, confidence: s0.confidence, why: s0.reason };
+      if (res.code) out.normUnit = repo.normUnitCost(dataset, res.code, o.projectId!)?.total ?? null;
+      else if (s0) out.normUnit = repo.normUnitCost(dataset, s0.code, o.projectId!)?.total ?? null;
+    }
+    const q = r.quantity;
+    const usedUnit = (o.pricingOption ?? 'file') === 'norm' ? out.normUnit ?? null : out.fileUnitPrice;
+    out.computedAmount = q !== null && usedUnit !== null && usedUnit !== undefined ? q * usedUnit : null;
     return out;
   });
   const counts = {} as Record<RowType, number>;
+  const typeOf = (r: AnalyzedRow) => (o.rowTypes?.[String(r.index)] as RowType | 'skip' | undefined) ?? r.type;
   for (const r of rows) counts[r.type] = (counts[r.type] ?? 0) + 1;
   const warnings: string[] = [];
-  const m = header.mapping;
   if (kind === 'estimate' && (m.name === undefined || m.quantity === undefined)) warnings.push('Chưa xác định cột Tên công việc hoặc Khối lượng.');
   if (kind === 'pricebook' && (m.name === undefined || m.price === undefined)) warnings.push('Chưa xác định cột Tên vật tư hoặc Giá.');
+
+  // Fidelity check: per row and per category/total, the file's figures vs the recomputed ones.
+  let reconciliation: Reconciliation | null = null;
+  if (kind === 'estimate') {
+    const recon: Reconciliation = { items: [], subtotals: [], grand: { fileAmount: null, computed: 0, diff: null, ok: null }, allOk: true };
+    let catComputed = 0;
+    let grandFile: number | null = null;
+    let subtotalFileSum = 0;
+    let hasSubtotal = false;
+    for (const r of rows) {
+      const t = typeOf(r);
+      if (t === 'item') {
+        const diff = r.amount !== null && r.computedAmount !== null && r.computedAmount !== undefined ? r.computedAmount - r.amount : null;
+        const ok = diff === null ? null : Math.abs(diff) <= TOL;
+        recon.items.push({ excelRow: r.excelRow, name: r.name, quantity: r.quantity, unitPrice: (o.pricingOption ?? 'file') === 'norm' ? r.normUnit ?? null : r.fileUnitPrice ?? null, fileAmount: r.amount, computed: r.computedAmount ?? null, diff, ok });
+        if (ok === false) recon.allOk = false;
+        catComputed += r.computedAmount ?? 0;
+        recon.grand.computed += r.computedAmount ?? 0;
+      } else if (t === 'category') catComputed = 0;
+      else if (t === 'subtotal' && r.amount !== null) {
+        if (GRAND_RE.test(normalizeText(r.name || r.code || ''))) grandFile = r.amount;
+        else {
+          const diff = catComputed - r.amount;
+          const ok = Math.abs(diff) <= TOL;
+          recon.subtotals.push({ excelRow: r.excelRow, name: r.name, fileAmount: r.amount, computed: catComputed, diff, ok });
+          if (!ok) recon.allOk = false;
+          subtotalFileSum += r.amount;
+          hasSubtotal = true;
+          catComputed = 0;
+        }
+      }
+    }
+    recon.grand.fileAmount = grandFile ?? (hasSubtotal ? subtotalFileSum : null);
+    if (recon.grand.fileAmount !== null) {
+      recon.grand.diff = recon.grand.computed - recon.grand.fileAmount;
+      recon.grand.ok = Math.abs(recon.grand.diff) <= TOL;
+      if (!recon.grand.ok) recon.allOk = false;
+    }
+    reconciliation = recon;
+  }
+
+  // Every non-empty column with its header text and 3 sample values, for the mapping dropdowns.
+  const width = Math.max(0, ...sheet.rows.map((r) => r?.length ?? 0));
+  const ht = headerTexts(sheet.rows, sheet.merges ?? [], header.headerRow, header.headerRows, width);
+  const dataStart = header.headerRow + header.headerRows;
+  const fmt = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 3 });
+  const columns = [] as { index: number; letter: string; header: string; samples: string[]; label: string }[];
+  for (let c = 0; c < width; c++) {
+    const nonEmpty = sheet.rows.some((r) => r?.[c] !== null && r?.[c] !== undefined && r[c] !== '');
+    if (!nonEmpty) continue;
+    const samples: string[] = [];
+    for (let i = dataStart; i < sheet.rows.length && samples.length < 3; i++) {
+      const v = sheet.rows[i]?.[c];
+      if (v === null || v === undefined || v === '') continue;
+      samples.push(typeof v === 'number' ? fmt.format(v) : String(v).slice(0, 24));
+    }
+    const head = ht.parts[c].join(' / ');
+    columns.push({ index: c, letter: colLetter(c), header: head, samples, label: `${colLetter(c)} – ${head || '(không có tiêu đề)'}${samples.length ? ` (vd: ${samples.join('; ')}…)` : ''}` });
+  }
+  const bodyRows = rows.map((r) => r.excelRow);
   return {
     fileId: f.id,
     fileName: f.fileName,
@@ -197,10 +315,14 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
     sheetIndex,
     preview,
     header: { headerRow: header.headerRow, headerRows: header.headerRows, labels: header.rawLabels, mapping: header.mapping, confidence: header.confidence },
+    range: { first: bodyRows.length ? Math.min(...bodyRows) : dataStart + 1, last: bodyRows.length ? Math.max(...bodyRows) : sheet.rows.length },
+    columns,
     fingerprint,
     template: template ? { id: template.id, name: template.name } : null,
     rows,
     counts,
+    reconciliation,
+    pricingOption: o.pricingOption ?? 'file',
     fields: fields.map((k) => ({ key: k, label: IMPORT_FIELD_LABELS[k] })),
     rowTypeLabels: ROW_TYPE_LABELS,
     warnings: [
@@ -208,8 +330,11 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
       ...(sheet.encoding === 'vni' || sheet.encoding === 'tcvn3'
         ? [`Sheet dùng bảng mã cũ ${sheet.encoding.toUpperCase()} – đã chuyển sang Unicode (${Object.keys(sheet.raw ?? {}).length} ô), bản gốc được lưu kèm.`]
         : []),
+      ...(Object.keys(sheet.evaluated ?? {}).length
+        ? [`${Object.keys(sheet.evaluated!).length} ô công thức không có giá trị lưu sẵn (file do thư viện ghi) – đã tính lại từ số liệu trong sheet.`]
+        : []),
       ...((sheet.issues?.length ?? 0) > 0
-        ? [`${sheet.issues!.length} ô có lỗi công thức (#NAME?, #REF!…) hoặc liên kết workbook khác – không được dùng im lặng (FLAG_EXTERNAL_LINK_OR_BROKEN_FORMULA).`]
+        ? [`${sheet.issues!.length} ô có lỗi công thức (#NAME?, #REF!…), liên kết workbook khác hoặc công thức không tính được – không được dùng im lặng (FLAG_EXTERNAL_LINK_OR_BROKEN_FORMULA).`]
         : []),
       ...warnings,
     ],
@@ -219,9 +344,12 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
 }
 
 export interface ImportEstimateOptions extends AnalyzeOptions {
-  /** Per-row overrides of the detected type (0-based row index → type). */
-  rowTypes?: Record<string, RowType | 'skip'>;
   saveTemplate?: string | null;
+  /**
+   * Norm code chosen per row (0-based row index → code, null = leave without code). Rows not listed keep
+   * the file code when it exists in the active norm set (match / mismatch) and stay without code otherwise.
+   */
+  codeChoices?: Record<string, string | null>;
 }
 
 /**
@@ -241,6 +369,12 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
   let categories = 0;
   let skipped = 0;
   db.transaction(() => {
+    // A brand-new project has one empty default category; the file's own categories replace it.
+    const cats0 = repo.listCategories(projectId);
+    if (cats0.length === 1 && normalizeText(cats0[0].name) === 'hang muc chung' && repo.listItems(projectId).length === 0) {
+      repo.deleteCategory(projectId, cats0[0].id);
+      undo.push({ op: 'createCategory', name: cats0[0].name });
+    }
     const existing = new Map(repo.listCategories(projectId).map((c) => [normalizeText(c.name), c.id]));
     let currentCat: number | null = null;
     const ensureDefault = () => {
@@ -276,10 +410,22 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
         if (type === 'skip') skipped++;
         continue;
       }
-      const cc = canonicalNormCode(r.code);
-      const code = cc.normalized;
-      const isGtt = cc.kind === 'custom';
-      const known = !isGtt && !!(code && repo.getNorm(code, dataset));
+      const res = r.resolution ?? resolveImportCode(repo, dataset, { code: r.code, name: r.name, unit: r.unit });
+      const isGtt = res.status === 'gtt';
+      const chosen = Object.prototype.hasOwnProperty.call(o.codeChoices ?? {}, String(r.index)) ? o.codeChoices![String(r.index)] : undefined;
+      let code = '';
+      let codeStatus: 'imported' | 'confirmed' | '' = '';
+      if (!isGtt) {
+        if (chosen) {
+          const n = repo.getNorm(chosen, dataset);
+          if (!n) throw new HttpError(400, `Mã ${chosen} không có trong bộ ${dataset} (dòng ${r.excelRow})`);
+          code = n.code;
+          codeStatus = res.code === n.code && (res.status === 'match' || res.status === 'mismatch') ? 'imported' : 'confirmed';
+        } else if (chosen === undefined && res.code) {
+          code = res.code;
+          codeStatus = 'imported';
+        }
+      }
       let formula: string | null = null;
       if (r.formula && isFormula(r.formula)) {
         try {
@@ -289,15 +435,25 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
           formula = null;
         }
       }
+      const p = r.prices;
+      const hasFilePrice = p.vl !== null || p.nc !== null || p.m !== null || p.unit !== null;
+      const fileMode = (o.pricingOption ?? 'norm') === 'file';
+      const useFile = isGtt || (fileMode && hasFilePrice);
+      const cells = r.cells ?? {};
+      const priceCells = [cells.vl, cells.nc, cells.m].filter(Boolean) as string[];
+      if (!priceCells.length && cells.unitPrice) priceCells.push(cells.unitPrice);
       const item = repo.createItem(projectId, {
         categoryId: ensureDefault(),
-        normCode: known ? code : '',
-        name: r.name || code,
+        normCode: code,
+        name: r.name || code || r.code,
         unit: r.unit || undefined,
         quantity: r.quantity ?? 0,
         quantityFormula: formula,
         note: r.formula && !formula ? `Diễn giải gốc: ${r.formula}` : r.note || null,
-        codeStatus: known ? 'imported' : '',
+        codeStatus,
+        normCodeRaw: r.code || null,
+        codeCheck: res.status === 'none' || res.status === 'gtt' ? null : res.status,
+        codeCheckNote: res.status === 'none' || res.status === 'gtt' ? null : res.message + (code && code !== res.rawCode.toUpperCase() ? ` → đã chọn ${code}` : ''),
         source: {
           file: f.fileName,
           sheet: sheetName,
@@ -306,18 +462,20 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
           quantity: r.quantity,
           unit: r.unit || null,
           code: r.code || null,
+          cells,
         },
         sourceRawText: r.rawName ?? null,
         sourceFlags: r.flags ?? [],
         quantitySource: 'IMPORTED',
-        pricing: isGtt
+        pricing: useFile
           ? {
               pricingMethod: 'CUSTOM_GTT',
-              custom: { vl: r.prices.vl ?? r.prices.unit ?? 0, nc: r.prices.nc ?? 0, m: r.prices.m ?? 0 },
-              priceSource:
-                r.prices.vl !== null || r.prices.nc !== null || r.prices.m !== null || r.prices.unit !== null
-                  ? `Đơn giá trong file ${f.fileName} / ${sheetName} / dòng ${r.excelRow} (chưa xác minh)`
-                  : null,
+              custom: { vl: p.vl ?? p.unit ?? 0, nc: p.nc ?? 0, m: p.m ?? 0 },
+              priceSource: !hasFilePrice
+                ? null
+                : fileMode
+                  ? `File Excel ${f.fileName}, ô ${priceCells.length ? priceCells.join('/') : `dòng ${r.excelRow}`}`
+                  : `Đơn giá trong file ${f.fileName} / ${sheetName} / dòng ${r.excelRow} (chưa xác minh)`,
             }
           : undefined,
       });
@@ -327,7 +485,7 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
     if (o.saveTemplate && a.fingerprint) saveTemplate(db, 'estimate', o.saveTemplate, a.fingerprint, a.header!.headerRows, a.header!.mapping, user);
     if (a.template) db.prepare('UPDATE import_templates SET used_count = used_count + 1 WHERE id = ?').run(a.template.id);
   })();
-  const withCode = created.filter((id) => repo.getItem(projectId, id).codeStatus === 'imported').length;
+  const withCode = created.filter((id) => ['imported', 'confirmed'].includes(repo.getItem(projectId, id).codeStatus ?? '')).length;
   return {
     created: created.length,
     categories,

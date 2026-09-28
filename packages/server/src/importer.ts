@@ -2,18 +2,20 @@ import crypto from 'node:crypto';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { detectDominantEncoding, toUnicode, type Merge, type TextEncoding } from '@dutoan/core';
-import { evaluateFormula, isFormula, normalizeText, parseVnNumber, type ResourceType } from '@dutoan/core';
+import { evaluateFormula, evaluateSheetFormula, isFormula, normalizeText, parseFlexibleNumber, parseVnNumber, type ResourceType } from '@dutoan/core';
 import { HttpError, type Repo } from './repo.js';
 
 export type CellValue = string | number | null;
 export const FLAG_BROKEN = 'FLAG_EXTERNAL_LINK_OR_BROKEN_FORMULA';
 
+export const FLAG_FORMULA_NOT_EVALUATED = 'FLAG_FORMULA_NOT_EVALUATED';
+
 export interface CellIssue {
   row: number;
   col: number;
-  kind: 'broken_formula' | 'external_link';
+  kind: 'broken_formula' | 'external_link' | 'formula_not_evaluated';
   value: string;
-  flag: typeof FLAG_BROKEN;
+  flag: typeof FLAG_BROKEN | typeof FLAG_FORMULA_NOT_EVALUATED;
 }
 
 export interface ParsedSheet {
@@ -28,6 +30,10 @@ export interface ParsedSheet {
   raw?: Record<string, string>;
   /** #NAME? / #REF! / … values and formulas pointing to other workbooks. */
   issues?: CellIssue[];
+  /** Spreadsheet formulas by "row:col" (without "="), also those with a cached value. */
+  formulas?: Record<string, string>;
+  /** Cells whose formula had NO cached value and was evaluated on import ("row:col" → formula). */
+  evaluated?: Record<string, string>;
 }
 export interface ParsedFile {
   id: string;
@@ -109,6 +115,81 @@ function normaliseEncoding(sheet: ParsedSheet): ParsedSheet {
   return sheet;
 }
 
+const decodeXml = (t: string) => t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_m, n: string) => String.fromCharCode(Number(n))).replace(/&amp;/g, '&');
+
+/**
+ * Formulas straight from the worksheet XML. SheetJS drops a formula cell whose cached value is empty
+ * (`<f>..</f><v></v>`, as written by libraries), so the formula would be lost without this scan.
+ */
+function xmlFormulas(wb: XLSX.WorkBook, sheetIndex: number): Record<string, string> {
+  const out: Record<string, string> = {};
+  const files = (wb as unknown as { files?: Record<string, { content?: Buffer | string }> }).files ?? {};
+  const text = (name: string) => {
+    const c = files[name]?.content;
+    return c === undefined ? '' : typeof c === 'string' ? c : Buffer.from(c).toString('utf8');
+  };
+  const rid = (wb.Workbook?.Sheets?.[sheetIndex] as unknown as { id?: string } | undefined)?.id;
+  let target = `xl/worksheets/sheet${sheetIndex + 1}.xml`;
+  if (rid) {
+    const m = new RegExp(`<Relationship[^>]*Id="${rid}"[^>]*>`).exec(text('xl/_rels/workbook.xml.rels'));
+    const t = m && /Target="([^"]+)"/.exec(m[0]);
+    if (t) target = t[1].startsWith('/') ? t[1].slice(1) : `xl/${t[1]}`;
+  }
+  const xml = text(target);
+  const re = /<c\s+r="([A-Z]+)(\d+)"[^>]*?>(?:(?!<\/c>)[\s\S])*?<f(?:\s[^>]*)?>([^<]+)<\/f>/g;
+  for (let m = re.exec(xml); m; m = re.exec(xml)) {
+    const { r, c } = XLSX.utils.decode_cell(`${m[1]}${m[2]}`);
+    out[`${r}:${c}`] = decodeXml(m[3]);
+  }
+  return out;
+}
+
+/**
+ * Formulas saved by a library carry no cached value (<v></v>): evaluate them from the sheet's own
+ * numbers (+ − × ÷, parentheses, SUM over ranges, references in the same sheet). A formula that
+ * cannot be evaluated is flagged and stays empty – it is never imported as 0.
+ */
+function resolveFormulas(sheet: ParsedSheet): void {
+  const formulas = sheet.formulas ?? {};
+  const cache = new Map<string, number | null>();
+  const busy = new Set<string>();
+  const valueAt = (r: number, c: number): number | null => {
+    const key = `${r}:${c}`;
+    if (cache.has(key)) return cache.get(key)!;
+    const raw = sheet.rows[r]?.[c];
+    let v: number | null;
+    const empty = raw === null || raw === undefined || raw === '';
+    if (typeof raw === 'number') v = raw;
+    else if (!empty && typeof raw === 'string') v = parseFlexibleNumber(raw) ?? 0;
+    else if (formulas[key] !== undefined) {
+      if (busy.has(key)) return null; // circular reference
+      busy.add(key);
+      try {
+        v = evaluateSheetFormula(formulas[key], valueAt);
+      } catch {
+        v = null;
+      }
+      busy.delete(key);
+    } else v = 0; // empty cell counts as 0, like Excel
+    cache.set(key, v);
+    return v;
+  };
+  sheet.evaluated = {};
+  for (const key of Object.keys(formulas)) {
+    const [r, c] = key.split(':').map(Number);
+    const raw = sheet.rows[r]?.[c];
+    if (raw !== null && raw !== undefined && raw !== '') continue;
+    const v = valueAt(r, c);
+    if (v !== null && Number.isFinite(v)) {
+      (sheet.rows[r] ??= [])[c] = v;
+      sheet.evaluated[key] = formulas[key];
+    } else {
+      (sheet.rows[r] ??= [])[c] = null;
+      (sheet.issues ??= []).push({ row: r, col: c, kind: 'formula_not_evaluated', value: `=${formulas[key]}`, flag: FLAG_FORMULA_NOT_EVALUATED });
+    }
+  }
+}
+
 /** Flag error values and formulas that reference other workbooks – never used silently. */
 function scanIssues(sheet: ParsedSheet, ws?: XLSX.WorkSheet): void {
   const issues: CellIssue[] = [];
@@ -158,7 +239,7 @@ export async function parseBuffer(buf: Buffer, fileName: string, fileIssues: str
   }
   const files = (wb as unknown as { keys?: string[] }).keys ?? [];
   if (files.some((k) => /externalLinks?\//i.test(k))) fileIssues.push('File có liên kết tới workbook khác (external links) – giá trị liên kết có thể đã cũ.');
-  return wb.SheetNames.map((name) => {
+  return wb.SheetNames.map((name, sheetIndex) => {
     const ws = wb.Sheets[name];
     const ref = ws['!ref'];
     const rows: CellValue[][] = [];
@@ -176,8 +257,17 @@ export async function parseBuffer(buf: Buffer, fileName: string, fileIssues: str
       }
     }
     const merges = (ws['!merges'] ?? []).map((m) => ({ s: { r: m.s.r, c: m.s.c }, e: { r: m.e.r, c: m.e.c } }));
-    const sheet: ParsedSheet = { name, rows, merges };
+    const sheet: ParsedSheet = { name, rows, merges, formulas: xmlFormulas(wb, sheetIndex) };
+    for (const addr of Object.keys(ws)) {
+      if (addr.startsWith('!')) continue;
+      const cell = ws[addr] as XLSX.CellObject;
+      if (cell.f) {
+        const { r, c } = XLSX.utils.decode_cell(addr);
+        sheet.formulas![`${r}:${c}`] = cell.f;
+      }
+    }
     scanIssues(sheet, ws);
+    resolveFormulas(sheet);
     return normaliseEncoding(sheet);
   });
 }

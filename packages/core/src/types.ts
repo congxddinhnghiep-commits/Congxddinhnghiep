@@ -91,6 +91,13 @@ export interface EstimateItem {
   quote?: ItemQuote | null;
   /** 'MANUAL' | 'FORMULA' | 'LINES' | 'IMPORTED' */
   quantitySource?: string | null;
+  /** Code exactly as written in the imported file (never overwritten by the resolved norm code). */
+  normCodeRaw?: string | null;
+  /** Result of checking the imported code against the active norm set: match | mismatch | propose | suggest. */
+  codeCheck?: 'match' | 'mismatch' | 'propose' | 'suggest' | null;
+  codeCheckNote?: string | null;
+  /** Norm-based unit cost shown next to a file/custom price for comparison ("giá theo định mức"). */
+  normUnitCost?: { vl: number; nc: number; m: number; total: number } | null;
   /** Selected TT 38/2026 Phụ lục VII mix design code for this item's "Vữa..." resource, if any. */
   mixCode?: string | null;
   /**
@@ -118,6 +125,8 @@ export interface ItemSource {
   quantity?: number | null;
   unit?: string | null;
   code?: string | null;
+  /** Excel cell of each imported field, e.g. { quantity: 'E6', vl: 'F6' }. */
+  cells?: Record<string, string> | null;
 }
 
 /** Cost settings stored per project. All rates are percentages (e.g. 6.5 means 6.5%). */

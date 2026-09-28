@@ -38,9 +38,9 @@ export type ImportField =
   | 'subArea';
 
 export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
-  stt: 'STT',
+  stt: 'STT / phân cấp',
   code: 'Mã hiệu',
-  name: 'Tên công việc / nội dung',
+  name: 'Hạng mục công việc (tên công tác)',
   unit: 'Đơn vị',
   quantity: 'Khối lượng',
   formula: 'Diễn giải khối lượng',
@@ -159,6 +159,39 @@ function mapLabels(labels: string[], fields: ImportField[]): { mapping: Partial<
 }
 
 /**
+ * Header texts per column for an explicit header position. A group label ("Đơn giá") whose right
+ * neighbours are empty above sub-labels ("Vật liệu", "Nhân công") spans those columns even when the
+ * cells are NOT merged.
+ */
+export function headerTexts(rows: Cell[][], merges: Merge[], headerRow: number, span: 1 | 2, width?: number): { raw: string[]; labels: string[]; parts: string[][] } {
+  const w = width ?? Math.max(0, ...rows.slice(headerRow, headerRow + span + 1).map((r) => r?.length ?? 0));
+  const isText = (x: Cell) => x !== null && x !== undefined && x !== '' && typeof x !== 'number';
+  const tops: Cell[] = [];
+  for (let c = 0; c < w; c++) tops.push(mergedValue(rows, merges, headerRow, c));
+  const subs: Cell[] = [];
+  for (let c = 0; c < w; c++) subs.push(span === 2 ? mergedValue(rows, merges, headerRow + 1, c) : null);
+  if (span === 2) {
+    let source = -1;
+    for (let c = 0; c < w; c++) {
+      if (isText(rows[headerRow]?.[c])) source = isText(subs[c]) ? c : -1;
+      else if (source >= 0 && !isText(rows[headerRow]?.[c]) && isText(subs[c]) && !isText(tops[c])) tops[c] = tops[source];
+      else if (!isText(subs[c])) source = -1;
+    }
+  }
+  const raw: string[] = [];
+  const labels: string[] = [];
+  const parts: string[][] = [];
+  for (let c = 0; c < w; c++) {
+    const ps = [tops[c], subs[c] !== tops[c] ? subs[c] : null].filter((x) => isText(x)).map((x) => String(x).replace(/\s+/g, ' ').trim());
+    const text = ps.join(' ').trim();
+    parts.push(ps);
+    raw.push(text);
+    labels.push(labelOf(text));
+  }
+  return { raw, labels, parts };
+}
+
+/**
  * Find the header row(s) in the first `scan` rows: single-row headers and two-row headers where
  * a merged group label ("Đơn giá") sits above sub-labels ("Vật liệu", "Nhân công", "Máy").
  */
@@ -169,15 +202,7 @@ export function detectHeader(rows: Cell[][], merges: Merge[] = [], fields: Impor
   for (let r = 0; r < Math.min(scan, rows.length); r++) {
     for (const span of [1, 2] as const) {
       if (span === 2 && r + 1 >= rows.length) continue;
-      const raw: string[] = [];
-      const labels: string[] = [];
-      for (let c = 0; c < width; c++) {
-        const top = mergedValue(rows, merges, r, c);
-        const sub = span === 2 ? mergedValue(rows, merges, r + 1, c) : null;
-        const text = [top, sub !== top ? sub : null].filter((x) => x !== null && x !== '' && typeof x !== 'number').map(String).join(' ');
-        raw.push(text.trim());
-        labels.push(labelOf(text));
-      }
+      const { raw, labels } = headerTexts(rows, merges, r, span, width);
       const { mapping, score } = mapLabels(labels, fields);
       const hasName = mapping.name !== undefined;
       const hasValue = mapping.quantity !== undefined || mapping.price !== undefined || mapping.unit !== undefined || mapping.unitPrice !== undefined;
@@ -265,6 +290,8 @@ export interface ClassifiedRow {
   quantity: number | null;
   formula: string;
   prices: { vl: number | null; nc: number | null; m: number | null; unit: number | null };
+  /** "Thành tiền" of the row as in the file (formulas without cached values are evaluated on import). */
+  amount: number | null;
   /** Price-book mode: the quoted price of the row. */
   price: number | null;
   spec: string;
@@ -281,7 +308,12 @@ const ROMAN_RE = /^(i|ii|iii|iv|v|vi|vii|viii|ix|x|xi|xii|xiii|xiv|xv|xvi|xvii|x
 const str = (v: Cell | undefined): string => (v === null || v === undefined ? '' : String(v).replace(/\s+/g, ' ').trim());
 
 /** Classify data rows below the header. */
-export function classifyRows(rows: Cell[][], header: Pick<HeaderDetection, 'headerRow' | 'headerRows' | 'mapping'>): ClassifiedRow[] {
+export function classifyRows(
+  rows: Cell[][],
+  header: Pick<HeaderDetection, 'headerRow' | 'headerRows' | 'mapping'>,
+  /** Rows (0-based) whose "Thành tiền" is a SUM formula – treated as subtotal rows. */
+  sumRows?: ReadonlySet<number>,
+): ClassifiedRow[] {
   const m = header.mapping;
   const get = (r: Cell[], f: ImportField) => (m[f] === undefined || m[f]! < 0 ? undefined : r[m[f]!]);
   // Price lists have no quantity column: a row is an item when it has a name/code and a price.
@@ -315,6 +347,7 @@ export function classifyRows(rows: Cell[][], header: Pick<HeaderDetection, 'head
         m: parseFlexibleNumber(get(r, 'priceM') ?? null),
         unit: parseFlexibleNumber(get(r, 'unitPrice') ?? null),
       },
+      amount: parseFlexibleNumber(get(r, 'amount') ?? null),
       price,
       spec: str(get(r, 'spec')),
       subArea: str(get(r, 'subArea')),
@@ -336,7 +369,7 @@ export function classifyRows(rows: Cell[][], header: Pick<HeaderDetection, 'head
     }
     const firstText = normalizeText([stt, code, name, ...cells.slice(0, 4)].filter(Boolean).join(' '));
     const nameN = normalizeText(name || firstText);
-    if (SUBTOTAL_RE.test(nameN) || SUBTOTAL_CN.test(cells.join(' ')) || (!name && SUBTOTAL_RE.test(firstText))) {
+    if (SUBTOTAL_RE.test(nameN) || SUBTOTAL_CN.test(cells.join(' ')) || (!name && SUBTOTAL_RE.test(firstText)) || (sumRows?.has(i) && quantity === null)) {
       row.type = 'subtotal';
       out.push(row);
       continue;

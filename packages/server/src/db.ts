@@ -309,6 +309,11 @@ export function migrate(db: DB): void {
     ['quote_vat_rate', 'REAL'],
     ['quantity_source', "TEXT NOT NULL DEFAULT 'MANUAL'"],
     ['mix_code', 'TEXT'],
+    // Update 3 B – code mapping of imported items
+    ['norm_code_raw', 'TEXT'],
+    ['code_check', 'TEXT'],
+    ['code_check_note', 'TEXT'],
+    ['source_cells', 'TEXT'],
   ];
   for (const [c, t] of itemCols) if (!icols.includes(c)) db.exec(`ALTER TABLE estimate_items ADD COLUMN ${c} ${t}`);
   db.exec(`UPDATE estimate_items SET code_status = 'manual' WHERE code_status = '' AND norm_code <> ''`);

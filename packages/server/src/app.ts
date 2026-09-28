@@ -13,6 +13,7 @@ import {
   TT36_WORK_CATEGORIES,
   type BuildingType,
   type ProjectCostSettings,
+  type RowType,
 } from '@dutoan/core';
 import { AssistantService, autoAssignPlan } from './assistant.js';
 import { AuthService, requireAdmin, requirePasswordChanged } from './auth.js';
@@ -778,6 +779,10 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
     headerRow: b.headerRow !== undefined && b.headerRow !== null ? Number(b.headerRow) : undefined,
     headerRows: (Number(b.headerRows) === 2 ? 2 : 1) as 1 | 2,
     mapping: mappingOf(b.mapping),
+    firstRow: b.firstRow !== undefined && b.firstRow !== null && b.firstRow !== '' ? Number(b.firstRow) : undefined,
+    lastRow: b.lastRow !== undefined && b.lastRow !== null && b.lastRow !== '' ? Number(b.lastRow) : undefined,
+    rowTypes: b.rowTypes && typeof b.rowTypes === 'object' ? (b.rowTypes as Record<string, RowType | 'skip'>) : undefined,
+    pricingOption: (b.pricingOption === 'norm' ? 'norm' : b.pricingOption === 'file' ? 'file' : undefined) as 'file' | 'norm' | undefined,
   });
   api.post(
     '/import/analyze',
@@ -794,7 +799,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
       const p = proj(req);
       const b = req.body ?? {};
       const f = getParsed(String(b.fileId), req.user!.id);
-      const r = importEstimate(db, repo, f, p.id, { ...headerOpts(b), rowTypes: b.rowTypes, saveTemplate: b.saveTemplate ?? null }, req.user!.username);
+      const r = importEstimate(db, repo, f, p.id, { ...headerOpts(b), saveTemplate: b.saveTemplate ?? null, codeChoices: b.codeChoices && typeof b.codeChoices === 'object' ? (b.codeChoices as Record<string, string | null>) : undefined }, req.user!.username);
       if (r.created) assistant.record(p.id, req.user!.id, `Nhập ${r.created} công việc từ ${f.fileName}`, { tool: 'importEstimate', file: f.fileName }, r.undo);
       let autoText = '';
       const t = b.autoAssignThreshold;

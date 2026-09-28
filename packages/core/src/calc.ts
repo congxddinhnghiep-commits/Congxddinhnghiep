@@ -175,7 +175,25 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
             const q = it.quantity || 0;
             const amount: UnitCost = { vl: unitCost.vl * q, nc: unitCost.nc * q, m: unitCost.m * q, total: unitCost.total * q };
             add(catTotal, amount);
-            return { ...it, unitCost, amount, analysis: [], missingNorm: false };
+            // A file/custom price may still carry a norm code: show the norm-based price and analysis
+            // for comparison only (never added to totals or the material summary).
+            const cnrs = it.normCode ? it.normResourcesOverride ?? byNorm.get(it.normCode) ?? [] : [];
+            if (!cnrs.length) return { ...it, unitCost, amount, analysis: [], missingNorm: false };
+            const cb = breakdownUnitCost(cnrs, resources, input.projectPrices);
+            const analysis: AnalysisRow[] = [];
+            for (const nr of cnrs) {
+              const r = resources.get(nr.resourceCode);
+              if (!r) continue;
+              if (nr.pctBase) {
+                const p = cb.pct.find((x) => x.resourceCode === r.code && x.base === nr.pctBase && x.pct === nr.consumption);
+                analysis.push({ resourceCode: r.code, name: r.name, unit: r.unit, type: r.type, consumption: nr.consumption, quantity: q, price: 0, unitAmount: p?.amount ?? 0, amount: (p?.amount ?? 0) * q });
+                continue;
+              }
+              const price = priceOf(r, input.projectPrices);
+              const quantity = expandResource(q, nr.consumption, nr.coefficient ?? 1);
+              analysis.push({ resourceCode: r.code, name: r.name, unit: r.unit, type: r.type, consumption: nr.consumption, quantity, price, unitAmount: expandResource(1, nr.consumption, nr.coefficient ?? 1) * price, amount: quantity * price });
+            }
+            return { ...it, unitCost, amount, analysis, missingNorm: false, normUnitCost: cb.unitCost };
           }
           const nrs = it.normResourcesOverride ?? byNorm.get(it.normCode) ?? [];
           const breakdown = breakdownUnitCost(nrs, resources, input.projectPrices);

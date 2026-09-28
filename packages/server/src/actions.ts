@@ -5,6 +5,7 @@ import type { ItemSnapshot, Repo } from './repo.js';
 export type UndoOp =
   | { op: 'deleteItem'; itemId: number }
   | { op: 'deleteCategory'; categoryId: number }
+  | { op: 'createCategory'; name: string }
   | { op: 'setQuantity'; itemId: number; quantity: number; quantityFormula: string | null }
   | { op: 'setPrice'; resourceCode: string; price: number | null }
   | { op: 'restoreItem'; itemId: number; snapshot: ItemSnapshot };
@@ -98,6 +99,9 @@ export function applyUndo(repo: Repo, projectId: number, ops: UndoOp[]): void {
           } catch {
             /* already removed */
           }
+          break;
+        case 'createCategory':
+          repo.createCategory(projectId, u.name);
           break;
         case 'setQuantity':
           repo.updateItem(projectId, u.itemId, { quantity: u.quantity, quantityFormula: u.quantityFormula });

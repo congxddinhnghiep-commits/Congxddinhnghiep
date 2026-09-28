@@ -1,5 +1,6 @@
 import {
   computeEstimate,
+  computeUnitCost,
   computeProjectCost,
   defaultLegalSetFor,
   legalSetDateWarning,
@@ -141,6 +142,10 @@ interface ItemRow {
   quote_vat_rate: number | null;
   quantity_source: string | null;
   mix_code: string | null;
+  norm_code_raw: string | null;
+  code_check: EstimateItem['codeCheck'];
+  code_check_note: string | null;
+  source_cells: string | null;
 }
 const toItem = (r: ItemRow): EstimateItem & { sourceRawText: string | null; sourceFlags: string[] } => ({
   id: r.id,
@@ -164,6 +169,7 @@ const toItem = (r: ItemRow): EstimateItem & { sourceRawText: string | null; sour
           quantity: r.source_quantity,
           unit: r.source_unit,
           code: r.source_code,
+          cells: r.source_cells ? JSON.parse(r.source_cells) : null,
         }
       : null,
   sourceRawText: r.source_raw_text,
@@ -177,6 +183,9 @@ const toItem = (r: ItemRow): EstimateItem & { sourceRawText: string | null; sour
       : null,
   quantitySource: r.quantity_source ?? 'MANUAL',
   mixCode: r.mix_code,
+  normCodeRaw: r.norm_code_raw,
+  codeCheck: r.code_check,
+  codeCheckNote: r.code_check_note,
 });
 
 export interface PricingInput {
@@ -430,6 +439,9 @@ export class Repo {
       sourceFlags?: string[];
       pricing?: PricingInput;
       quantitySource?: string;
+      normCodeRaw?: string | null;
+      codeCheck?: EstimateItem['codeCheck'];
+      codeCheckNote?: string | null;
     },
   ): EstimateItem {
     this.getCategory(projectId, data.categoryId);
@@ -464,6 +476,10 @@ export class Repo {
     this.db
       .prepare('UPDATE estimate_items SET source_raw_text = ?, source_flags = ?, quantity_source = ? WHERE id = ?')
       .run(data.sourceRawText ?? null, data.sourceFlags?.length ? JSON.stringify(data.sourceFlags) : null, data.quantitySource ?? (data.quantityFormula ? 'FORMULA' : 'MANUAL'), newId);
+    if (data.source?.cells) this.db.prepare('UPDATE estimate_items SET source_cells = ? WHERE id = ?').run(JSON.stringify(data.source.cells), newId);
+    if (data.normCodeRaw !== undefined || data.codeCheck !== undefined) {
+      this.db.prepare('UPDATE estimate_items SET norm_code_raw = ?, code_check = ?, code_check_note = ? WHERE id = ?').run(data.normCodeRaw ?? null, data.codeCheck ?? null, data.codeCheckNote ?? null, newId);
+    }
     if (data.pricing) this.setPricing(projectId, newId, data.pricing, false);
     this.touchProject(projectId);
     return this.getItem(projectId, newId);
@@ -845,6 +861,19 @@ export class Repo {
          base_price = excluded.base_price, name_search = excluded.name_search, is_sample = excluded.is_sample`,
       )
       .run(r.code, r.name, r.unit, r.type, r.basePrice, normalizeText(`${r.code} ${r.name}`), isSample ? 1 : 0);
+  }
+
+  /** Norm-based unit cost (VL/NC/M per unit of the norm) at the project's effective prices. */
+  normUnitCost(dataset: string, code: string, projectId: number) {
+    const nrs = this.getNormResources(code, dataset);
+    if (!nrs.length) return null;
+    const resolved = this.priceResolver?.(projectId);
+    const prices = resolved ? Object.fromEntries(Object.entries(resolved).map(([k, v]) => [k, v.price])) : this.projectPrices(projectId);
+    return computeUnitCost(
+      nrs.map((n) => ({ normCode: code, resourceCode: n.resourceCode, consumption: n.consumption, pctBase: n.pctBase })),
+      new Map(nrs.map((n) => [n.code, n as Resource])),
+      prices,
+    );
   }
 
   // ---------------- prices ----------------

@@ -232,6 +232,52 @@ export class NormIndex<T extends SuggestNorm = SuggestNorm> {
       .sort((a, b) => a.code.localeCompare(b.code));
   }
 
+  private scoreDoc(d: Indexed<T>, qTokens: string[], qParams: WorkParams, qMass: number) {
+    const matched = qTokens.filter((t) => d.tokens.has(t));
+    const mMass = matched.reduce((a, t) => a + (this.idf.get(t) ?? 0), 0);
+    const qCov = qMass ? mMass / qMass : 0;
+    const dCov = mMass / d.idfMass;
+    let text = 0.7 * qCov + 0.3 * dCov;
+    let agree = 0;
+    let conflicts = 0;
+    let missing = 0;
+    const reasons: string[] = [];
+    const bad: string[] = [];
+    for (const key of Object.keys(PARAM_LABEL) as (keyof WorkParams)[]) {
+      const qv = qParams[key];
+      const nv = d.params[key];
+      if (qv && nv) {
+        if (qv === nv) {
+          agree += key === 'work' ? 1.5 : 1;
+          reasons.push(PARAM_LABEL[key]);
+        } else {
+          conflicts += key === 'work' ? 3 : 1;
+          bad.push(PARAM_LABEL[key]);
+        }
+      } else if (nv && !qv && key !== 'height' && key !== 'mortar' && key !== 'location') {
+        missing++;
+      }
+    }
+    if (qParams.work && d.params.work && qParams.work !== d.params.work) text *= 0.3;
+    const nParams = Object.values(qParams).filter(Boolean).length || 1;
+    const paramScore = (agree - 1.5 * conflicts) / (nParams + 0.5);
+    return { score: text + 0.5 * paramScore - 0.05 * missing, matched, qCov, agreeCount: agree, conflicts, missing, reasons, bad };
+  }
+
+  /**
+   * How well a work description fits ONE given norm (by code): keyword coverage of the description,
+   * parameter agreement/conflicts. Used to check an imported code against its name.
+   */
+  compare(description: string, code: string): { found: boolean; coverage: number; score: number; conflicts: string[]; agree: string[] } {
+    const d = this.docs.find((x) => x.norm.code === code);
+    if (!d) return { found: false, coverage: 0, score: 0, conflicts: [], agree: [] };
+    const qn = normalizeWork(description);
+    const qTokens = [...new Set(workTokens(qn))].filter((t) => this.idf.has(t));
+    const qMass = qTokens.reduce((a, t) => a + (this.idf.get(t) ?? 0), 0);
+    const sc = this.scoreDoc(d, qTokens, extractParams(qn), qMass);
+    return { found: true, coverage: sc.qCov, score: sc.score, conflicts: sc.bad, agree: sc.reasons };
+  }
+
   /**
    * Rank norms for a work description (+ optional unit). Unit compatibility is a hard filter.
    * Returns candidates sorted by score with a confidence for the top ones.
@@ -251,45 +297,14 @@ export class NormIndex<T extends SuggestNorm = SuggestNorm> {
         if (f === null) continue;
         factor = f;
       }
-      const matched = qTokens.filter((t) => d.tokens.has(t));
-      const mMass = matched.reduce((a, t) => a + (this.idf.get(t) ?? 0), 0);
-      const qCov = qMass ? mMass / qMass : 0;
-      const dCov = mMass / d.idfMass;
-      let text = 0.7 * qCov + 0.3 * dCov;
-
-      // Parameters
-      let agree = 0;
-      let conflicts = 0;
-      let missing = 0;
-      const reasons: string[] = [];
-      const bad: string[] = [];
-      for (const key of Object.keys(PARAM_LABEL) as (keyof WorkParams)[]) {
-        const qv = qParams[key];
-        const nv = d.params[key];
-        if (qv && nv) {
-          if (qv === nv) {
-            agree += key === 'work' ? 1.5 : 1;
-            reasons.push(PARAM_LABEL[key]);
-          } else {
-            conflicts += key === 'work' ? 3 : 1;
-            bad.push(PARAM_LABEL[key]);
-          }
-        } else if (nv && !qv && key !== 'height' && key !== 'mortar' && key !== 'location') {
-          missing++;
-        }
-      }
-      if (qParams.work && d.params.work && qParams.work !== d.params.work) text *= 0.3;
-      const nParams = Object.values(qParams).filter(Boolean).length || 1;
-      const paramScore = (agree - 1.5 * conflicts) / (nParams + 0.5);
-      const score = text + 0.5 * paramScore - 0.05 * missing;
-      if (score <= 0.05 || (!matched.length && !agree)) continue;
-
+      const sc = this.scoreDoc(d, qTokens, qParams, qMass);
+      if (sc.score <= 0.05 || (!sc.matched.length && !sc.agreeCount)) continue;
       const whyParts: string[] = [];
-      if (matched.length) whyParts.push(`khớp từ khóa: ${matched.join(', ')}`);
-      if (reasons.length) whyParts.push(`đúng ${reasons.join(', ')}`);
-      if (bad.length) whyParts.push(`KHÁC ${bad.join(', ')}`);
+      if (sc.matched.length) whyParts.push(`khớp từ khóa: ${sc.matched.join(', ')}`);
+      if (sc.reasons.length) whyParts.push(`đúng ${sc.reasons.join(', ')}`);
+      if (sc.bad.length) whyParts.push(`KHÁC ${sc.bad.join(', ')}`);
       if (unit) whyParts.push(factor === 1 ? `cùng đơn vị ${d.norm.unit}` : `quy đổi ${unit} → ${d.norm.unit} (×${String(+factor.toPrecision(6)).replace('.', ',')})`);
-      scored.push({ norm: d.norm, score, confidence: 0, why: whyParts.join('; '), unitFactor: factor, conflicts, missing });
+      scored.push({ norm: d.norm, score: sc.score, confidence: 0, why: whyParts.join('; '), unitFactor: factor, conflicts: sc.conflicts, missing: sc.missing });
     }
     scored.sort((a, b) => b.score - a.score || a.norm.code.localeCompare(b.norm.code));
     const top = scored.slice(0, Math.max(limit, 2));
