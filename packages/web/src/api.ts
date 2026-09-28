@@ -162,6 +162,30 @@ export interface AutoAssignPlan {
 
 export type RowType = 'header' | 'category' | 'item' | 'subtotal' | 'note' | 'empty';
 
+export interface CodeCandidateDTO {
+  code: string;
+  name: string;
+  unit: string;
+  confidence: number;
+  reason: string;
+}
+export interface CodeResolutionDTO {
+  status: 'match' | 'mismatch' | 'propose' | 'suggest' | 'gtt' | 'none';
+  label: string;
+  rawCode: string;
+  code: string | null;
+  normName?: string;
+  candidates: CodeCandidateDTO[];
+  askParams?: string[];
+  message: string;
+}
+export interface ReconciliationDTO {
+  items: { excelRow: number; name: string; quantity: number | null; unitPrice: number | null; fileAmount: number | null; computed: number | null; diff: number | null; ok: boolean | null }[];
+  subtotals: { excelRow: number; name: string; fileAmount: number; computed: number; diff: number; ok: boolean }[];
+  grand: { fileAmount: number | null; computed: number; diff: number | null; ok: boolean | null };
+  allOk: boolean;
+}
+
 export interface Analysis {
   fileId: string;
   fileName: string;
@@ -189,7 +213,18 @@ export interface Analysis {
     rawName?: string | null;
     flags?: string[];
     suggestion?: { code: string; name: string; confidence: number; why: string } | null;
+    amount: number | null;
+    prices: { vl: number | null; nc: number | null; m: number | null; unit: number | null };
+    fileUnitPrice?: number | null;
+    computedAmount?: number | null;
+    normUnit?: number | null;
+    cells?: Record<string, string>;
+    resolution?: CodeResolutionDTO;
   }[];
+  columns: { index: number; letter: string; header: string; samples: string[]; label: string }[];
+  range: { first: number; last: number };
+  reconciliation: ReconciliationDTO | null;
+  pricingOption: 'file' | 'norm';
   counts: Partial<Record<RowType, number>>;
   fields: { key: string; label: string }[];
   rowTypeLabels: Record<RowType, string>;

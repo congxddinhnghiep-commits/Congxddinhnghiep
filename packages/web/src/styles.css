@@ -307,3 +307,12 @@ b.up { color: var(--up); } b.down { color: var(--down); }
 .sigma { font-size: 11px; color: var(--brand); margin-right: 2px; }
 td.nowrap { white-space: nowrap; }
 button.pm { border: none; cursor: pointer; }
+
+/* Update 3: import mapping, reconciliation */
+.chip-sug.bad { background: #fdecea; color: #b42318; border-color: #f2b8b5; }
+.ok-mark { color: #1f6b3a; font-weight: 700; }
+.warn-mark { color: #b42318; font-weight: 700; }
+.map-table select { min-width: 360px; max-width: 100%; }
+.code-cell { display: flex; flex-direction: column; gap: 3px; min-width: 220px; }
+.code-cell select { max-width: 320px; }
+.import-review h4 { margin: 16px 0 6px; }

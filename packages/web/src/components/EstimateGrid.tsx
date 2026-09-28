@@ -267,11 +267,28 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
                               ⚠ lỗi ô nguồn{' '}
                             </span>
                           ) : null}
+                          {it.codeCheck === 'mismatch' && (
+                            <span className="code-state review" data-testid="code-mismatch" title={it.codeCheckNote ?? ''}>
+                              ⚠ mã không khớp tên{' '}
+                            </span>
+                          )}
+                          {it.normCodeRaw && it.normCode && it.normCodeRaw.trim().toUpperCase() !== it.normCode && (
+                            <span className="hint" title={it.codeCheckNote ?? ''}>
+                              mã gốc {it.normCodeRaw}{' '}
+                            </span>
+                          )}
                           {it.pricingMethod && it.pricingMethod !== 'NORM_BASED' ? (
-                            <button className="pm" title={it.priceSource ?? 'Chưa có nguồn giá'} onClick={() => setDialogItem(it.id)}>
-                              {it.pricingMethod === 'CUSTOM_GTT' ? 'GTT' : 'Báo giá'}
-                              {!it.priceSource ? ' · thiếu nguồn' : ''}
-                            </button>
+                            <>
+                              <button className="pm" title={it.priceSource ?? 'Chưa có nguồn giá'} onClick={() => setDialogItem(it.id)}>
+                                {it.pricingMethod === 'CUSTOM_GTT' ? (it.priceSource?.startsWith('File Excel') ? 'Giá file' : 'GTT') : 'Báo giá'}
+                                {!it.priceSource ? ' · thiếu nguồn' : ''}
+                              </button>
+                              {it.normUnitCost && (
+                                <span className="hint" data-testid="norm-price" title="Giá theo định mức (chỉ để so sánh, không tính vào tổng)">
+                                  {' '}ĐM {money(it.normUnitCost.total)}
+                                </span>
+                              )}
+                            </>
                           ) : suggestions.has(it.id) ? (
                             <SuggestionCell projectId={pid} itemId={it.id} candidates={suggestions.get(it.id)!} onDone={reload} />
                           ) : it.codeStatus === 'auto' ? (
@@ -296,6 +313,12 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
                           }
                         >
                           <Cell value={it.name} r={r} col="name" onCommit={(v) => upd({ name: v })} />
+                          {it.note && (
+                            <span className="hint" data-testid="item-note" title="Ghi chú">
+                              {' '}
+                              {it.note}
+                            </span>
+                          )}
                         </td>
                         <td>
                           <Cell value={it.unit} r={r} col="unit" className="center" onCommit={(v) => upd({ unit: v })} />
