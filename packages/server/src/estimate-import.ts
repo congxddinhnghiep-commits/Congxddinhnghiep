@@ -12,6 +12,8 @@ import {
   isFormula,
   normalizeText,
   PRICE_FIELDS,
+  profileColumns,
+  refineMapping,
   ROW_TYPE_LABELS,
   SHEET_KIND_LABELS,
   type ClassifiedRow,
@@ -22,6 +24,8 @@ import {
 import type { UndoOp } from './actions.js';
 import type { DB } from './db.js';
 import type { ParsedFile } from './importer.js';
+import { parseFlexibleNumber } from '@dutoan/core';
+import { removeForReplace, saveImportSource, type ReimportSnapshot } from './import-sources.js';
 import { resolveImportCode, type CodeResolution } from './import-codes.js';
 import { HttpError, type Repo } from './repo.js';
 
@@ -45,6 +49,8 @@ export interface AnalyzeOptions {
    * 'norm' – recompute from the norms and price books of the project (file prices are ignored).
    */
   pricingOption?: 'file' | 'norm';
+  /** The user confirmed a mostly-numeric column as the work name ("Vẫn dùng"). */
+  allowNumericName?: boolean;
 }
 
 export const colLetter = (c: number): string => {
@@ -171,7 +177,36 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
     };
   }
 
+  // Content-based correction of the column mapping (never let a numeric column be the work name).
+  const dataStart0 = header.headerRow + header.headerRows;
+  const hidden = new Set(sheet.hiddenCols ?? []);
+  const dupCols = new Set<number>();
+  const widthAll = Math.max(0, ...sheet.rows.map((r) => r?.length ?? 0));
+  for (let c = 0; c < widthAll; c++) {
+    let filled = 0;
+    let total = 0;
+    for (let r = dataStart0; r < sheet.rows.length; r++) {
+      const v = sheet.rows[r]?.[c];
+      if (v === null || v === undefined || v === '') continue;
+      total++;
+      if (sheet.mergeFilled?.[`${r}:${c}`]) filled++;
+    }
+    if (total > 0 && filled / total >= 0.8) dupCols.add(c);
+  }
+  const detectionNotes: string[] = [];
+  if (kind === 'estimate' && !o.mapping) {
+    const refined = refineMapping(sheet.rows, header.mapping, { exclude: new Set([...hidden, ...dupCols]), first: dataStart0, last: sheet.rows.length - 1, headerLabels: header.rawLabels });
+    header = { ...header, mapping: refined.mapping as HeaderDetection['mapping'] };
+    detectionNotes.push(...refined.notes);
+  }
   const m = header.mapping;
+  const columnWarnings: { field: string; column: number; letter: string; message: string; blocking: boolean }[] = [];
+  if (kind === 'estimate' && m.name !== undefined) {
+    const prof = profileColumns(sheet.rows, dataStart0, sheet.rows.length - 1, header.rawLabels)[m.name];
+    if (prof && prof.nonEmpty > 0 && prof.numericShare >= 0.6) {
+      columnWarnings.push({ field: 'name', column: m.name, letter: colLetter(m.name), message: 'Cột này chủ yếu là số – không phải tên công việc', blocking: true });
+    }
+  }
   const sumRows = new Set<number>();
   if (m.amount !== undefined) {
     for (const [key, formula] of Object.entries(sheet.formulas ?? {})) {
@@ -293,10 +328,10 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
   const ht = headerTexts(sheet.rows, sheet.merges ?? [], header.headerRow, header.headerRows, width);
   const dataStart = header.headerRow + header.headerRows;
   const fmt = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 3 });
-  const columns = [] as { index: number; letter: string; header: string; samples: string[]; label: string }[];
+  const columns = [] as { index: number; letter: string; header: string; samples: string[]; label: string; hidden: boolean }[];
   for (let c = 0; c < width; c++) {
     const nonEmpty = sheet.rows.some((r) => r?.[c] !== null && r?.[c] !== undefined && r[c] !== '');
-    if (!nonEmpty) continue;
+    if (!nonEmpty || dupCols.has(c)) continue;
     const samples: string[] = [];
     for (let i = dataStart; i < sheet.rows.length && samples.length < 3; i++) {
       const v = sheet.rows[i]?.[c];
@@ -304,7 +339,31 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
       samples.push(typeof v === 'number' ? fmt.format(v) : String(v).slice(0, 24));
     }
     const head = ht.parts[c].join(' / ');
-    columns.push({ index: c, letter: colLetter(c), header: head, samples, label: `${colLetter(c)} – ${head || '(không có tiêu đề)'}${samples.length ? ` (vd: ${samples.join('; ')}…)` : ''}` });
+    columns.push({ index: c, letter: colLetter(c), header: head, samples, hidden: hidden.has(c), label: `${colLetter(c)} – ${head || '(không có tiêu đề)'}${hidden.has(c) ? ' [cột ẩn]' : ''}${samples.length ? ` (vd: ${samples.join('; ')}…)` : ''}` });
+  }
+  // The first 15 mapped rows exactly as they will appear in the grid.
+  const gridPreview = rows
+    .filter((r) => (typeOf(r) === 'item' || typeOf(r) === 'category') && r.type !== 'subtotal')
+    .slice(0, 15)
+    .map((r) => {
+      const t = typeOf(r);
+      const unitPrice = (o.pricingOption ?? 'file') === 'norm' ? r.normUnit ?? null : r.fileUnitPrice ?? null;
+      return {
+        excelRow: r.excelRow,
+        type: t,
+        stt: r.stt,
+        code: r.code,
+        name: t === 'category' ? r.category ?? r.name : r.name,
+        unit: r.unit,
+        quantity: r.quantity,
+        unitPrice,
+        amount: r.computedAmount ?? null,
+        nameIsNumeric: parseFlexibleNumber(r.name) !== null,
+      };
+    });
+  const zeroItems = rows.filter((r) => typeOf(r) === 'item' && (r.quantity ?? 0) > 0 && !(r.computedAmount && r.computedAmount > 0));
+  if (kind === 'estimate' && zeroItems.length) {
+    warnings.push(`${zeroItems.length} công việc sẽ có thành tiền = 0 (chưa có đơn giá trong file${(o.pricingOption ?? 'file') === 'norm' ? '/định mức' : ''} hoặc chưa map cột đơn giá) – kiểm tra ánh xạ cột trước khi nhập.`);
   }
   const bodyRows = rows.map((r) => r.excelRow);
   return {
@@ -322,6 +381,10 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
     rows,
     counts,
     reconciliation,
+    gridPreview,
+    columnWarnings,
+    detectionNotes,
+    zeroAmountRows: zeroItems.map((r) => r.excelRow),
     pricingOption: o.pricingOption ?? 'file',
     fields: fields.map((k) => ({ key: k, label: IMPORT_FIELD_LABELS[k] })),
     rowTypeLabels: ROW_TYPE_LABELS,
@@ -350,6 +413,9 @@ export interface ImportEstimateOptions extends AnalyzeOptions {
    * the file code when it exists in the active norm set (match / mismatch) and stay without code otherwise.
    */
   codeChoices?: Record<string, string | null>;
+  /** Re-import: replace the items of this stored import / of these categories (as an undoable revision). */
+  replaceImportId?: number;
+  replaceCategoryIds?: number[];
 }
 
 /**
@@ -362,13 +428,20 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
   if (a.header.mapping.name === undefined || a.header.mapping.quantity === undefined) {
     throw new HttpError(400, 'Cần gán cột Tên công việc và Khối lượng trước khi nhập');
   }
+  const blocking = a.columnWarnings?.find((w) => w.blocking);
+  if (blocking && !o.allowNumericName) throw new HttpError(400, `Cột ${blocking.letter}: ${blocking.message}. Hãy chọn lại cột tên công việc hoặc xác nhận “Vẫn dùng”.`);
   const dataset = repo.datasetOf(projectId);
   const sheetName = f.sheets[a.sheetIndex].name;
   const undo: UndoOp[] = [];
   const created: number[] = [];
   let categories = 0;
   let skipped = 0;
+  const createdCategoryIds: number[] = [];
+  let replaced: ReturnType<typeof removeForReplace> | null = null;
+  let importId = 0;
+  let revisionId: number | null = null;
   db.transaction(() => {
+    if (o.replaceImportId || o.replaceCategoryIds?.length) replaced = removeForReplace(db, projectId, { importId: o.replaceImportId, categoryIds: o.replaceCategoryIds });
     // A brand-new project has one empty default category; the file's own categories replace it.
     const cats0 = repo.listCategories(projectId);
     if (cats0.length === 1 && normalizeText(cats0[0].name) === 'hang muc chung' && repo.listItems(projectId).length === 0) {
@@ -386,6 +459,7 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
         id = repo.createCategory(projectId, name).id;
         existing.set(key, id);
         undo.push({ op: 'deleteCategory', categoryId: id });
+        createdCategoryIds.push(id);
         categories++;
       }
       currentCat = id;
@@ -401,6 +475,7 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
           id = repo.createCategory(projectId, name).id;
           existing.set(key, id);
           undo.push({ op: 'deleteCategory', categoryId: id });
+          createdCategoryIds.push(id);
           categories++;
         }
         currentCat = id;
@@ -482,6 +557,24 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
       created.push(item.id);
       undo.unshift({ op: 'deleteItem', itemId: item.id });
     }
+    // keep the parsed sheet so the mapping can be corrected later without uploading again
+    importId = saveImportSource(db, {
+      projectId,
+      f,
+      sheetIndex: a.sheetIndex,
+      header: { headerRow: a.header!.headerRow, headerRows: a.header!.headerRows },
+      mapping: a.header!.mapping as Record<string, number>,
+      options: { firstRow: o.firstRow, lastRow: o.lastRow, rowTypes: o.rowTypes as Record<string, string> | undefined, pricingOption: o.pricingOption, allowNumericName: o.allowNumericName },
+      user,
+    });
+    for (const id of created) db.prepare('UPDATE estimate_items SET import_id = ? WHERE id = ?').run(importId, id);
+    if (replaced) {
+      const snap: ReimportSnapshot = { ...(replaced as ReturnType<typeof removeForReplace>).snapshot, newItemIds: created, newCategoryIds: createdCategoryIds, newImportId: importId };
+      const r = db
+        .prepare('INSERT INTO estimate_revisions (project_id, kind, description, created_by, snapshot_json) VALUES (?, ?, ?, ?, ?)')
+        .run(projectId, 'reimport', `Nhập lại ${f.fileName} / ${sheetName}: thay ${(replaced as ReturnType<typeof removeForReplace>).removed} công việc bằng ${created.length} công việc theo ánh xạ mới`, user, JSON.stringify(snap));
+      revisionId = Number(r.lastInsertRowid);
+    }
     if (o.saveTemplate && a.fingerprint) saveTemplate(db, 'estimate', o.saveTemplate, a.fingerprint, a.header!.headerRows, a.header!.mapping, user);
     if (a.template) db.prepare('UPDATE import_templates SET used_count = used_count + 1 WHERE id = ?').run(a.template.id);
   })();
@@ -493,6 +586,12 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
     withCode,
     withoutCode: created.length - withCode,
     itemIds: created,
+    importId,
+    revisionId,
+    zeroAmount: created.filter((id) => {
+      const it = repo.getItem(projectId, id);
+      return (it.quantity ?? 0) > 0 && (it.pricingMethod ?? 'NORM_BASED') === 'NORM_BASED' && !it.normCode;
+    }).length,
     undo,
     message: `Đã nhập ${created.length} công việc (${withCode} có mã định mức hợp lệ, ${created.length - withCode} cần gắn mã) vào ${categories} hạng mục mới từ ${f.fileName} / ${sheetName}.`,
   };

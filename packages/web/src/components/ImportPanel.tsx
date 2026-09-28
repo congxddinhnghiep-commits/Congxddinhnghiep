@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, type Analysis, type AppConfig, type EstimateResponse, type ImportPreview, type ImportTarget, type User } from '../api';
 import { EstimateImportReview } from './EstimateImportReview';
 import { pickDriveFile } from './googleDrive';
@@ -32,12 +32,15 @@ export function ImportPanel({
   config,
   user,
   data,
+  editCategoryId,
   onClose,
   onImported,
 }: {
   config: AppConfig;
   user: User;
   data: EstimateResponse;
+  /** "Sửa lại cột đã nhập" for this imported category. */
+  editCategoryId?: number;
   onClose: () => void;
   onImported: () => void;
 }) {
@@ -56,6 +59,8 @@ export function ImportPanel({
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [replace, setReplace] = useState<{ importId?: number; categoryIds?: number[] } | undefined>(undefined);
+  const [legacy, setLegacy] = useState<{ fileName: string } | null>(null);
 
   const isAdmin = user.role === 'admin';
   const loaded = async (p: ImportPreview) => {
@@ -69,6 +74,29 @@ export function ImportPanel({
     setMapping(p.mapping);
     setMsg('');
   };
+
+  // "Sửa lại cột đã nhập": re-open the stored rows of the category's import (no upload), or ask for the file again
+  useEffect(() => {
+    if (!editCategoryId) return;
+    (async () => {
+      setBusy(true);
+      try {
+        const info = await api.importInfo(data.project.id, editCategoryId);
+        if (!info.imported) setError('Hạng mục này không phải hạng mục nhập từ file Excel.');
+        else if (info.hasRaw && info.importId) {
+          setReplace({ importId: info.importId });
+          setAnalysis(await api.importReopen(data.project.id, info.importId));
+        } else {
+          setReplace({ categoryIds: [editCategoryId] });
+          setLegacy({ fileName: info.fileName });
+        }
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setBusy(false);
+      }
+    })();
+  }, [editCategoryId, data.project.id]);
 
   const wrap = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -132,7 +160,12 @@ export function ImportPanel({
   };
 
   return (
-    <Modal title="Nhập dữ liệu" onClose={onClose} wide>
+    <Modal title={editCategoryId ? 'Sửa lại cột đã nhập' : 'Nhập dữ liệu'} onClose={onClose} wide>
+      {legacy && (
+        <div className="warn-box" data-testid="legacy-import">
+          Lần nhập này (file {legacy.fileName}) chưa lưu dữ liệu gốc. <b>Hãy tải lại file Excel</b> – việc nhập lại sẽ THAY THẾ hạng mục này (tạo phiên bản mới, hoàn tác được).
+        </div>
+      )}
       <div className="tabs small">
         <button className={source === 'local' ? 'active' : ''} onClick={() => setSource('local')}>
           Từ máy tính
@@ -211,6 +244,7 @@ export function ImportPanel({
           key={analysis.fileId}
           projectId={data.project.id}
           initial={analysis}
+          replace={replace}
           onImported={(m) => {
             setMsg(m);
             setAnalysis(null);

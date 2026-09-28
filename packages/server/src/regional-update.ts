@@ -1,6 +1,7 @@
 import { normalizeText, periodRange, proposeBooks, type PeriodType, type ResolvedPrice, type ResourceType } from '@dutoan/core';
 import type { DB } from './db.js';
 import { resolveImportCode, type CodeResolution } from './import-codes.js';
+import { restoreReplaced, type ReimportSnapshot } from './import-sources.js';
 import type { PriceBookService } from './pricebooks.js';
 import { HttpError, type Repo } from './repo.js';
 
@@ -246,7 +247,16 @@ export class RegionalUpdateService {
     if (!rev) throw new HttpError(404, 'Không tìm thấy phiên bản');
     if (rev.undone_at) throw new HttpError(409, 'Phiên bản này đã được hoàn tác');
     if (!latest || latest.id !== rev.id) throw new HttpError(409, 'Chỉ hoàn tác được phiên bản mới nhất – hãy hoàn tác các phiên bản sau nó trước');
-    const snap = JSON.parse(rev.snapshot_json) as Snapshot;
+    const raw = JSON.parse(rev.snapshot_json) as Snapshot | ReimportSnapshot;
+    if ('kind' in raw && raw.kind === 'reimport') {
+      this.db.transaction(() => {
+        restoreReplaced(this.db, raw);
+        this.db.prepare(`UPDATE estimate_revisions SET undone_at = datetime('now') WHERE id = ?`).run(rev.id);
+        this.repo.touchProject(projectId);
+      })();
+      return;
+    }
+    const snap = raw as Snapshot;
     this.db.transaction(() => {
       this.repo.updateProject(projectId, { region: snap.project.region, subArea: snap.project.subArea, priceDate: snap.project.priceDate });
       this.db.prepare('DELETE FROM project_price_books WHERE project_id = ?').run(projectId);

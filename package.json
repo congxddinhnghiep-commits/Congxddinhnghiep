@@ -20,7 +20,9 @@
     "import:tt38-pl7": "tsx packages/server/src/scripts/import-tt38-pl7.ts",
     "test": "vitest run",
     "typecheck": "tsc -p packages/core && tsc -p packages/server --noEmit && tsc -p packages/web --noEmit",
-    "e2e": "node e2e/update3.mjs"
+    "e2e": "node e2e/update3.mjs",
+    "fixtures:import": "node scripts/make-import-fixtures.mjs",
+    "e2e:update4": "node e2e/update4.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

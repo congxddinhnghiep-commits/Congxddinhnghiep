@@ -23,6 +23,7 @@ import { buildWorkbook } from './excel.js';
 import { downloadDriveFile } from './gdrive.js';
 import { applyImport, getParsed, parseAndStore, previewOf, type ImportTarget } from './importer.js';
 import { analyze, importEstimate, listTemplates } from './estimate-import.js';
+import { importInfoForCategory, reopenImport } from './import-sources.js';
 import { RegionalUpdateService } from './regional-update.js';
 import { PriceBookService, provinceMergers, regions, seedHcmJune2026PriceBook, seedPriceBookExample, seedTt38PriceBookAugust2026 } from './pricebooks.js';
 import { validateProject } from './validation.js';
@@ -784,6 +785,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
     firstRow: b.firstRow !== undefined && b.firstRow !== null && b.firstRow !== '' ? Number(b.firstRow) : undefined,
     lastRow: b.lastRow !== undefined && b.lastRow !== null && b.lastRow !== '' ? Number(b.lastRow) : undefined,
     rowTypes: b.rowTypes && typeof b.rowTypes === 'object' ? (b.rowTypes as Record<string, RowType | 'skip'>) : undefined,
+    allowNumericName: b.allowNumericName === true,
     pricingOption: (b.pricingOption === 'norm' ? 'norm' : b.pricingOption === 'file' ? 'file' : undefined) as 'file' | 'norm' | undefined,
   });
   api.post(
@@ -801,8 +803,8 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
       const p = proj(req);
       const b = req.body ?? {};
       const f = getParsed(String(b.fileId), req.user!.id);
-      const r = importEstimate(db, repo, f, p.id, { ...headerOpts(b), saveTemplate: b.saveTemplate ?? null, codeChoices: b.codeChoices && typeof b.codeChoices === 'object' ? (b.codeChoices as Record<string, string | null>) : undefined }, req.user!.username);
-      if (r.created) assistant.record(p.id, req.user!.id, `Nhập ${r.created} công việc từ ${f.fileName}`, { tool: 'importEstimate', file: f.fileName }, r.undo);
+      const r = importEstimate(db, repo, f, p.id, { ...headerOpts(b), saveTemplate: b.saveTemplate ?? null, codeChoices: b.codeChoices && typeof b.codeChoices === 'object' ? (b.codeChoices as Record<string, string | null>) : undefined, replaceImportId: b.replaceImportId ? Number(b.replaceImportId) : undefined, replaceCategoryIds: Array.isArray(b.replaceCategoryIds) ? b.replaceCategoryIds.map(Number).filter(Number.isFinite) : undefined }, req.user!.username);
+      if (r.created && !r.revisionId) assistant.record(p.id, req.user!.id, `Nhập ${r.created} công việc từ ${f.fileName}`, { tool: 'importEstimate', file: f.fileName }, r.undo);
       let autoText = '';
       const t = b.autoAssignThreshold;
       if (t !== undefined && t !== null && r.created) {
@@ -843,6 +845,16 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
     h((req) => repo.setAutoPriceUpdate(proj(req).id, req.body?.enabled === true)),
   );
 
+  // Update 4 A8 – "Sửa lại cột đã nhập": re-open the stored sheet of an import with its mapping
+  api.get('/projects/:id/categories/:cid/import-info', h((req) => importInfoForCategory(db, proj(req).id, id(req.params.cid))));
+  api.post(
+    '/projects/:id/imports/:iid/reopen',
+    h((req) => {
+      const p = proj(req);
+      const { file, header, mapping, options } = reopenImport(db, p.id, id(req.params.iid), req.user!.id);
+      return analyze(db, repo, file, { sheetIndex: 0, headerRow: header.headerRow, headerRows: header.headerRows, mapping, firstRow: options.firstRow, lastRow: options.lastRow, rowTypes: options.rowTypes as Record<string, RowType | 'skip'> | undefined, pricingOption: options.pricingOption, kind: 'estimate', projectId: p.id });
+    }),
+  );
   api.get('/import/templates', h((req) => listTemplates(db, req.query.kind === 'pricebook' ? 'pricebook' : req.query.kind === 'estimate' ? 'estimate' : undefined)));
   api.delete(
     '/import/templates/:tid',

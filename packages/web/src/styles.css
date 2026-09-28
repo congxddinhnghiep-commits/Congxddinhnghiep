@@ -318,3 +318,5 @@ button.pm { border: none; cursor: pointer; }
 .import-review h4 { margin: 16px 0 6px; }
 .form label.check, label.check { flex-direction: row; align-items: center; gap: 8px; color: inherit; }
 .form .check-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.bad-cell { background: #fdecea; color: #b42318; font-weight: 600; }
+.error.blocking { border: 2px solid #b42318; padding: 10px 12px; margin: 8px 0; }

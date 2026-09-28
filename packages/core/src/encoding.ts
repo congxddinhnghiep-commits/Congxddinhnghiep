@@ -107,6 +107,9 @@ const TCVN_ONLY = /[¡¢£¤¥¦§¨©ª«¬­®µ¶·¸¹»¾]/g;
 export function detectEncoding(s: string): TextEncoding {
   if (!s || !/[^\x00-\x7F]/.test(s)) return 'plain';
   if (UNICODE_VI.test(s)) return 'unicode';
+  // TCVN3 lower-case toned letters sit at 0xC0–0xDE: a capital Latin-1 letter inside a lower-case word ("tÊn") is a TCVN3 tell.
+  if (/[a-z][ÇÈÉÊËÌÎÏÐÑÒÓÔÕÖØÜÝÞ×]/.test(s) && !VNI_SEQ.test(s)) return 'tcvn3';
+  VNI_SEQ.lastIndex = 0;
   const vni = (s.match(VNI_SEQ) ?? []).length;
   const tcvn = (s.match(TCVN_ONLY) ?? []).length;
   if (vni >= 1 && vni >= tcvn) return 'vni';

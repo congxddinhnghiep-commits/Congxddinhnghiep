@@ -11,7 +11,7 @@ export const PRICING_METHOD_LABELS: Record<PricingMethod, string> = {
   MARKET_QUOTE: 'Báo giá thị trường',
 };
 
-const CUSTOM_CODES = /^(GTT|TT|TAM TINH|TẠM TÍNH|TAMTINH|TT\.?GTT|BG|BAO GIA)$/i;
+const CUSTOM_CODES = /^(GTT|TT|VD|TAM TINH|TẠM TÍNH|TAMTINH|TT\.?GTT|BG|BAO GIA)$/i;
 
 export interface CanonicalCode {
   raw: string;

@@ -249,3 +249,26 @@ Nguồn: `docs/LEGAL-UPDATE-2026.md` (đã xác minh metadata ngày 2026-09-27).
 83. **Kiểm thử**: `update3-import.test.ts` (fixture `test_import.xlsx`: 1.187.500 / 4.384.000 / 15.555.000 / 21.126.500, AB.11213 không khớp, AF.11111 → AF.11110,
     dòng trống → AF.61110), `update3-regional.test.ts`, và `e2e/update3.mjs` (Playwright headless: tải file, đổi ánh xạ tay chọn G = đơn giá nhân công, xác nhận,
     so lưới với file, nút cập nhật khu vực TP. Hồ Chí Minh, xem trước, áp dụng, hoàn tác).
+
+## Update 4 A – sửa nhập Excel (cột tên hiện số, mã trống, đơn vị VNI/TCVN3)
+84. **Tái hiện bằng fixture mới** (`npm run fixtures:import` → `scripts/make-import-fixtures.mjs`, bộ mã hóa VNI/TCVN3 suy ra bằng cách đảo bộ giải mã):
+    `import_wide.xlsx` (tiêu đề gộp ô, cột ẩn, mô tả gộp 2 cột, số dạng chữ “1.382.500”), `import_vni.xlsx` (3 sheet: VNI, TCVN3, hỗn hợp),
+    `import_nameoffset.xlsx` (cột tên sau cột trống; tiêu đề giá chứa “công việc”). Không đụng dữ liệu công trình thật.
+85. **Cột tên chọn theo nội dung** (`profileColumns`/`refineMapping`, core): mỗi cột được chấm theo tỷ lệ ô là chữ, độ dài trung bình, từ khóa xây dựng và gợi ý
+    tiêu đề; cột có ≥60% ô là số (kể cả số dạng chữ), ≥50% ô giống mã định mức hoặc ≥60% ô là đơn vị đo KHÔNG BAO GIỜ được tự chọn làm tên. Cột mã dự phòng
+    theo tỷ lệ khớp mẫu mã (`AF.11111`, `AF11111`, `SA.xxxxx`, `TT12.AF.…`, placeholder `TT`/`VD`/`GTT`); cột đơn vị dự phòng theo nội dung. Cột ẩn và cột
+    “phần nối” của ô gộp không bao giờ tự chọn. Người dùng chọn tay cột chủ yếu là số → cảnh báo chặn “Cột này chủ yếu là số – không phải tên công việc”
+    với “Vẫn dùng” / “Chọn lại”; API từ chối nhập nếu chưa xác nhận (`allowNumericName`).
+86. **Ô gộp**: mọi ô trong vùng gộp đọc giá trị ô chính (mô tả gộp 2 cột, nhóm “Đơn giá” trên VL/NC/M); vùng gộp rộng >3 cột (tiêu đề/hạng mục kéo ngang) không
+    đổ xuống các cột ĐVT/KL. `Thành tiền` tách VL/NC/M được cộng lại thành thành tiền của dòng để đối chiếu.
+87. **Bảng mã cũ theo từng cột** (không còn bỏ phiếu cả sheet): mỗi cột chọn mã theo đa số ô; ô có dấu hiệu VNI/TCVN3 rõ vẫn được chuyển dù nằm trong cột Unicode
+    (chữ Latin-1 hoa nằm giữa chữ thường như “tÊn” là dấu hiệu TCVN3). Ô chứa ký tự chỉ có ở Unicode thật không bị chuyển. TCVN3 (ABC) không có chữ hoa có dấu.
+88. **Không để thành tiền = 0 âm thầm**: xem trước có bảng “15 dòng đầu như sẽ hiện trong lưới” (đỏ nếu tên là số / thành tiền 0), cảnh báo số công việc sẽ có thành
+    tiền 0, và thông báo sau khi nhập; thành tiền luôn tính lại KL × đơn giá và đối chiếu với file (Update 3).
+89. **Sửa lại cột đã nhập**: mỗi lần nhập lưu sheet đã đọc (`import_sources`: giá trị sau khi tính công thức/đổi bảng mã, ô gốc, ô gộp) và gắn `estimate_items.import_id`.
+    Nút ⚙ ở hạng mục mở lại ánh xạ từ dữ liệu đã lưu, không cần tải lại file; áp dụng = thay thế công việc của lần nhập đó bằng kết quả mới **dưới dạng phiên bản
+    (`estimate_revisions`, kind `reimport`) hoàn tác được** (ảnh chụp hạng mục/công việc/dòng bóc tách/nguồn cũ với đúng id). Lần nhập cũ chưa có dữ liệu gốc: báo “Hãy
+    tải lại file Excel”, nhập lại sẽ thay thế hạng mục đó (cũng là phiên bản hoàn tác được).
+90. **Gợi ý mã theo chương** (`chapterHints`): Đào/Đắp → AB, Bê tông → AF, Xây → AE, Cốt thép → AF.6, Ván khuôn → AF.8, Trát/Lát/Ốp/Sơn/Bả → AK, Cọc → AC, Lắp đặt ống → BB;
+    có từ khóa thì CHỈ đề xuất trong chương đó (không bao giờ SF/SB… cho “ĐÀO ĐẤT”). Dòng chỉ có một cụm chữ ngắn và không có số ở bất kỳ ô nào là dòng hạng mục.
+    Hệ quả: test gợi ý “Xây tường gạch ống” đổi từ SB.33110 (chương sửa chữa) sang AE.22110.

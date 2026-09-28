@@ -198,6 +198,23 @@ CREATE TABLE IF NOT EXISTS estimate_revisions (
 );
 CREATE INDEX IF NOT EXISTS idx_estimate_revisions_project ON estimate_revisions(project_id);
 
+-- Update 4 A8: the parsed sheet of every estimate import, kept so the column mapping can be re-applied
+-- ("Sửa lại cột đã nhập") without uploading the file again.
+CREATE TABLE IF NOT EXISTS import_sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  sheet_name TEXT NOT NULL DEFAULT '',
+  sha256 TEXT,
+  sheet_json TEXT NOT NULL,
+  header_json TEXT NOT NULL,
+  mapping_json TEXT NOT NULL,
+  options_json TEXT NOT NULL DEFAULT '{}',
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_import_sources_project ON import_sources(project_id);
+
 CREATE TABLE IF NOT EXISTS project_price_books (
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   book_id INTEGER NOT NULL REFERENCES price_books(id) ON DELETE CASCADE,
@@ -329,6 +346,7 @@ export function migrate(db: DB): void {
     ['code_check', 'TEXT'],
     ['code_check_note', 'TEXT'],
     ['source_cells', 'TEXT'],
+    ['import_id', 'INTEGER'],
   ];
   for (const [c, t] of itemCols) if (!icols.includes(c)) db.exec(`ALTER TABLE estimate_items ADD COLUMN ${c} ${t}`);
   db.exec(`UPDATE estimate_items SET code_status = 'manual' WHERE code_status = '' AND norm_code <> ''`);

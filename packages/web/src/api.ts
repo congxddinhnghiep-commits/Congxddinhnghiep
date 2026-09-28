@@ -256,7 +256,11 @@ export interface Analysis {
     cells?: Record<string, string>;
     resolution?: CodeResolutionDTO;
   }[];
-  columns: { index: number; letter: string; header: string; samples: string[]; label: string }[];
+  columns: { index: number; letter: string; header: string; samples: string[]; label: string; hidden?: boolean }[];
+  gridPreview: { excelRow: number; type: string; stt: string; code: string; name: string; unit: string; quantity: number | null; unitPrice: number | null; amount: number | null; nameIsNumeric: boolean }[];
+  columnWarnings: { field: string; column: number; letter: string; message: string; blocking: boolean }[];
+  detectionNotes: string[];
+  zeroAmountRows: number[];
   range: { first: number; last: number };
   reconciliation: ReconciliationDTO | null;
   pricingOption: 'file' | 'norm';
@@ -513,7 +517,10 @@ export const api = {
   setAutoPriceUpdate: (pid: number, enabled: boolean) => request('PUT', `/projects/${pid}/auto-price-update`, { enabled }),
   importAnalyze: (body: Record<string, unknown>) => request<Analysis>('POST', '/import/analyze', body),
   importEstimate: (pid: number, body: Record<string, unknown>) =>
-    request<{ created: number; withCode: number; withoutCode: number; categories: number; skipped: number; message: string }>('POST', `/projects/${pid}/import-estimate`, body),
+    request<{ created: number; withCode: number; withoutCode: number; categories: number; skipped: number; message: string; revisionId: number | null; importId: number; zeroAmount: number }>('POST', `/projects/${pid}/import-estimate`, body),
+  importInfo: (pid: number, cid: number) =>
+    request<{ imported: false } | { imported: true; hasRaw: boolean; importId: number | null; fileName: string; sheetName: string | null; itemCount: number; createdAt?: string }>('GET', `/projects/${pid}/categories/${cid}/import-info`),
+  importReopen: (pid: number, importId: number) => request<Analysis>('POST', `/projects/${pid}/imports/${importId}/reopen`),
   importPreview: (fileId: string, sheetIndex: number, target: ImportTarget) =>
     request<ImportPreview>('POST', '/import/preview', { fileId, sheetIndex, target }),
   importApply: (body: Record<string, unknown>) => request<{ message: string; count: number }>('POST', '/import/apply', body),

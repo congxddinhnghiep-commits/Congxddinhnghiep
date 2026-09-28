@@ -10,10 +10,13 @@ const STATUS_CLASS: Record<string, string> = { match: 'hi', mismatch: 'bad', pro
 export function EstimateImportReview({
   projectId,
   initial,
+  replace,
   onImported,
 }: {
   projectId: number;
   initial: Analysis;
+  /** "Sửa lại cột đã nhập": replace the items of a stored import / of these categories. */
+  replace?: { importId?: number; categoryIds?: number[] };
   onImported: (message: string) => void;
 }) {
   const [a, setA] = useState<Analysis>(initial);
@@ -32,6 +35,7 @@ export function EstimateImportReview({
   const [auto, setAuto] = useState(false);
   const [threshold, setThreshold] = useState('80');
   const [acceptAt, setAcceptAt] = useState('50');
+  const [allowNumericName, setAllowNumericName] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -110,10 +114,13 @@ export function EstimateImportReview({
         rowTypes: overrides,
         pricingOption: pricing,
         codeChoices: choices,
+        allowNumericName,
+        replaceImportId: replace?.importId,
+        replaceCategoryIds: replace?.categoryIds,
         saveTemplate: templateName.trim() || null,
         autoAssignThreshold: auto ? Number(threshold.replace(',', '.')) / 100 : null,
       });
-      onImported(r.message);
+      onImported(r.message + (r.zeroAmount ? ` Lưu ý: ${r.zeroAmount} công việc chưa có mã định mức nên thành tiền có thể bằng 0 nếu chưa có đơn giá.` : ''));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -127,6 +134,7 @@ export function EstimateImportReview({
   const shown = a.rows.filter((r) => r.type !== 'empty' && (!onlyItems || r.type === 'item'));
   const warnCount = itemRows.filter((r) => r.warnings.length).length;
   const recon = a.reconciliation;
+  const blocking = a.columnWarnings?.find((w) => w.blocking);
   const acceptAll = () => {
     const min = Number(acceptAt.replace(',', '.')) / 100;
     const next = { ...choices };
@@ -214,6 +222,26 @@ export function EstimateImportReview({
         </div>
       )}
 
+      {a.detectionNotes?.length > 0 && (
+        <div className="notice" data-testid="detection-notes">
+          {a.detectionNotes.map((n) => (
+            <div key={n}>ℹ {n}</div>
+          ))}
+        </div>
+      )}
+      {blocking && !allowNumericName && (
+        <div className="error blocking" role="alert" data-testid="numeric-name-warning">
+          <b>Cột {blocking.letter}: {blocking.message}</b>
+          <div className="actions" style={{ justifyContent: 'flex-start' }}>
+            <button data-testid="numeric-name-keep" onClick={() => setAllowNumericName(true)}>
+              Vẫn dùng
+            </button>
+            <button className="primary" data-testid="numeric-name-choose" onClick={() => setField('name', null)}>
+              Chọn lại
+            </button>
+          </div>
+        </div>
+      )}
       <h4>2. Chọn cột cho từng trường (tự nhận diện chỉ điền sẵn – bạn có thể đổi hoặc bỏ)</h4>
       <table className="table compact map-table" data-testid="map-table">
         <thead>
@@ -256,6 +284,46 @@ export function EstimateImportReview({
         <label className="check">
           <input type="radio" name="pricing" data-testid="pricing-norm" checked={pricing === 'norm'} onChange={() => { setPricing('norm'); reanalyze({ pricingOption: 'norm' }); }} /> Tính lại theo định mức &amp; bộ giá của công trình
         </label>
+      </div>
+
+      <h4>Xem trước như sẽ hiện trong lưới dự toán (15 dòng đầu)</h4>
+      <div className="table-scroll">
+        <table className="table compact" data-testid="grid-preview">
+          <thead>
+            <tr>
+              <th>STT</th>
+              <th>Mã</th>
+              <th>Tên công việc</th>
+              <th>ĐVT</th>
+              <th className="num">KL</th>
+              <th className="num">Đơn giá</th>
+              <th className="num">Thành tiền</th>
+            </tr>
+          </thead>
+          <tbody>
+            {a.gridPreview?.map((r) =>
+              r.type === 'category' ? (
+                <tr key={r.excelRow} className="rt-row-category">
+                  <td>{r.stt}</td>
+                  <td />
+                  <td colSpan={5}>{r.name.toUpperCase()}</td>
+                </tr>
+              ) : (
+                <tr key={r.excelRow}>
+                  <td>{r.stt}</td>
+                  <td>{r.code}</td>
+                  <td className={r.nameIsNumeric ? 'bad-cell' : ''} data-testid={r.nameIsNumeric ? 'name-numeric' : undefined}>
+                    {r.name}
+                  </td>
+                  <td>{r.unit}</td>
+                  <td className="num">{r.quantity === null ? '' : qty(r.quantity)}</td>
+                  <td className="num">{r.unitPrice === null ? '' : money(r.unitPrice)}</td>
+                  <td className={`num ${!r.amount ? 'bad-cell' : ''}`}>{r.amount === null ? '' : money(r.amount)}</td>
+                </tr>
+              ),
+            )}
+          </tbody>
+        </table>
       </div>
 
       <h4>4. Loại dòng và mã hiệu</h4>
@@ -431,8 +499,8 @@ export function EstimateImportReview({
         </p>
       </div>
       <div className="actions">
-        <button className="primary" data-testid="do-import" disabled={busy || !itemRows.length} onClick={doImport}>
-          Nhập {itemRows.length} công việc
+        <button className="primary" data-testid="do-import" disabled={busy || !itemRows.length || (!!blocking && !allowNumericName)} onClick={doImport}>
+          {replace ? 'Thay thế bằng' : 'Nhập'} {itemRows.length} công việc
         </button>
       </div>
     </div>

@@ -88,7 +88,7 @@ function Cell({
   );
 }
 
-export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload: () => Promise<void> }) {
+export function EstimateGrid({ data, reload, onEditImport }: { data: EstimateResponse; reload: () => Promise<void>; onEditImport?: (categoryId: number) => void }) {
   const pid = data.project.id;
   const [error, setError] = useState('');
   const [search, setSearch] = useState<{ q: string; apply: (n: Norm) => void } | null>(null);
@@ -223,7 +223,12 @@ export function EstimateGrid({ data, reload }: { data: EstimateResponse; reload:
                     <td className="num">{money(cat.total.nc)}</td>
                     <td className="num">{money(cat.total.m)}</td>
                     <td className="num">{money(cat.total.total)}</td>
-                    <td>
+                    <td className="nowrap">
+                      {onEditImport && cat.items.some((i) => i.source?.file) && (
+                        <button className="icon" data-testid={`edit-import-${cat.id}`} title="Sửa lại cột đã nhập (ánh xạ cột của file Excel)" onClick={() => onEditImport(cat.id)}>
+                          ⚙
+                        </button>
+                      )}
                       {confirmCat === cat.id ? (
                         <span className="inline-confirm">
                           <button className="danger small" onClick={() => (setConfirmCat(null), run(() => api.deleteCategory(pid, cat.id)))}>

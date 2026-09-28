@@ -32,6 +32,9 @@ export type ImportField =
   | 'priceM'
   | 'unitPrice'
   | 'amount'
+  | 'amountVL'
+  | 'amountNC'
+  | 'amountM'
   | 'note'
   | 'spec'
   | 'price'
@@ -49,13 +52,16 @@ export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
   priceM: 'Đơn giá máy',
   unitPrice: 'Đơn giá (tổng hợp)',
   amount: 'Thành tiền',
+  amountVL: 'Thành tiền – vật liệu',
+  amountNC: 'Thành tiền – nhân công',
+  amountM: 'Thành tiền – máy',
   note: 'Ghi chú',
   spec: 'Quy cách / thông số',
   price: 'Giá',
   subArea: 'Khu vực',
 };
 
-export const ESTIMATE_FIELDS: ImportField[] = ['stt', 'code', 'name', 'unit', 'quantity', 'formula', 'priceVL', 'priceNC', 'priceM', 'unitPrice', 'amount', 'note'];
+export const ESTIMATE_FIELDS: ImportField[] = ['stt', 'code', 'name', 'unit', 'quantity', 'formula', 'priceVL', 'priceNC', 'priceM', 'unitPrice', 'amount', 'amountVL', 'amountNC', 'amountM', 'note'];
 export const PRICE_FIELDS: ImportField[] = ['stt', 'code', 'name', 'spec', 'unit', 'price', 'subArea', 'note'];
 
 /** Synonyms (normalised, no diacritics) and Chinese headers of bilingual files. */
@@ -74,6 +80,9 @@ const SYNONYMS: Record<ImportField, string[]> = {
   priceM: [],
   unitPrice: ['don gia', 'dg', '单价', '综合单价'],
   amount: ['thanh tien', 'gia tri', 'thanh tien truoc thue', '合价', '金额'],
+  amountVL: [],
+  amountNC: [],
+  amountM: [],
   note: ['ghi chu', '备注'],
   spec: ['quy cach ky thuat', 'quy cach', 'thong so ky thuat', 'thong so', 'tieu chuan', '规格', '规格型号'],
   price: ['gia chua thue', 'gia chua vat', 'gia truoc thue', 'gia ban', 'gia cong bo', 'gia vat lieu', 'gia', 'don gia', '单价', '价格'],
@@ -107,8 +116,12 @@ function fieldOf(label: string, fields: ImportField[]): [ImportField, number] | 
     if (NC_RE.test(label)) return ['priceNC', 100];
     if (M_RE.test(label.replace(/\bdon gia\b/, ''))) return ['priceM', 100];
   }
-  // "Thành tiền" split into VL / NC / M is not needed for import – only the total column is used.
-  if (/\bthanh tien\b|合价|金额/.test(label) && (VL_RE.test(label) || NC_RE.test(label) || M_RE.test(label.replace(/\bthanh tien\b/, '')))) return null;
+  // "Thành tiền" split into VL / NC / M: kept as separate amount parts (their sum is the row's Thành tiền).
+  if (/\bthanh tien\b|合价|金额/.test(label) && fields.includes('amountVL')) {
+    if (VL_RE.test(label)) return ['amountVL', 100];
+    if (NC_RE.test(label)) return ['amountNC', 100];
+    if (M_RE.test(label.replace(/\bthanh tien\b/, ''))) return ['amountM', 100];
+  }
   let best: [ImportField, number] | null = null;
   for (const f of fields) {
     for (const syn of SYNONYMS[f]) {
@@ -153,7 +166,7 @@ function mapLabels(labels: string[], fields: ImportField[]): { mapping: Partial<
     mapping[k.f] = k.c;
     used.add(k.c);
   }
-  const w: Partial<Record<ImportField, number>> = { name: 3, unit: 2, quantity: 2, code: 2, price: 2, stt: 1, unitPrice: 1, amount: 1, formula: 1, priceVL: 1, priceNC: 1, priceM: 1, spec: 1, note: 0.5 };
+  const w: Partial<Record<ImportField, number>> = { name: 3, unit: 2, quantity: 2, code: 2, price: 2, stt: 1, unitPrice: 1, amount: 1, amountVL: 0.5, amountNC: 0.5, amountM: 0.5, formula: 1, priceVL: 1, priceNC: 1, priceM: 1, spec: 1, note: 0.5 };
   const score = Object.keys(mapping).reduce((a, f) => a + (w[f as ImportField] ?? 0.5), 0);
   return { mapping, score };
 }
@@ -301,6 +314,14 @@ export interface ClassifiedRow {
   warnings: string[];
 }
 
+const NOTE_START = /^(ghi chu|luu y|chu thich|note|dien giai|ke hoach|nguon|can cu|theo|ma so thue|dia chi)\b/;
+/** A row that carries only a short heading text (nothing numeric anywhere) is a category header. */
+function isBareHeading(cells: string[], name: string, mapping: Partial<Record<ImportField, number>>): boolean {
+  if (!name || name.length > 80 || /[:;]/.test(name) || NOTE_START.test(normalizeText(name))) return false;
+  const others = cells.filter((c, i) => c && i !== mapping.name && i !== mapping.stt);
+  return others.length === 0 && !/\d{3,}/.test(name);
+}
+
 const SUBTOTAL_RE = /^(cong|tong cong|tong|cong hang muc|cong phan|tong gia tri|tong so|gia tri|cong truoc thue|cong sau thue|tong chi phi)\b/;
 const SUBTOTAL_CN = /小计|合计|总计/;
 const ROMAN_RE = /^(i|ii|iii|iv|v|vi|vii|viii|ix|x|xi|xii|xiii|xiv|xv|xvi|xvii|xviii|xix|xx)\.?$/;
@@ -347,7 +368,12 @@ export function classifyRows(
         m: parseFlexibleNumber(get(r, 'priceM') ?? null),
         unit: parseFlexibleNumber(get(r, 'unitPrice') ?? null),
       },
-      amount: parseFlexibleNumber(get(r, 'amount') ?? null),
+      amount: ((): number | null => {
+        const total = parseFlexibleNumber(get(r, 'amount') ?? null);
+        if (total !== null) return total;
+        const parts = [get(r, 'amountVL'), get(r, 'amountNC'), get(r, 'amountM')].map((x) => parseFlexibleNumber(x ?? null));
+        return parts.some((x) => x !== null) ? parts.reduce<number>((a, x) => a + (x ?? 0), 0) : null;
+      })(),
       price,
       spec: str(get(r, 'spec')),
       subArea: str(get(r, 'subArea')),
@@ -396,6 +422,11 @@ export function classifyRows(
       const sttN = normalizeText(stt);
       const upper = name === name.toUpperCase() && /[A-ZÀ-Ỹ]/.test(name);
       if (ROMAN_RE.test(sttN) || /^[a-e]\.?$/.test(sttN) || upper || /^(hang muc|phan|hm)\b/.test(normalizeText(name)) || /^[ivx]+[.\s]/i.test(name)) {
+        row.type = 'category';
+        category = name.replace(/^[IVX]+[.\s]+/, '').trim();
+        row.category = category;
+      } else if (isBareHeading(cells, name, m)) {
+        // only a capitalised phrase and no quantity / unit / price / code anywhere in the row
         row.type = 'category';
         category = name.replace(/^[IVX]+[.\s]+/, '').trim();
         row.category = category;

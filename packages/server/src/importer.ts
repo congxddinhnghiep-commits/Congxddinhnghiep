@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import { detectDominantEncoding, toUnicode, type Merge, type TextEncoding } from '@dutoan/core';
+import { detectDominantEncoding, detectEncoding, toUnicode, type Merge, type TextEncoding } from '@dutoan/core';
 import { evaluateFormula, evaluateSheetFormula, isFormula, normalizeText, parseFlexibleNumber, parseVnNumber, type ResourceType } from '@dutoan/core';
 import { HttpError, type Repo } from './repo.js';
 
@@ -28,6 +28,12 @@ export interface ParsedSheet {
   encoding?: TextEncoding;
   /** Original text of converted cells, keyed "row:col". */
   raw?: Record<string, string>;
+  /** Dominant text encoding per column (0-based). */
+  columnEncodings?: Record<number, TextEncoding>;
+  /** Hidden columns (0-based) – never auto-selected. */
+  hiddenCols?: number[];
+  /** Cells that got their value from the master cell of a merged range ("row:col"). */
+  mergeFilled?: Record<string, true>;
   /** #NAME? / #REF! / … values and formulas pointing to other workbooks. */
   issues?: CellIssue[];
   /** Spreadsheet formulas by "row:col" (without "="), also those with a cached value. */
@@ -92,27 +98,69 @@ function cellToValue(v: unknown): CellValue {
   return t === '' ? null : t;
 }
 
+/** Characters that only exist in real Unicode Vietnamese text (not in cp1252 legacy strings). */
+const REAL_UNICODE = /[ăĂđĐơƠưƯẠ-ỹ]/;
 const ERROR_RE = /^#(NAME\?|REF!|VALUE!|DIV\/0!|N\/A|NULL!|NUM!|SPILL!|CALC!)$/;
 
-/** Convert legacy-encoded (VNI / TCVN3) text cells of a sheet to Unicode, keeping the raw text. */
+/**
+ * Convert legacy-encoded (VNI / TCVN3) text cells to Unicode, keeping the raw text. The encoding is
+ * decided PER COLUMN (a file may have names in VNI but units in TCVN3 or a Unicode header) and a cell
+ * that clearly carries a legacy signature is converted even inside a Unicode column.
+ */
 function normaliseEncoding(sheet: ParsedSheet): ParsedSheet {
-  const texts: string[] = [];
-  for (const r of sheet.rows) for (const c of r) if (typeof c === 'string' && /[^\x00-\x7F]/.test(c)) texts.push(c);
-  const { encoding } = detectDominantEncoding(texts);
-  sheet.encoding = encoding;
+  const width = Math.max(0, ...sheet.rows.map((r) => r.length));
+  const nonAscii = (c: unknown): c is string => typeof c === 'string' && /[^\x00-\x7F]/.test(c);
   sheet.raw = {};
-  if (encoding !== 'vni' && encoding !== 'tcvn3') return sheet;
-  sheet.rows.forEach((r, ri) =>
-    r.forEach((c, ci) => {
-      if (typeof c !== 'string' || !/[^\x00-\x7F]/.test(c)) return;
-      const u = toUnicode(c, encoding);
-      if (u !== c) {
-        sheet.raw![`${ri}:${ci}`] = c;
-        r[ci] = u;
+  sheet.columnEncodings = {};
+  const all: string[] = [];
+  for (const r of sheet.rows) for (const c of r) if (nonAscii(c)) all.push(c);
+  const sheetEnc = detectDominantEncoding(all).encoding;
+  let legacyCells = 0;
+  for (let c = 0; c < width; c++) {
+    const texts = sheet.rows.map((r) => r[c]).filter(nonAscii);
+    if (!texts.length) continue;
+    const colEnc = detectDominantEncoding(texts).encoding;
+    sheet.columnEncodings[c] = colEnc;
+    sheet.rows.forEach((r, ri) => {
+      const v = r[c];
+      if (!nonAscii(v)) return;
+      const cellEnc = detectEncoding(v);
+      const enc: TextEncoding | null = cellEnc === 'vni' || cellEnc === 'tcvn3' ? cellEnc : (colEnc === 'vni' || colEnc === 'tcvn3') && !REAL_UNICODE.test(v) ? colEnc : null;
+      if (!enc) return;
+      const u = toUnicode(v, enc);
+      if (u !== v) {
+        sheet.raw![`${ri}:${c}`] = v;
+        r[c] = u;
+        legacyCells++;
       }
-    }),
-  );
+    });
+  }
+  sheet.encoding = legacyCells ? (Object.values(sheet.columnEncodings).includes('vni') ? 'vni' : 'tcvn3') : sheetEnc === 'vni' || sheetEnc === 'tcvn3' ? 'unicode' : sheetEnc;
   return sheet;
+}
+
+/**
+ * Every cell of a merged range reads as the master cell's value (a description merged over two
+ * columns, a header group over VL/NC/M). Wide banners (more than 3 columns: titles, category rows
+ * merged across the sheet) are left alone so they don't fill the unit / quantity columns.
+ */
+function fillMerged(sheet: ParsedSheet): void {
+  sheet.mergeFilled = {};
+  for (const m of sheet.merges ?? []) {
+    if (m.e.c - m.s.c > 2) continue;
+    const v = sheet.rows[m.s.r]?.[m.s.c];
+    if (v === null || v === undefined || v === '') continue;
+    for (let r = m.s.r; r <= m.e.r; r++) {
+      for (let c = m.s.c; c <= m.e.c; c++) {
+        if (r === m.s.r && c === m.s.c) continue;
+        const row = (sheet.rows[r] ??= []);
+        if (row[c] === null || row[c] === undefined || row[c] === '') {
+          row[c] = v;
+          sheet.mergeFilled[`${r}:${c}`] = true;
+        }
+      }
+    }
+  }
 }
 
 const decodeXml = (t: string) => t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_m, n: string) => String.fromCharCode(Number(n))).replace(/&amp;/g, '&');
@@ -121,8 +169,7 @@ const decodeXml = (t: string) => t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').r
  * Formulas straight from the worksheet XML. SheetJS drops a formula cell whose cached value is empty
  * (`<f>..</f><v></v>`, as written by libraries), so the formula would be lost without this scan.
  */
-function xmlFormulas(wb: XLSX.WorkBook, sheetIndex: number): Record<string, string> {
-  const out: Record<string, string> = {};
+function sheetXml(wb: XLSX.WorkBook, sheetIndex: number): string {
   const files = (wb as unknown as { files?: Record<string, { content?: Buffer | string }> }).files ?? {};
   const text = (name: string) => {
     const c = files[name]?.content;
@@ -135,7 +182,24 @@ function xmlFormulas(wb: XLSX.WorkBook, sheetIndex: number): Record<string, stri
     const t = m && /Target="([^"]+)"/.exec(m[0]);
     if (t) target = t[1].startsWith('/') ? t[1].slice(1) : `xl/${t[1]}`;
   }
-  const xml = text(target);
+  return text(target);
+}
+
+/** Hidden columns (0-based) from the worksheet `<cols>` (SheetJS only exposes them with cellStyles). */
+function xmlHiddenCols(wb: XLSX.WorkBook, sheetIndex: number): number[] {
+  const out: number[] = [];
+  for (const m of sheetXml(wb, sheetIndex).matchAll(/<col\s[^>]*>/g)) {
+    if (!/\bhidden="(1|true)"/.test(m[0])) continue;
+    const min = Number(/\bmin="(\d+)"/.exec(m[0])?.[1]);
+    const max = Number(/\bmax="(\d+)"/.exec(m[0])?.[1] ?? min);
+    for (let c = min; c <= Math.min(max, min + 200); c++) out.push(c - 1);
+  }
+  return out;
+}
+
+function xmlFormulas(wb: XLSX.WorkBook, sheetIndex: number): Record<string, string> {
+  const out: Record<string, string> = {};
+  const xml = sheetXml(wb, sheetIndex);
   const re = /<c\s+r="([A-Z]+)(\d+)"[^>]*?>(?:(?!<\/c>)[\s\S])*?<f(?:\s[^>]*)?>([^<]+)<\/f>/g;
   for (let m = re.exec(xml); m; m = re.exec(xml)) {
     const { r, c } = XLSX.utils.decode_cell(`${m[1]}${m[2]}`);
@@ -258,6 +322,8 @@ export async function parseBuffer(buf: Buffer, fileName: string, fileIssues: str
     }
     const merges = (ws['!merges'] ?? []).map((m) => ({ s: { r: m.s.r, c: m.s.c }, e: { r: m.e.r, c: m.e.c } }));
     const sheet: ParsedSheet = { name, rows, merges, formulas: xmlFormulas(wb, sheetIndex) };
+    sheet.hiddenCols = xmlHiddenCols(wb, sheetIndex);
+    fillMerged(sheet);
     for (const addr of Object.keys(ws)) {
       if (addr.startsWith('!')) continue;
       const cell = ws[addr] as XLSX.CellObject;

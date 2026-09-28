@@ -143,6 +143,25 @@ export function extractParams(norm: string): WorkParams {
   return p;
 }
 
+/**
+ * Chapters of the TT 38/2026 norm book that a work description can belong to, from its keywords
+ * (Đào → AB, Bê tông → AF, Xây → AE, Cốt thép → AF.6, Ván khuôn → AF.8, Trát/Lát/Sơn → AK, Ép cọc → AC,
+ * Lắp đặt ống → BB). `null` = no hint. Never suggest unrelated chapters (e.g. SF for "ĐÀO ĐẤT").
+ */
+export function chapterHints(normalizedDescription: string): string[] | null {
+  const n = ` ${normalizedDescription} `;
+  const has = (re: RegExp) => re.test(n);
+  if (has(/\b(ep|dong|nen|noi)\b.*\bcoc\b|\bcoc\b/)) return ['AC.'];
+  if (has(/\bvan khuon\b/)) return ['AF.8'];
+  if (has(/\bcot thep\b|\bthep tron\b/)) return ['AF.6'];
+  if (has(/\bxay\b/)) return ['AE.'];
+  if (has(/\b(trat|lat|op|son|ba matit|ba bot|matit|bot ba)\b/)) return ['AK.'];
+  if (has(/\bbe tong\b/) && !has(/\bbe tong nhua\b/)) return ['AF.'];
+  if (has(/\b(dao|dap|san lap)\b/)) return ['AB.'];
+  if (has(/\blap dat\b.*\bong\b|\bong (nhua|thep|gang|pvc|hdpe|ppr|cap nuoc|thoat nuoc)\b/)) return ['BB.'];
+  return null;
+}
+
 const STOP = new Set([
   'cong', 'tac', 'san', 'xuat', 'lap', 'dung', 'bang', 'cac', 'loai', 'va', 'cho', 'cua', 'trong', 'tren', 'duoi', 'tang',
   'truc', 'phan', 'hang', 'muc', 'khoi', 'luong', 'thi', 'the', 'theo', 'tai', 'vi', 'tri', 'le', 'gt', 'ge', 'lt', 'mm', 'cm',
@@ -288,9 +307,11 @@ export class NormIndex<T extends SuggestNorm = SuggestNorm> {
     const qParams = extractParams(qn);
     const qMass = qTokens.reduce((a, t) => a + (this.idf.get(t) ?? 0), 0);
     if (!qTokens.length && !qParams.work) return [];
+    const hints = chapterHints(qn);
 
     const scored: (Suggestion<T> & { conflicts: number; missing: number })[] = [];
     for (const d of this.docs) {
+      if (hints && !hints.some((h) => d.norm.code.toUpperCase().startsWith(h))) continue;
       let factor = 1;
       if (unit) {
         const f = unitFactor(unit, d.norm.unit);

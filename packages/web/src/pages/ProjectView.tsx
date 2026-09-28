@@ -29,6 +29,7 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
   const [tab, setTab] = useState<Tab>('estimate');
   const [showAssistant, setShowAssistant] = useState(true);
   const [showImport, setShowImport] = useState(false);
+  const [editImportCat, setEditImportCat] = useState<number | undefined>(undefined);
   const [showRegional, setShowRegional] = useState(false);
   const [newBooks, setNewBooks] = useState(0);
   const [notice, setNotice] = useState('');
@@ -162,7 +163,7 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
           ))}
         </nav>
         <div className="tab-body">
-          {tab === 'estimate' && <EstimateGrid data={data} reload={reload} />}
+          {tab === 'estimate' && <EstimateGrid data={data} reload={reload} onEditImport={(cid) => { setEditImportCat(cid); setShowImport(true); }} />}
           {tab === 'prices' && <PricesTab project={data.project} config={config} onChanged={reload} />}
           {tab === 'analysis' && <AnalysisTab data={data} />}
           {tab === 'resources' && <ResourceSummaryTab data={data} />}
@@ -199,7 +200,7 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
           }}
         />
       )}
-      {showImport && <ImportPanel config={config} user={user} data={data} onClose={() => setShowImport(false)} onImported={reload} />}
+      {showImport && <ImportPanel config={config} user={user} data={data} editCategoryId={editImportCat} onClose={() => { setShowImport(false); setEditImportCat(undefined); }} onImported={reload} />}
     </div>
   );
 }

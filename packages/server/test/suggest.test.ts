@@ -29,7 +29,7 @@ const CASES: [string, string, string][] = [
   ['Ván khuôn sàn mái', '100m2', 'AF.83111'],
   ['Xây tường thẳng, dày ≤11cm, cao ≤6m', 'm3', 'AE.22110'],
   ['Xây tường thẳng, dày ≤33cm, cao ≤6m', 'm3', 'AE.22210'],
-  ['Xây tường gạch ống (10x10x20), dày ≤10cm, cao ≤6m', 'm3', 'SB.33110'],
+  ['Xây tường gạch ống (10x10x20), dày ≤10cm, cao ≤6m', 'm3', 'AE.22110'], // "Xây" → chương AE (SB là chương sửa chữa, không đề xuất)
   ['Trát tường trong, dày trát 1,5cm', 'm2', 'AK.21210'],
   ['Trát tường ngoài, dày trát 1,0cm', 'm2', 'AK.21110'],
   ['Đào móng băng, cấp đất II', 'm3', 'AB.11312'],
@@ -70,6 +70,18 @@ describe('auto code suggestion on the real TT 38/2026 dataset', () => {
   it('explains why', () => {
     const s = index.suggest('SX lắp dựng cốt thép móng, đường kính ≤18mm', 'tấn')[0];
     expect(s.why).toMatch(/đúng .*đường kính/);
+  });
+
+  it('only suggests from the chapter matching the description keywords (Update 4 A9)', () => {
+    const chapters = (d: string, u: string) => [...new Set(index.suggest(d, u, 30).map((x) => x.norm.code.slice(0, 2)))];
+    expect(chapters('ĐÀO ĐẤT', 'm3')).toEqual(['AB']); // never SF / SA…
+    expect(chapters('Đào đất móng bằng thủ công', 'm3')).toEqual(['AB']);
+    expect(chapters('Bê tông cột', 'm3')).toEqual(['AF']);
+    expect(chapters('Xây tường gạch', 'm3')).toEqual(['AE']);
+    expect(chapters('Trát tường trong', 'm2')).toEqual(['AK']);
+    expect(index.suggest('Cốt thép móng D<=10', 'tấn', 30).every((x) => x.norm.code.startsWith('AF.6'))).toBe(true);
+    expect(index.suggest('Ván khuôn cột', '100m2', 30).every((x) => x.norm.code.startsWith('AF.8'))).toBe(true);
+    expect(index.suggest('Ép cọc BTCT', '100m', 30).every((x) => x.norm.code.startsWith('AC'))).toBe(true);
   });
 
   it('searches by code prefix with or without dot', () => {
