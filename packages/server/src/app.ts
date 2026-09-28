@@ -23,6 +23,7 @@ import { buildWorkbook } from './excel.js';
 import { downloadDriveFile } from './gdrive.js';
 import { applyImport, getParsed, parseAndStore, previewOf, type ImportTarget } from './importer.js';
 import { analyze, importEstimate, listTemplates } from './estimate-import.js';
+import { RegionalUpdateService } from './regional-update.js';
 import { PriceBookService, provinceMergers, regions, seedHcmJune2026PriceBook, seedPriceBookExample, seedTt38PriceBookAugust2026 } from './pricebooks.js';
 import { validateProject } from './validation.js';
 import { LegalService, legalDocuments } from './legal.js';
@@ -80,6 +81,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
   const assistant = new AssistantService(repo);
   const priceBooks = new PriceBookService(db, repo);
   repo.priceResolver = (pid) => priceBooks.resolve(pid);
+  const regional = new RegionalUpdateService(db, repo, priceBooks);
   seedPriceBookExample(db);
   seedTt38PriceBookAugust2026(db);
   seedHcmJune2026PriceBook(db);
@@ -815,6 +817,32 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
       return { ...rest, message: r.message + autoText };
     }),
   );
+  // Update 3 C – "Cập nhật định mức & đơn giá theo khu vực": preview, apply as an undoable revision, audit log
+  const regionalReq = (b: Record<string, unknown>) => ({
+    region: String(b.region ?? ''),
+    subArea: b.subArea ? String(b.subArea) : null,
+    auto: b.auto !== false,
+    period: b.period && typeof b.period === 'object' ? (b.period as { type: 'month' | 'quarter' | 'year'; year: number; value: number | null }) : null,
+    types: Array.isArray(b.types) ? (b.types.filter((t) => ['VL', 'NC', 'M'].includes(String(t))) as ('VL' | 'NC' | 'M')[]) : undefined,
+    priceDate: b.priceDate ? String(b.priceDate) : null,
+    remapCodes: b.remapCodes === true,
+    codeChoices: b.codeChoices && typeof b.codeChoices === 'object' ? (b.codeChoices as Record<string, string | null>) : undefined,
+  });
+  api.post('/projects/:id/regional-update/preview', h((req) => regional.preview(proj(req).id, regionalReq(req.body ?? {}))));
+  api.post('/projects/:id/regional-update/apply', h((req) => regional.apply(proj(req).id, regionalReq(req.body ?? {}), req.user!.username)));
+  api.get('/projects/:id/revisions', h((req) => regional.revisions(proj(req).id)));
+  api.post(
+    '/projects/:id/revisions/:rid/undo',
+    h((req) => {
+      regional.undo(proj(req).id, id(req.params.rid));
+    }),
+  );
+  api.get('/projects/:id/price-update-status', h((req) => regional.status(proj(req).id)));
+  api.put(
+    '/projects/:id/auto-price-update',
+    h((req) => repo.setAutoPriceUpdate(proj(req).id, req.body?.enabled === true)),
+  );
+
   api.get('/import/templates', h((req) => listTemplates(db, req.query.kind === 'pricebook' ? 'pricebook' : req.query.kind === 'estimate' ? 'estimate' : undefined)));
   api.delete(
     '/import/templates/:tid',

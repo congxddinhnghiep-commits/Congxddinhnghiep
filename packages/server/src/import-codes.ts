@@ -55,7 +55,7 @@ function missingParams(name: string): string[] {
  *  3. no code → suggestion engine on description + unit.
  * The raw code is never overwritten – the caller keeps it.
  */
-export function resolveImportCode(repo: Repo, dataset: string, row: { code: string; name: string; unit: string }): CodeResolution {
+export function resolveImportCode(repo: Repo, dataset: string, row: { code: string; name: string; unit: string }, opts: { ignoreExisting?: boolean } = {}): CodeResolution {
   const index = repo.normIndex(dataset);
   const cc = canonicalNormCode(row.code);
   const unit = row.unit.trim() || null;
@@ -68,7 +68,7 @@ export function resolveImportCode(repo: Repo, dataset: string, row: { code: stri
 
   if (cc.kind === 'custom') return { ...base, status: 'gtt', label: CODE_CHECK_LABELS.gtt, code: null, candidates: [], message: 'Mã GTT: tính theo giá tạm tính/tự lập, cần nguồn giá.' };
 
-  const norm = cc.normalized ? repo.getNorm(cc.normalized, dataset) : undefined;
+  const norm = cc.normalized && !opts.ignoreExisting ? repo.getNorm(cc.normalized, dataset) : undefined;
   if (norm) {
     const cmp = index.compare(row.name, norm.code);
     const unitOk = !unit || unitFactor(unit, norm.unit) !== null;

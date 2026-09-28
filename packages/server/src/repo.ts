@@ -56,6 +56,7 @@ export interface ProjectRow {
   approved_at: string | null;
   region: string | null;
   sub_area: string | null;
+  auto_price_update: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -82,6 +83,8 @@ export interface Project {
   /** Tỉnh/thành (after the 2025 merger) and optional sub-area used to pick price books. */
   region: string | null;
   subArea: string | null;
+  /** Show a notification when a newer verified price book of the region is available (never applied silently). */
+  autoPriceUpdate: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -104,6 +107,7 @@ export const toProject = (r: ProjectRow): Project => ({
   approvedAt: r.approved_at,
   region: r.region,
   subArea: r.sub_area,
+  autoPriceUpdate: !!r.auto_price_update,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -312,6 +316,11 @@ export class Repo {
   }
 
   /** Any change invalidates an approval: the estimate goes back to draft and must be approved again. */
+  setAutoPriceUpdate(id: number, on: boolean): Project {
+    this.db.prepare('UPDATE projects SET auto_price_update = ? WHERE id = ?').run(on ? 1 : 0, id);
+    return this.getProject(id)!;
+  }
+
   touchProject(id: number): void {
     this.db.prepare(`UPDATE projects SET updated_at = datetime('now'), status = 'draft', approved_by = NULL, approved_at = NULL WHERE id = ?`).run(id);
   }
@@ -911,7 +920,7 @@ export class Repo {
 
   // ---------------- calculation ----------------
   /** Full calculated estimate for a project. */
-  calculate(projectId: number) {
+  calculate(projectId: number, opts: { resolved?: Record<string, ResolvedPrice> } = {}) {
     const project = this.getProject(projectId)!;
     const categories = this.listCategories(projectId);
     const items = this.listItems(projectId);
@@ -958,7 +967,7 @@ export class Repo {
       return { ...it, normResourcesOverride: expanded };
     });
     const resources = [...resourceRows.values()].map(toResource);
-    const resolved = this.priceResolver?.(projectId);
+    const resolved = opts.resolved ?? this.priceResolver?.(projectId);
     const effective = resolved ? Object.fromEntries(Object.entries(resolved).map(([k, v]) => [k, v.price])) : this.projectPrices(projectId);
     const estimate = computeEstimate({ categories, items: itemsForCalc, normResources, resources, projectPrices: effective });
     const priceSources = Object.fromEntries(

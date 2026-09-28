@@ -575,9 +575,9 @@ export class PriceBookService {
   }
 
   /** Effective price and source of every library resource for a project. */
-  resolve(projectId: number, sel = this.selection(projectId)): Record<string, ResolvedPrice> {
+  resolve(projectId: number, sel = this.selection(projectId), subArea?: string | null): Record<string, ResolvedPrice> {
     const p = this.repo.getProject(projectId)!;
-    return resolvePrices(this.repo.listResources(), this.repo.projectPrices(projectId), this.selectionsFor(sel), p.subArea, this.transportLegs(projectId));
+    return resolvePrices(this.repo.listResources(), this.repo.projectPrices(projectId), this.selectionsFor(sel), subArea === undefined ? p.subArea : subArea, this.transportLegs(projectId));
   }
 
   /** Price differences for the resources used by the project when switching to another selection. */

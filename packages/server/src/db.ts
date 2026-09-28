@@ -183,6 +183,21 @@ CREATE TABLE IF NOT EXISTS price_book_suppliers (
 );
 CREATE INDEX IF NOT EXISTS idx_price_book_suppliers_book ON price_book_suppliers(book_id);
 
+-- Update 3 C: audit log of regional price / norm updates (undoable; never applied to approved projects).
+CREATE TABLE IF NOT EXISTS estimate_revisions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  description TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  total_before REAL,
+  total_after REAL,
+  snapshot_json TEXT NOT NULL,
+  undone_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_estimate_revisions_project ON estimate_revisions(project_id);
+
 CREATE TABLE IF NOT EXISTS project_price_books (
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   book_id INTEGER NOT NULL REFERENCES price_books(id) ON DELETE CASCADE,
@@ -348,6 +363,7 @@ export function migrate(db: DB): void {
   ];
   for (const [c, t] of rowCols) if (!rcols.includes(c)) db.exec(`ALTER TABLE price_book_rows ADD COLUMN ${c} ${t}`);
   if (!pc.includes('region')) db.exec(`ALTER TABLE projects ADD COLUMN region TEXT`);
+  if (!pc.includes('auto_price_update')) db.exec(`ALTER TABLE projects ADD COLUMN auto_price_update INTEGER NOT NULL DEFAULT 0`);
   if (!pc.includes('sub_area')) db.exec(`ALTER TABLE projects ADD COLUMN sub_area TEXT`);
 
   if (!columns(db, 'norms').includes('dataset')) {
