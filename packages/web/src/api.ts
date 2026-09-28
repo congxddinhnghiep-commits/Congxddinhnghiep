@@ -329,15 +329,37 @@ export interface LegalRegister {
   sets: LegalSet[];
 }
 
+export interface AiProviderStatus {
+  id: 'openai' | 'anthropic';
+  label: string;
+  hasKey: boolean;
+  envKey: string;
+  model: string;
+  defaultModel: string;
+  status: 'Đã kết nối' | 'Chưa có khóa API';
+  detail: string;
+  tested: boolean | null;
+}
+export interface AiStatus {
+  requested: 'openai' | 'anthropic' | 'offline' | 'auto';
+  active: 'openai' | 'anthropic' | 'offline';
+  activeLabel: string;
+  activeModel: string | null;
+  fellBack: boolean;
+  providers: AiProviderStatus[];
+}
+
 export interface AppConfig {
   localMode: boolean;
-  assistantProvider: string;
   sampleData: boolean;
   googleDrive: { configured: boolean; clientId: string; apiKey: string; appId: string };
   buildingTypes: Record<BuildingType, string>;
   legalSets: LegalSet[];
   tt36WorkCategories: Record<string, string>;
   regions: string[];
+  assistantProvider: string;
+  assistantLabel: string;
+  assistantModel: string | null;
 }
 
 export interface PriceRow extends Resource {
@@ -500,7 +522,10 @@ export const api = {
   setRateTable: (setId: LegalSetId, tableId: string, patch: { status?: 'verified' | 'provisional'; interpolation?: 'none' | 'linear' }) =>
     request<RateTable>('PUT', `/legal/${setId}/tables/${encodeURIComponent(tableId)}`, patch),
 
-  assistant: (pid: number, body: { text?: string; intent?: Intent; pending?: PendingField }) => request<Reply>('POST', `/projects/${pid}/assistant`, body),
+  assistant: (pid: number, body: { text?: string; intent?: Intent; pending?: PendingField; history?: { role: 'user' | 'assistant'; text: string }[] }) => request<Reply>('POST', `/projects/${pid}/assistant`, body),
+  aiStatus: () => request<AiStatus>('GET', '/ai/status'),
+  aiSaveSettings: (body: { provider?: string; models?: Record<string, string> }) => request<AiStatus>('PUT', '/ai/settings', body),
+  aiTest: (provider: 'openai' | 'anthropic') => request<{ ok: boolean; model?: string; latencyMs?: number; code?: string; message: string; status: AiStatus }>('POST', '/ai/test', { provider }),
   confirmAction: (pid: number, action: Action, description: string) =>
     request<{ text: string }>('POST', `/projects/${pid}/assistant/confirm`, { action, description }),
   undo: (pid: number) => request<{ text: string }>('POST', `/projects/${pid}/assistant/undo`),

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { Intent, PendingField, Reply } from '@dutoan/core';
+import type { Action, Intent, PendingField, Reply } from '@dutoan/core';
 import { api, downloadExcel } from '../api';
 
 type Msg =
   | { from: 'user'; text: string }
-  | { from: 'bot'; reply: Reply; done?: boolean }
+  | { from: 'bot'; reply: Reply; done?: boolean; doneItems?: number[] }
   | { from: 'info'; text: string; error?: boolean };
 
 const EXAMPLES = [
@@ -20,6 +20,8 @@ const EXAMPLES = [
 export function AssistantPanel({
   projectId,
   provider,
+  providerLabel,
+  providerModel,
   onChanged,
   onOpenImport,
   onOpenRegional,
@@ -27,6 +29,8 @@ export function AssistantPanel({
 }: {
   projectId: number;
   provider: string;
+  providerLabel: string;
+  providerModel: string | null;
   onChanged: () => Promise<void>;
   onOpenImport: () => void;
   onOpenRegional: () => void;
@@ -35,7 +39,7 @@ export function AssistantPanel({
   const [msgs, setMsgs] = useState<Msg[]>([
     {
       from: 'info',
-      text: `Xin chào! Tôi là trợ lý lập dự toán (${provider === 'claude' ? 'Claude' : 'chế độ ngoại tuyến'}). Hãy nhập yêu cầu bằng tiếng Việt, có dấu hoặc không dấu. Mọi thay đổi đều được xem trước và chỉ thực hiện khi bạn bấm Xác nhận.`,
+      text: `Xin chào! Tôi là trợ lý lập dự toán (${provider === 'offline' ? 'chế độ ngoại tuyến – theo quy tắc' : `${providerLabel}${providerModel ? ` · ${providerModel}` : ''}`}). Hãy nhập yêu cầu bằng tiếng Việt, có dấu hoặc không dấu. Mọi thay đổi đều được xem trước và chỉ thực hiện khi bạn bấm Áp dụng / Xác nhận, và hoàn tác được.`,
     },
   ]);
   const [text, setText] = useState('');
@@ -43,7 +47,9 @@ export function AssistantPanel({
   const [busy, setBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), [msgs]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView?.({ behavior: 'smooth' });
+  }, [msgs]);
 
   const push = (m: Msg) => setMsgs((prev) => [...prev, m]);
   const markDone = (idx: number) => setMsgs((prev) => prev.map((m, i) => (i === idx && m.from === 'bot' ? { ...m, done: true } : m)));
@@ -51,6 +57,14 @@ export function AssistantPanel({
   const handleReply = async (reply: Reply) => {
     setPending(reply.type === 'question' ? reply.pending : undefined);
     push({ from: 'bot', reply });
+    if (reply.type === 'agent') {
+      try {
+        if (reply.commands.includes('importFile')) onOpenImport();
+        if (reply.commands.includes('regionalUpdate')) onOpenRegional();
+      } catch (e) {
+        push({ from: 'info', text: (e as Error).message, error: true });
+      }
+    }
     if (reply.type === 'command') {
       try {
         if (reply.command === 'recalc') await onChanged();
@@ -72,7 +86,12 @@ export function AssistantPanel({
     push({ from: 'user', text: label });
     setBusy(true);
     try {
-      const reply = await api.assistant(projectId, { ...body, pending: body.text ? pending : undefined });
+      const history = msgs
+        .flatMap((m): { role: 'user' | 'assistant'; text: string }[] =>
+          m.from === 'user' ? [{ role: 'user', text: m.text }] : m.from === 'bot' && (m.reply.type === 'agent' || m.reply.type === 'message') ? [{ role: 'assistant', text: m.reply.text }] : [],
+        )
+        .slice(-8);
+      const reply = await api.assistant(projectId, { ...body, pending: body.text ? pending : undefined, history: body.text ? history : undefined });
       await handleReply(reply);
     } catch (e) {
       push({ from: 'info', text: (e as Error).message, error: true });
@@ -103,6 +122,20 @@ export function AssistantPanel({
     }
   };
 
+  const applyPreview = async (idx: number, k: number, p: { text: string; action: Action }) => {
+    setMsgs((prev) => prev.map((m, i) => (i === idx && m.from === 'bot' ? { ...m, doneItems: [...(m.doneItems ?? []), k] } : m)));
+    setBusy(true);
+    try {
+      const r = await api.confirmAction(projectId, p.action, p.text);
+      push({ from: 'info', text: `✔ ${r.text}` });
+      await onChanged();
+    } catch (e) {
+      push({ from: 'info', text: (e as Error).message, error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const undo = async () => {
     try {
       const r = await api.undo(projectId);
@@ -117,6 +150,9 @@ export function AssistantPanel({
     <aside className="assistant">
       <div className="assistant-head">
         <b>🤖 Trợ lý AI</b>
+        <span className="assistant-provider" data-testid="assistant-provider">
+          {provider === 'offline' ? 'Ngoại tuyến' : `${providerLabel}${providerModel ? ` · ${providerModel}` : ''}`}
+        </span>
         <span className="spacer" />
         <button className="small" onClick={undo} title="Hoàn tác thao tác gần nhất của trợ lý">
           ↶ Hoàn tác
@@ -171,6 +207,32 @@ export function AssistantPanel({
                     </button>
                   ))}
                 </div>
+              )}
+              {r.type === 'agent' && (
+                <>
+                  {r.trace.length > 0 && (
+                    <div className="agent-trace" title="Các công cụ mô hình đã dùng">
+                      {r.trace.map((t, j) => (
+                        <span key={j} className={`tool ${t.readOnly ? '' : 'write'} ${t.ok ? '' : 'fail'}`}>
+                          {t.readOnly ? '🔎' : '✎'} {t.tool}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {r.previews.map((p, k) => (
+                    <div key={k} className="agent-preview" data-testid="agent-preview">
+                      <div className="pre">{p.text}</div>
+                      <div className="options">
+                        <button className="primary" data-testid="agent-apply" disabled={m.doneItems?.includes(k) || busy} onClick={() => applyPreview(i, k, p)}>
+                          Áp dụng
+                        </button>
+                        <button data-testid="agent-cancel" disabled={m.doneItems?.includes(k) || busy} onClick={() => (setMsgs((prev) => prev.map((x, ii) => (ii === i && x.from === 'bot' ? { ...x, doneItems: [...(x.doneItems ?? []), k] } : x))), push({ from: 'info', text: 'Đã hủy.' }))}>
+                          Hủy
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </>
               )}
               {r.type === 'preview' && (
                 <div className="options">

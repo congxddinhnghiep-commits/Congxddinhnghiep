@@ -176,6 +176,8 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
         <AssistantPanel
           projectId={projectId}
           provider={config.assistantProvider}
+          providerLabel={config.assistantLabel}
+          providerModel={config.assistantModel}
           onChanged={reload}
           onOpenImport={() => setShowImport(true)}
           onOpenRegional={() => setShowRegional(true)}

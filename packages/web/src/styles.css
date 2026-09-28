@@ -320,3 +320,10 @@ button.pm { border: none; cursor: pointer; }
 .form .check-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .bad-cell { background: #fdecea; color: #b42318; font-weight: 600; }
 .error.blocking { border: 2px solid #b42318; padding: 10px 12px; margin: 8px 0; }
+.guide li { margin-bottom: 8px; line-height: 1.5; }
+.agent-trace { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0; }
+.agent-trace .tool { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: #eef2f7; color: #475467; }
+.agent-trace .tool.write { background: #fff6d6; color: #7a5a00; }
+.agent-trace .tool.fail { background: #fdecea; color: #b42318; }
+.agent-preview { border: 1px solid #f0dc9a; background: #fffbea; border-radius: 6px; padding: 8px; margin: 6px 0; }
+.assistant-provider { font-size: 11px; color: #667085; font-weight: 400; margin-left: 6px; }

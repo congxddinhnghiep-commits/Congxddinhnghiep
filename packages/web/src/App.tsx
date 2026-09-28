@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, getToken, setToken, setUnauthorizedHandler, type AppConfig, type User } from './api';
 import { ChangePassword } from './pages/ChangePassword';
+import { AiSettings } from './pages/AiSettings';
 import { LegalRegister } from './pages/LegalRegister';
 import { PriceBooks } from './pages/PriceBooks';
 import { Login } from './pages/Login';
 import { ProjectList } from './pages/ProjectList';
 import { ProjectView } from './pages/ProjectView';
 
-type Route = { name: 'projects' } | { name: 'project'; id: number } | { name: 'legal' } | { name: 'priceBooks' };
+type Route = { name: 'projects' } | { name: 'project'; id: number } | { name: 'legal' } | { name: 'priceBooks' } | { name: 'ai' };
 
 function parseHash(): Route {
   if (location.hash.startsWith('#/legal')) return { name: 'legal' };
+  if (location.hash.startsWith('#/ai')) return { name: 'ai' };
   if (location.hash.startsWith('#/price-books')) return { name: 'priceBooks' };
   const m = /^#\/project\/(\d+)/.exec(location.hash);
   return m ? { name: 'project', id: Number(m[1]) } : { name: 'projects' };
@@ -28,7 +30,9 @@ export function App() {
     setConfig(null);
   }, []);
 
-  useEffect(() => setUnauthorizedHandler(logout), [logout]);
+  useEffect(() => {
+    setUnauthorizedHandler(logout);
+  }, [logout]);
 
   useEffect(() => {
     const onHash = () => setRoute(parseHash());
@@ -79,6 +83,9 @@ export function App() {
         <a className="nav" href="#/legal">
           Căn cứ pháp lý
         </a>
+        <a className="nav" href="#/ai" data-testid="nav-ai">
+          Trợ lý AI
+        </a>
         <span className="spacer" />
         <span className="user">
           {user.fullName || user.username}
@@ -93,7 +100,9 @@ export function App() {
           ⚠ Dữ liệu định mức/đơn giá MẪU – thay bằng dữ liệu chính thức (định mức TT 38/2026, đơn giá địa phương) qua chức năng <b>Nhập dữ liệu</b>.
         </div>
       )}
-      {route.name === 'legal' ? (
+      {route.name === 'ai' ? (
+        <AiSettings user={user} onChanged={() => api.config().then(setConfig).catch(() => undefined)} />
+      ) : route.name === 'legal' ? (
         <LegalRegister user={user} />
       ) : route.name === 'priceBooks' ? (
         <PriceBooks user={user} config={config} />

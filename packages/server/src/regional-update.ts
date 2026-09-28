@@ -16,6 +16,8 @@ export interface RegionalUpdateRequest {
   priceDate?: string | null;
   /** Re-map codes that are missing from the active norm set (or sample-only) – section B flow. */
   remapCodes?: boolean;
+  /** Use exactly these price books (each for its own type) instead of choosing by region/period. */
+  bookIds?: number[];
   /** itemId → code chosen by the user for the re-mapping (null = leave). */
   codeChoices?: Record<string, string | null>;
 }
@@ -46,10 +48,12 @@ export class RegionalUpdateService {
   /** Books chosen for each requested type (newest first = highest priority). */
   private choose(projectId: number, req: RegionalUpdateRequest) {
     const p = this.repo.getProject(projectId)!;
-    const types = req.types?.length ? req.types : ALL_TYPES;
+    const types: ResourceType[] = req.types?.length ? [...req.types] : [...ALL_TYPES];
     const priceDate = req.priceDate ?? p.priceDate;
     const auto = req.auto !== false;
-    let candidates = proposeBooks(this.books.list(), req.region, priceDate, req.subArea ?? null);
+    const explicit = req.bookIds?.length ? this.books.list().filter((b) => req.bookIds!.includes(b.id)) : null;
+    let candidates = explicit ?? proposeBooks(this.books.list(), req.region, priceDate, req.subArea ?? null);
+    if (explicit && !req.types?.length) types.splice(0, types.length, ...([...new Set(explicit.map((b) => b.bookType))].filter((t) => t !== 'TH') as ResourceType[]));
     if (!auto && req.period) {
       const { start, end } = periodRange(req.period.type, req.period.year, req.period.value);
       candidates = candidates.filter((b) => b.periodStart >= start && b.periodStart <= end);

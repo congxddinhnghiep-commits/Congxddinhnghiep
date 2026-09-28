@@ -59,7 +59,12 @@ export type Action =
   | { tool: 'updateQuantity'; params: { itemId: number; quantity: number; quantityFormula?: string } }
   | { tool: 'setPrice'; params: { resourceCode: string; price: number } }
   | { tool: 'createCategory'; params: { name: string } }
-  | { tool: 'autoAssignCodes'; params: { assignments: { itemId: number; normCode: string; confidence: number }[] } };
+  | { tool: 'autoAssignCodes'; params: { assignments: { itemId: number; normCode: string; confidence: number }[] } }
+  /** Cập nhật định mức & đơn giá theo khu vực (áp dụng = phiên bản mới, hoàn tác được). */
+  | {
+      tool: 'regionalUpdate';
+      params: { region: string; subArea?: string | null; auto?: boolean; types?: ('VL' | 'NC' | 'M')[]; bookIds?: number[]; remapCodes?: boolean };
+    };
 
 export interface ReplyOption {
   label: string;
@@ -76,6 +81,18 @@ export type Reply =
       pending?: { intent: Intent; field: 'quantity' | 'price' | 'categoryName' | 'name' | 'normQuery' };
     }
   | { type: 'preview'; text: string; action: Action }
+  /**
+   * Answer of the AI agent (ChatGPT / Claude): text, the write actions it prepared as PREVIEWS (nothing is applied
+   * until the user confirms each one) and UI commands to run (open the import / regional update dialogs).
+   */
+  | {
+      type: 'agent';
+      text: string;
+      previews: { text: string; action: Action }[];
+      commands: ('importFile' | 'regionalUpdate')[];
+      trace: { tool: string; readOnly: boolean; ok: boolean }[];
+      provider: string;
+    }
   /** Non-mutating commands executed by the client/server directly (recalc, export, import, undo). */
   | { type: 'command'; text: string; command: 'recalc' | 'exportExcel' | 'importFile' | 'regionalUpdate' | 'undo' };
 

@@ -15,6 +15,7 @@ import {
   type ProjectCostSettings,
   type RowType,
 } from '@dutoan/core';
+import { AiRegistry, type AiConfig, type ProviderFactory } from './ai/registry.js';
 import { AssistantService, autoAssignPlan } from './assistant.js';
 import { AuthService, requireAdmin, requirePasswordChanged } from './auth.js';
 import { config, WEB_DIST } from './config.js';
@@ -75,14 +76,31 @@ function quantityFromBody(body: { quantity?: unknown; quantityFormula?: unknown 
   return out;
 }
 
-export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
+export function createApp(db: DB, opts: { serveWeb?: boolean; ai?: { cfg?: AiConfig; factory?: ProviderFactory } } = {}) {
   const legal = new LegalService(db);
   const repo = new Repo(db, legal);
   const auth = new AuthService(db, config.jwtSecret, config.jwtExpiresIn);
-  const assistant = new AssistantService(repo);
   const priceBooks = new PriceBookService(db, repo);
   repo.priceResolver = (pid) => priceBooks.resolve(pid);
   const regional = new RegionalUpdateService(db, repo, priceBooks);
+  const aiRegistry = new AiRegistry(db, opts.ai?.cfg, opts.ai?.factory);
+  const assistant = new AssistantService(repo, aiRegistry, {
+    regional,
+    priceBooks,
+    legal,
+    analyzeFile: (fileId, userId, projectId) => {
+      const a = analyze(db, repo, getParsed(fileId, userId), { kind: 'estimate', projectId, pricingOption: 'file' });
+      return {
+        fileName: a.fileName,
+        sheets: a.sheets.map((x) => ({ name: x.name, kind: x.kindLabel, rows: x.rowCount })),
+        header: a.header ? { headerRow: a.header.headerRow + 1, headerRows: a.header.headerRows, mapping: a.header.mapping } : null,
+        counts: 'counts' in a ? a.counts : {},
+        columnWarnings: 'columnWarnings' in a ? a.columnWarnings : [],
+        detectionNotes: 'detectionNotes' in a ? a.detectionNotes : [],
+        warnings: a.warnings,
+      };
+    },
+  });
   seedPriceBookExample(db);
   seedTt38PriceBookAugust2026(db);
   seedHcmJune2026PriceBook(db);
@@ -122,6 +140,8 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
     h(() => ({
       localMode: config.localMode,
       assistantProvider: assistant.providerName,
+      assistantLabel: aiRegistry.status().activeLabel,
+      assistantModel: aiRegistry.status().activeModel,
       sampleData: repo.hasSampleData(),
       googleDrive: {
         configured: !!(config.google.clientId && config.google.apiKey),
@@ -134,6 +154,36 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
       tt36WorkCategories: TT36_WORK_CATEGORIES,
       regions: regions(),
     })),
+  );
+
+  // AI assistant settings – provider / model only; API keys live in the server environment and are never returned
+  api.get('/ai/status', h(() => aiRegistry.status()));
+  api.put(
+    '/ai/settings',
+    requireAdmin,
+    h((req) => {
+      try {
+        aiRegistry.save({ provider: req.body?.provider, models: req.body?.models });
+      } catch (e) {
+        throw new HttpError(400, (e as Error).message);
+      }
+      return aiRegistry.status();
+    }),
+  );
+  api.post(
+    '/ai/test',
+    requireAdmin,
+    h(async (req) => {
+      const id = req.body?.provider;
+      if (id !== 'openai' && id !== 'anthropic') throw new HttpError(400, 'Chọn ChatGPT hoặc Claude để kiểm tra kết nối');
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 20000);
+      try {
+        return { ...(await aiRegistry.test(id, ctrl.signal)), status: aiRegistry.status() };
+      } finally {
+        clearTimeout(t);
+      }
+    }),
   );
 
   // legal-basis register
@@ -865,7 +915,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean } = {}) {
   );
 
   // assistant
-  api.post('/projects/:id/assistant', h((req) => assistant.message(proj(req).id, req.body ?? {})));
+  api.post('/projects/:id/assistant', h((req) => assistant.message(proj(req).id, req.body ?? {}, req.user!.id)));
   api.post(
     '/projects/:id/assistant/confirm',
     h((req) => {

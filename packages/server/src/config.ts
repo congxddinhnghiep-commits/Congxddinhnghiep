@@ -41,8 +41,21 @@ export const config = {
     apiKey: process.env.GOOGLE_API_KEY || '',
     appId: process.env.GOOGLE_APP_ID || '',
   },
+  // AI keys come ONLY from the server environment (process env / gitignored .env / Codespaces secrets):
+  // never sent to the browser, never logged, never stored in the database.
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY || '',
-    model: process.env.ANTHROPIC_MODEL || 'claude-opus-5',
+    model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
+  },
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY || '',
+    model: process.env.OPENAI_MODEL || 'gpt-4o',
+  },
+  ai: {
+    /** 'openai' | 'anthropic' | 'offline' | '' (auto: whichever key exists). The Settings screen can override it. */
+    provider: process.env.AI_PROVIDER || '',
+    maxIterations: Number(process.env.AI_MAX_ITERATIONS) || 6,
+    maxOutputTokens: Number(process.env.AI_MAX_OUTPUT_TOKENS) || 6000,
+    timeoutMs: Number(process.env.AI_TIMEOUT_MS) || 60000,
   },
 };

@@ -196,9 +196,19 @@ Biến môi trường quan trọng khi lên web: `NODE_ENV=production`, `JWT_SEC
 Hộp thoại nhập tự đoán cột theo tiêu đề; có thể chỉnh lại trước khi bấm **Nhập dữ liệu**.
 Google Drive cần cấu hình theo [docs/google-drive-setup.md](docs/google-drive-setup.md).
 
-## Trợ lý dùng Claude (tùy chọn)
-Đặt `ANTHROPIC_API_KEY` (và tùy chọn `ANTHROPIC_MODEL`) trong `.env`. Claude chỉ diễn giải câu lệnh thành thao tác;
-việc hỏi lại, xem trước và xác nhận vẫn giữ nguyên. Không có khóa, trợ lý chạy chế độ ngoại tuyến (rule-based).
+## Kết nối ChatGPT / Claude
+Trợ lý có thể chạy bằng **ChatGPT (OpenAI)**, **Claude (Anthropic)** hoặc **chế độ ngoại tuyến** (theo quy tắc, không cần mạng, luôn dùng được).
+1. **Đặt khóa API trên máy chủ** (không bao giờ nhập trên trình duyệt): trong `.env` hoặc biến môi trường
+   `OPENAI_API_KEY` (tùy chọn `OPENAI_MODEL`, mặc định `gpt-4o`) và/hoặc `ANTHROPIC_API_KEY` (tùy chọn `ANTHROPIC_MODEL`, mặc định `claude-sonnet-5`).
+   Trên GitHub Codespaces: Settings → Secrets and variables → Codespaces → New secret (tên như trên), rồi khởi động lại Codespace / ứng dụng.
+2. Mở menu **Trợ lý AI** (tài khoản quản trị): chọn ChatGPT / Claude / Ngoại tuyến / Tự chọn, đặt tên mô hình, bấm **Kiểm tra kết nối**.
+   Màn hình chỉ hiện “Đã kết nối / Chưa có khóa API” – không hiện, không ghi log, không lưu khóa vào CSDL (CSDL chỉ lưu tên nhà cung cấp và mô hình).
+3. Hộp trợ lý ở công trình hiển thị nhà cung cấp đang dùng. Mô hình gọi **công cụ** (tra định mức, gợi ý mã, xem khối lượng/chi phí, tìm vật tư, bộ đơn giá, giải thích
+   quy tắc, hướng dẫn nhập file…). Công cụ ghi (thêm/sửa công việc, gán mã, cập nhật theo khu vực, áp bộ đơn giá) **chỉ tạo bản xem trước** – bạn bấm
+   **Áp dụng** hoặc **Hủy**; áp dụng là một thao tác hoàn tác được (↶ Hoàn tác, cập nhật khu vực là phiên bản hoàn tác được).
+4. Giới hạn mỗi yêu cầu: `AI_MAX_ITERATIONS` (6 bước), `AI_MAX_OUTPUT_TOKENS` (6000), `AI_TIMEOUT_MS` (60000). Lỗi khóa sai / hết hạn mức / mất mạng / quá thời gian
+   được báo bằng tiếng Việt và trợ lý **tự chuyển sang chế độ ngoại tuyến** cho yêu cầu đó – không mất thao tác.
+Kiểm thử không cần khóa thật: `npm test` dùng nhà cung cấp giả; `npm run e2e:update4-ai` chạy trình duyệt headless với máy chủ OpenAI giả.
 
 ## Ghi chú kỹ thuật
 Các quyết định thiết kế và giới hạn của Phase 1 được ghi trong [docs/DECISIONS.md](docs/DECISIONS.md).

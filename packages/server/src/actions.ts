@@ -8,7 +8,9 @@ export type UndoOp =
   | { op: 'createCategory'; name: string }
   | { op: 'setQuantity'; itemId: number; quantity: number; quantityFormula: string | null }
   | { op: 'setPrice'; resourceCode: string; price: number | null }
-  | { op: 'restoreItem'; itemId: number; snapshot: ItemSnapshot };
+  | { op: 'restoreItem'; itemId: number; snapshot: ItemSnapshot }
+  /** Undo an estimate revision (regional update); handled by the caller that owns the revision service. */
+  | { op: 'undoRevision'; revisionId: number };
 
 export interface ActionResult {
   text: string;
@@ -78,11 +80,13 @@ export function executeAction(repo: Repo, projectId: number, action: Action): Ac
           undo: [{ op: 'setPrice', resourceCode: res.code, price: old }],
         };
       }
+      case 'regionalUpdate':
+        throw new Error('Cập nhật theo khu vực được xử lý bởi dịch vụ phiên bản (AssistantService.confirm).');
     }
   })();
 }
 
-export function applyUndo(repo: Repo, projectId: number, ops: UndoOp[]): void {
+export function applyUndo(repo: Repo, projectId: number, ops: UndoOp[], hooks: { undoRevision?: (revisionId: number) => void } = {}): void {
   repo.db.transaction(() => {
     for (const u of ops) {
       switch (u.op) {
@@ -111,6 +115,9 @@ export function applyUndo(repo: Repo, projectId: number, ops: UndoOp[]): void {
           break;
         case 'restoreItem':
           repo.restoreItem(projectId, u.itemId, u.snapshot);
+          break;
+        case 'undoRevision':
+          hooks.undoRevision?.(u.revisionId);
           break;
       }
     }

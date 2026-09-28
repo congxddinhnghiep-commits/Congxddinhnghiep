@@ -215,6 +215,12 @@ CREATE TABLE IF NOT EXISTS import_sources (
 );
 CREATE INDEX IF NOT EXISTS idx_import_sources_project ON import_sources(project_id);
 
+-- Non-secret application settings (AI provider / model choice). API keys are NEVER stored here.
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS project_price_books (
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   book_id INTEGER NOT NULL REFERENCES price_books(id) ON DELETE CASCADE,

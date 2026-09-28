@@ -272,3 +272,14 @@ Nguồn: `docs/LEGAL-UPDATE-2026.md` (đã xác minh metadata ngày 2026-09-27).
 90. **Gợi ý mã theo chương** (`chapterHints`): Đào/Đắp → AB, Bê tông → AF, Xây → AE, Cốt thép → AF.6, Ván khuôn → AF.8, Trát/Lát/Ốp/Sơn/Bả → AK, Cọc → AC, Lắp đặt ống → BB;
     có từ khóa thì CHỈ đề xuất trong chương đó (không bao giờ SF/SB… cho “ĐÀO ĐẤT”). Dòng chỉ có một cụm chữ ngắn và không có số ở bất kỳ ô nào là dòng hạng mục.
     Hệ quả: test gợi ý “Xây tường gạch ống” đổi từ SB.33110 (chương sửa chữa) sang AE.22110.
+91. **Lớp nhà cung cấp AI** (`packages/server/src/ai`): giao diện `ChatProvider` chung; `OpenAiProvider` (SDK `openai`, function calling) và `AnthropicProvider`
+    (Messages API, tool use); `AiRegistry` quyết định nhà cung cấp đang dùng: cài đặt trong CSDL (`app_settings`) → `AI_PROVIDER` → tự chọn theo khóa có sẵn → ngoại tuyến.
+    Claude cũ (`claude-provider.ts`, chỉ diễn giải câu lệnh) bị thay bằng lớp này.
+92. **Khóa API chỉ ở môi trường máy chủ**: không có API nhận khóa, `/ai/status` chỉ trả `hasKey`, `scrub()` xóa mọi chuỗi giống khóa khỏi thông báo lỗi/log,
+    CSDL chỉ lưu tên nhà cung cấp + mô hình. Test đối chiếu rằng không phản hồi nào chứa khóa; E2E kiểm tra thêm ở phía trình duyệt.
+93. **Công cụ ghi chỉ tạo bản xem trước**: vòng lặp tác tử (`runAgent`) chạy công cụ đọc ngay, còn công cụ ghi trả `Action` + văn bản xem trước; chỉ `POST /confirm` (nút Áp dụng)
+    mới thực thi, ghi undo. Cập nhật đơn giá theo khu vực là hành động `regionalUpdate` (dùng `RegionalUpdateService`, hoàn tác bằng phiên bản). Khi mã/khối lượng chưa chắc chắn
+    công cụ trả lỗi để mô hình hỏi lại thay vì đoán (không tạo bản xem trước).
+94. **Giới hạn & dự phòng**: tối đa 6 vòng, 6000 token đầu ra tích lũy, 60 giây/yêu cầu, lịch sử gửi lên ≤ 10 tin. Lỗi nhà cung cấp (khóa sai, hết hạn mức, giới hạn tốc độ, mạng,
+    quá thời gian, mô hình sai) → thông báo tiếng Việt và xử lý lại bằng bộ quy tắc ngoại tuyến; không có khóa thì dùng ngoại tuyến ngay.
+95. **Kiểm thử không gọi mạng thật**: nhà cung cấp giả (test đơn vị) và máy chủ OpenAI giả qua `OPENAI_BASE_URL` (E2E). Khi có khóa thật, nút “Kiểm tra kết nối” là cách xác nhận.
