@@ -114,35 +114,56 @@ export class RegionalUpdateService {
       note: string | null;
     }[] = [];
     const unpriced: { code: string; name: string; unit: string; type: ResourceType; price: number; source: string }[] = [];
-    for (const r of after.resourceSummary) {
+    // Every resource used by an item's analysis. Items priced from the file / GTT / a quote keep their price
+    // (their norm analysis is comparison only), so their share is flagged and left out of the totals.
+    const used = new Map<string, { name: string; unit: string; type: ResourceType; basePrice: number; applied: number; reference: number }>();
+    for (const c of after.categories) {
+      for (const it of c.items) {
+        const custom = (it.pricingMethod ?? 'NORM_BASED') !== 'NORM_BASED';
+        for (const a of it.analysis) {
+          const u = used.get(a.resourceCode) ?? { name: a.name, unit: a.unit, type: a.type, basePrice: 0, applied: 0, reference: 0 };
+          if (custom) u.reference += a.quantity;
+          else u.applied += a.quantity;
+          used.set(a.resourceCode, u);
+        }
+      }
+    }
+    for (const [code, r] of used) {
       if (!types.includes(r.type)) continue;
-      const o = beforePrices[r.code];
-      const n = afterPrices[r.code];
+      const o = beforePrices[code];
+      const n = afterPrices[code];
       if (n?.source.kind === 'manual') {
         continue; // manual project prices always win and are not touched by the update
       }
       if (n?.source.kind === 'base') {
-        unpriced.push({ code: r.code, name: r.name, unit: r.unit, type: r.type, price: n.price, source: sourceLabel(n) });
+        unpriced.push({ code, name: r.name, unit: r.unit, type: r.type, price: n.price, source: sourceLabel(n) });
       }
       const oldPrice = o?.price ?? r.basePrice;
       const newPrice = n?.price ?? r.basePrice;
       if (Math.abs(newPrice - oldPrice) > 1e-9 || sourceLabel(o) !== sourceLabel(n)) {
-        resources.push({ code: r.code, name: r.name, unit: r.unit, type: r.type, quantity: r.quantity, oldPrice, newPrice, oldSource: sourceLabel(o), newSource: sourceLabel(n), delta: (newPrice - oldPrice) * r.quantity, note: n?.source.kind === 'base' ? 'không có giá trong bộ đã chọn – giữ giá hiện tại' : null });
+        const note = n?.source.kind === 'base' ? 'không có giá trong bộ đã chọn – giữ giá hiện tại' : r.applied === 0 ? 'chỉ để so sánh (các công việc dùng giá file/GTT không đổi)' : null;
+        resources.push({ code, name: r.name, unit: r.unit, type: r.type, quantity: r.applied + r.reference, oldPrice, newPrice, oldSource: sourceLabel(o), newSource: sourceLabel(n), delta: (newPrice - oldPrice) * r.applied, note });
       }
     }
     const missingCodes = new Set(unpriced.map((u) => u.code));
-    const items: { itemId: number; name: string; normCode: string; oldUnit: number; newUnit: number; delta: number; missingPrices: number }[] = [];
+    const items: { itemId: number; name: string; normCode: string; oldUnit: number; newUnit: number; delta: number; missingPrices: number; fixed: boolean }[] = [];
     const afterItems = new Map(after.categories.flatMap((c) => c.items).map((i) => [i.id, i]));
+    let fixedItems = 0;
     for (const c of before.categories) {
       for (const it of c.items) {
         const ai = afterItems.get(it.id);
         if (!ai) continue;
+        const custom = (it.pricingMethod ?? 'NORM_BASED') !== 'NORM_BASED';
+        if (custom) fixedItems++;
         const missing = ai.analysis.filter((a) => missingCodes.has(a.resourceCode)).length;
-        if (Math.abs(ai.unitCost.total - it.unitCost.total) > 0.5 || missing) {
-          items.push({ itemId: it.id, name: it.name, normCode: it.normCode, oldUnit: it.unitCost.total, newUnit: ai.unitCost.total, delta: ai.amount.total - it.amount.total, missingPrices: missing });
+        const oldUnit = custom ? it.normUnitCost?.total ?? 0 : it.unitCost.total;
+        const newUnit = custom ? ai.normUnitCost?.total ?? 0 : ai.unitCost.total;
+        if (Math.abs(newUnit - oldUnit) > 0.5 || (missing && !custom)) {
+          items.push({ itemId: it.id, name: it.name, normCode: it.normCode, oldUnit, newUnit, delta: custom ? 0 : ai.amount.total - it.amount.total, missingPrices: missing, fixed: custom });
         }
       }
     }
+    if (fixedItems) warnings.push(`${fixedItems} công việc đang dùng đơn giá trong file / GTT / báo giá – giữ nguyên khi cập nhật khu vực; giá theo định mức chỉ hiển thị để so sánh.`);
     const tot = (c: typeof before) => ({ direct: c.total.total, gxdtt: c.costSummary.G, gxd: c.costSummary.Gxd });
     const b = tot(before);
     const a = tot(after);

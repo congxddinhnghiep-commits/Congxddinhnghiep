@@ -201,3 +201,51 @@ Nguồn: `docs/LEGAL-UPDATE-2026.md` (đã xác minh metadata ngày 2026-09-27).
     `status: reference_only` – **không bao giờ được chọn làm mặc định** (có test). Bảng tổng hợp thực tế vẫn theo bộ pháp lý của công trình.
 68. Toàn bộ `test_cases.json` của skill được chạy trong `packages/core/test/engine-skill.test.ts` (đọc trực tiếp file của skill).
 
+
+
+## Nhập TT 38/2026, Phụ lục VII, bộ giá HCM (27–28/09/2026)
+69. **Bộ định mức TT38_2026** (`npm run import:tt38`, idempotent): 9.012 mã / 53.503 dòng hao phí từ CSV; mỗi mã giữ phụ lục, mục, công tác, biến thể,
+    trang, file nguồn, sha256 (đối chiếu `manifest.json`), trạng thái `imported_needs_review`. Tài nguyên gom theo (loại, tên, đơn vị) chuẩn hóa với
+    mã xác định (băm) nên chạy lại không sinh trùng; “Nhân công nhóm N” là một tài nguyên dùng chung. Định mức mẫu vẫn giữ cờ `is_sample`.
+70. **Dòng %** (“Vật liệu khác”, “Máy khác”, đơn vị `%`) là quy tắc tỷ lệ trên tổng VL/M *trước khi* cộng % (`norm_resources.pct_base`), cộng vào loại
+    của chính nó; các dòng % của cùng gốc không cộng dồn lên nhau. Tên bị dính do tách PDF (“Vật liệu khác Nhân công”…) vẫn được coi là dòng % vì
+    quy tắc dựa vào đơn vị `%`, không dựa vào tên.
+71. **Tìm/gợi ý mã trên dữ liệu thật**: đơn vị kèm ghi chú đo lường (“100m3 đất nguyên thổ”) được quy về đơn vị gốc khi so tương thích (chỉ khi phần
+    chữ đứng cuối chuỗi; “/1km”, “công/đơn vị vật liệu” là đơn vị khác, giữ nguyên); “Cấp đất – I” và “đường kính cốt thép (mm) – ≤18” được hiểu như
+    “đất cấp I”, “đk ≤18”. Nhiều mã TT38 chỉ khác nhau bởi tham số không nằm trong tên (cỡ gàu, chiều cao) → cùng điểm, hệ thống xếp theo mã: kết quả
+    xác định nhưng người dùng phải chọn đúng biến thể.
+72. **Phụ lục VII** (`npm run import:tt38-pl7`): 1.082 mã cấp phối (3 mã trùng do lỗi in bị bỏ, lấy bản đầu), `imported_needs_review`. Tài nguyên
+    “Vữa…” của định mức được bóc tách theo mã cấp phối chọn **cho từng công việc** (tùy chọn; `estimate_items.mix_code`), tính riêng từng công việc
+    (`normResourcesOverride`) để hai công việc cùng mã định mức có thể dùng mác khác nhau. Chương 12 trở đi của nguồn còn thiếu dòng vật liệu (ghi trong
+    README của dữ liệu) – chưa dùng cho mọi loại vữa.
+73. **Bộ giá chỉ có thông tin văn bản** (HCM 02/2026, 06/2026, 08/2026): 0 dòng giá, `needs_review`; số hiệu thông báo 06/2026 không có trong lớp văn
+    bản nên để trống thay vì đoán. Danh sách đơn vị công bố của kỳ 06/2026 lưu ở `price_book_suppliers` (25 nhóm; 54 dòng gồm 5 nhóm không có đơn vị
+    tham gia; 49 công văn – số liệu thật của CSV, không ép về 48). Bộ chưa có dòng giá bị bỏ qua khi chọn bộ giá theo khu vực.
+
+## Update 3 (docs/UPDATE-3.md)
+74. **Công thức không có giá trị lưu sẵn**: SheetJS bỏ hẳn ô công thức có `<v></v>` nên công thức được đọc thẳng từ XML của sheet
+    (`xmlFormulas`), rồi tính bằng `evaluateSheetFormula` (+ − × ÷ ^, ngoặc, `SUM` theo dải/ô, tham chiếu cùng sheet; ô trống = 0 như Excel;
+    vòng tham chiếu/hàm khác/sheet khác → không tính). Không tính được → ô để trống + cờ `FLAG_FORMULA_NOT_EVALUATED`, không nhập 0.
+75. **Tiêu đề 2 dòng không gộp ô**: ô nhóm có ô phải trống và hàng dưới có nhãn con thì trải sang các cột đó (“Đơn giá / Vật liệu”, “Đơn giá /
+    Nhân công”); danh sách cột cho người dùng gồm mọi cột có dữ liệu với chữ cái, tiêu đề ghép và 3 giá trị mẫu.
+76. **Ánh xạ do người dùng quyết định**: nhận diện chỉ điền sẵn; mỗi trường bật/tắt và chọn cột tự do, đổi vùng tiêu đề/dữ liệu, đổi loại từng dòng.
+    Dòng có công thức `SUM` ở cột Thành tiền và không có khối lượng được coi là dòng cộng.
+77. **Tùy chọn đơn giá** (API `pricingOption`, mặc định giao diện = `file`; API mặc định `norm` để giữ tương thích): `file` → mọi công việc có đơn giá
+    trong file thành `CUSTOM_GTT` với VL/NC/M của file, nguồn “File Excel <tên>, ô F6/G6”, vẫn gắn mã định mức và hiện giá theo định mức chỉ để so sánh
+    (không vào tổng, không vào tổng hợp vật tư); `norm` → định mức + bộ giá công trình.
+78. **Đối chiếu độ khớp** trước khi nhập: từng dòng (thành tiền file vs KL × đơn giá), từng dòng cộng theo hạng mục và tổng; dung sai 1 đ. Dòng
+    “Tổng…” là tổng chung, dòng “Cộng…” là cộng hạng mục; thiếu dòng tổng chung thì so với tổng các dòng cộng.
+79. **Mã hiệu khi nhập** (`resolveImportCode`): mã có trong bộ → so tên mô tả với tên định mức bằng độ phủ từ khóa có trọng số + xung đột tham số + đơn vị
+    (ngưỡng phủ 50%): khớp hoặc *không khớp* (vẫn giữ mã, cảnh báo, gợi ý top-3, hỏi tham số còn thiếu); mã kiểu cũ vắng trong bộ → *đề xuất chuyển mã*
+    trong cùng họ mã (6 ký tự rồi 5 ký tự), độ tin cậy cộng 0,25/0,1; không mã → gợi ý. Mã đề xuất chỉ áp dụng khi người dùng chấp nhận
+    (`codeChoices`); mã gốc luôn lưu ở `norm_code_raw`, ô nguồn ở `source_cells`. Dự toán mới chỉ có hạng mục mặc định trống thì hạng mục của file thay thế nó.
+80. **Cập nhật theo khu vực = phiên bản có nhật ký** (`estimate_revisions`: ảnh chụp tỉnh/khu vực/ngày giá/bộ giá đã chọn/mã đã đổi; hoàn tác được phiên bản
+    mới nhất). Không áp dụng/hoàn tác trên dự toán đã duyệt (phải hủy duyệt hoặc nhân bản). Xem trước tính hai lần (giá hiện tại vs giá bộ mới) bằng
+    cùng bộ tính, nên chênh lệch GXDTT/GXD là kết quả thật. Giá nhập tay luôn thắng bộ giá; bộ 0 dòng giá bị bỏ qua; loại giá không tích giữ nguyên lựa chọn cũ.
+81. **Chuyển bộ định mức** (mẫu → TT38_2026): tích “kiểm tra và chuyển mã” liệt kê công việc có mã vắng trong bộ hoặc chỉ là mã mẫu, đề xuất như mục 79, áp
+    dụng cùng phiên bản (hoàn tác khôi phục mã cũ). Việc đổi giữa hai bộ pháp lý (TT11/2021 ↔ TT36/2026) vẫn ở tab Cài đặt vì kéo theo bảng tỷ lệ chi phí.
+82. **Huy hiệu “Có bộ giá mới – Cập nhật?”**: chỉ khi bật “Tự động cập nhật” của công trình và có bộ giá đã xác minh, có dòng giá, cùng tỉnh, kỳ mới hơn bộ đang dùng;
+    không bao giờ tự áp dụng.
+83. **Kiểm thử**: `update3-import.test.ts` (fixture `test_import.xlsx`: 1.187.500 / 4.384.000 / 15.555.000 / 21.126.500, AB.11213 không khớp, AF.11111 → AF.11110,
+    dòng trống → AF.61110), `update3-regional.test.ts`, và `e2e/update3.mjs` (Playwright headless: tải file, đổi ánh xạ tay chọn G = đơn giá nhân công, xác nhận,
+    so lưới với file, nút cập nhật khu vực TP. Hồ Chí Minh, xem trước, áp dụng, hoàn tác).

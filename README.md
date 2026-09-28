@@ -50,16 +50,38 @@ Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/UPDATE
 
 ## Hướng dẫn nhanh các tính năng mới
 
-### 1. Nhập file dự toán / BOQ có sẵn (mọi mẫu Excel)
+### 1. Nhập file dự toán / BOQ có sẵn (bạn chọn từng cột)
 1. Mở công trình → **⤓ Nhập dữ liệu** → loại dữ liệu “Dự toán / BOQ có sẵn” → chọn file `.xlsx`, `.xlsm`, `.xls` hoặc `.csv`
-   (hoặc chọn từ Google Drive).
-2. Phần mềm liệt kê các sheet kèm loại tự nhận diện (Dự toán chi tiết, Tổng hợp chi phí, Phân tích vật tư…) và chọn sẵn sheet dự toán.
-3. Kiểm tra **ánh xạ cột** (STT, Mã hiệu, Tên công việc, Đơn vị, Khối lượng, Đơn giá VL/NC/M…), dòng tiêu đề (1 hoặc 2 dòng) và bảng dòng:
-   mỗi dòng có nhãn *Hạng mục / Công việc / Cộng-Tổng (bỏ qua) / Ghi chú*, có thể đổi loại hoặc **Bỏ qua** từng dòng; cột cảnh báo nêu thiếu
-   đơn vị, khối lượng bằng 0, dòng trùng, đơn vị lạ, mã không có trong bộ định mức; cột gợi ý mã cho dòng chưa có mã.
-4. Tùy chọn: đặt tên **mẫu nhập** để lần sau file cùng mẫu tự nhận ánh xạ; bật **gắn mã tự động** với ngưỡng tin cậy.
-5. Bấm **Nhập**. Mỗi công việc giữ nguyên mô tả, khối lượng, đơn vị, mã và vị trí gốc (file / sheet / dòng) – rê chuột vào tên công việc để xem.
-   Nhập nhầm thì bấm **↶ Hoàn tác** ở khung trợ lý.
+   (hoặc chọn từ Google Drive) → **Đọc file**. Phần mềm liệt kê các sheet kèm loại tự nhận diện và chọn sẵn sheet dự toán.
+2. **Vùng dữ liệu**: dòng tiêu đề, số dòng tiêu đề (1 hoặc 2 – nhận diện cả khi KHÔNG gộp ô: ô nhóm “Đơn giá” bên trên các nhãn
+   “Vật liệu”, “Nhân công” bên dưới), dòng dữ liệu đầu/cuối.
+3. **Chọn cột cho từng trường** (Mã hiệu · Hạng mục công việc · Đơn vị · Khối lượng · Diễn giải khối lượng · Đơn giá vật liệu/nhân công/máy ·
+   Đơn giá tổng hợp · Thành tiền · Ghi chú · STT/phân cấp): mỗi trường có ô tích **Lấy cột này** và danh sách MỌI cột có dữ liệu, dạng
+   `F – Đơn giá 单价 / Vật liệu (vd: 15.000; 1.150.000…)`. Tự nhận diện chỉ điền sẵn; bạn đổi hoặc chọn “— Không lấy —” tùy ý, kết quả cập nhật ngay.
+4. **Đơn giá**: (a) *Giữ nguyên đơn giá trong file* (mặc định) – đơn giá VL/NC/M của file thành đơn giá nhập tay của từng công việc, nguồn ghi
+   “File Excel …, ô F6/G6”; (b) *Tính lại theo định mức & bộ giá của công trình*.
+5. **Loại dòng**: mỗi dòng có nhãn sửa được *Hạng mục / Công việc / Dòng cộng (bỏ qua) / Ghi chú (bỏ qua)*. Tự nhận: STT chữ/La Mã không có khối
+   lượng → hạng mục; dòng “Cộng…”, “Tổng…”, 小计/合计 hoặc công thức `SUM` → dòng cộng.
+6. **Công thức không có giá trị lưu sẵn** (file do thư viện ghi, ví dụ `=E6*(F6+G6)`, `=SUM(H6:H8)`): được tính lại từ số liệu trong sheet; công thức
+   không tính được bị gắn cờ, không bao giờ nhập thành 0.
+7. **Mã hiệu** (đối chiếu bộ định mức của công trình, TT38_2026): *khớp mã*; *mã và tên công việc không khớp – cần kiểm tra* (giữ mã, hiện tên trong
+   TT38 và gợi ý; hỏi thêm cấp đất/chiều rộng/chiều sâu khi thiếu); *đề xuất chuyển mã* cho mã kiểu cũ (vd. AF.11111 → AF.11110, cùng họ mã AF.111xx);
+   *gợi ý mã* khi không có mã. Cột “Mã đề xuất” có top-3 kèm độ tin cậy; nút **Chấp nhận tất cả mã đề xuất ≥ ngưỡng**. Mã gốc không bị ghi đè.
+8. **Kiểm tra độ khớp với file** (✔/⚠ + chênh lệch): theo từng dòng (KL, đơn giá, thành tiền trong file so với tính lại), từng dòng cộng theo hạng mục và
+   tổng cộng. Khi nhập, lưới dự toán phản chiếu file: cùng thứ tự, hạng mục, tên, đơn vị, khối lượng, đơn giá, ghi chú; mã đã nhận có phân tích hao
+   phí và “giá theo định mức” để so sánh (không cộng vào tổng); mỗi công việc giữ file/sheet/dòng/ô gốc.
+9. Tùy chọn: đặt tên **mẫu nhập** để lần sau file cùng mẫu tự nhận ánh xạ. Nhập nhầm thì bấm **↶ Hoàn tác** ở khung trợ lý.
+
+### 1b. Cập nhật định mức & đơn giá theo khu vực
+Nút **Cập nhật định mức & đơn giá theo khu vực** (thanh công cụ công trình; hoặc gõ “cập nhật đơn giá theo khu vực” cho trợ lý):
+1. Chọn tỉnh/thành (34 đơn vị) và khu vực (nếu bộ giá chia khu vực), kỳ giá (mặc định tự chọn bộ mới nhất ≤ ngày lập giá; hoặc chọn tháng/quý),
+   loại giá cần cập nhật (vật liệu / nhân công / ca máy), bộ định mức (TT38_2026 – hiện trạng thái “cần đối chiếu”). Tùy chọn kiểm tra và chuyển
+   mã định mức chưa có trong bộ TT38_2026 (như mục 7 ở trên).
+2. **Xem trước**: bộ giá sẽ dùng, tài nguyên đổi giá (giá cũ → mới, nguồn: văn bản/kỳ), tài nguyên không có giá trong bộ đã chọn (giữ giá hiện tại,
+   có cảnh báo), công việc bị ảnh hưởng, chênh lệch chi phí trực tiếp / GXDTT / GXD. Giá nhập tay luôn được giữ; công việc dùng giá file/GTT không đổi
+   (giá theo định mức chỉ để so sánh). Bộ giá chưa có dòng giá (chỉ thông tin văn bản) bị bỏ qua kèm cảnh báo.
+3. **Áp dụng** = tạo phiên bản mới có nhật ký (ai, khi nào, mô tả, GXD trước → sau) và **hoàn tác được**; không áp dụng lên dự toán đã duyệt.
+4. Bật “Tự động cập nhật” của công trình: khi nhập bộ giá đã xác minh mới hơn của khu vực sẽ hiện nút **Có bộ giá mới – Cập nhật?** (không tự áp dụng).
 
 ### 2. Tra định mức và gắn mã tự động
 - Ô tra định mức (F3) nhận mã (`AF.1`, `AF11`), chữ có/không dấu và viết tắt: `BT`, `BTCT`, `VK`, `CT` (cốt thép), `M250`/`B20`, `PCB40`,
@@ -116,6 +138,9 @@ desktop/         Khung Electron (Phase 2)
 | `npm start` | Chạy bản build tại http://localhost:3000 |
 | `npm run dev` | Chế độ phát triển: API cổng 3000 + giao diện Vite cổng 5173 (tự tải lại) |
 | `npm test` | Chạy unit test (vitest) |
+| `npm run import:tt38` | Nạp bộ định mức TT 38/2026 (9.012 mã, `data/norms/tt38_2026/`) vào DB – chạy lại an toàn |
+| `npm run import:tt38-pl7` | Nạp Phụ lục VII (cấp phối vật liệu) để bóc tách “Vữa…” thành xi măng/cát/đá/nước |
+| `npm run e2e` | Kiểm thử trình duyệt headless cho Update 3 (xem `e2e/README.md`) |
 
 Đăng nhập lần đầu: **admin / admin123** (chỉ ở môi trường phát triển) → hệ thống yêu cầu đổi mật khẩu ngay.
 Có thể đặt tài khoản khác bằng biến môi trường `ADMIN_USER`, `ADMIN_PASS` (xem `.env.example`) trước lần chạy đầu tiên.

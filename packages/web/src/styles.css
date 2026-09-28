@@ -316,3 +316,5 @@ button.pm { border: none; cursor: pointer; }
 .code-cell { display: flex; flex-direction: column; gap: 3px; min-width: 220px; }
 .code-cell select { max-width: 320px; }
 .import-review h4 { margin: 16px 0 6px; }
+.form label.check, label.check { flex-direction: row; align-items: center; gap: 8px; color: inherit; }
+.form .check-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }

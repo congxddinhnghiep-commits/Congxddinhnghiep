@@ -46,14 +46,14 @@ export function EstimateImportReview({
     }
   };
 
-  const load = async (body: Record<string, unknown>, keepRange = false, keepOverrides = false) => {
+  const load = async (body: Record<string, unknown>, keepRange = false, keepOverrides = false, keepChoices = false) => {
     setBusy(true);
     setError('');
     try {
       const r = await api.importAnalyze({ fileId: a.fileId, projectId, pricingOption: pricing, ...body });
       apply(r, keepRange);
       if (!keepOverrides) setOverrides({});
-      setChoices({});
+      if (!keepChoices) setChoices({});
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -71,7 +71,7 @@ export function EstimateImportReview({
     rowTypes: overrides,
     ...over,
   });
-  const reanalyze = (over: Record<string, unknown> = {}) => load(current(over), true, true);
+  const reanalyze = (over: Record<string, unknown> = {}) => load(current(over), true, true, true);
 
   const setField = (key: string, col: number | null) => {
     const next = { ...mapping };
@@ -272,7 +272,7 @@ export function EstimateImportReview({
           <input type="checkbox" checked={onlyItems} onChange={(e) => setOnlyItems(e.target.checked)} /> Chỉ hiện công việc
         </label>
         <span className="check">
-          <button data-testid="accept-all" onClick={acceptAll}>
+          <button data-testid="accept-all" onClick={acceptAll} disabled={busy}>
             Chấp nhận tất cả mã đề xuất ≥
           </button>
           <input className="num" style={{ width: 48 }} value={acceptAt} onChange={(e) => setAcceptAt(e.target.value)} />%
@@ -336,7 +336,7 @@ export function EstimateImportReview({
                         {res.status === 'mismatch' && res.normName && <div className="hint">TT38: {res.normName}</div>}
                         {res.askParams && <div className="hint">Cần biết thêm: {res.askParams.join('; ')}</div>}
                         {(res.candidates.length > 0 || res.status === 'mismatch') && (
-                          <select data-testid={`code-${r.excelRow}`} value={choiceValue(r.index)} onChange={(e) => {
+                          <select data-testid={`code-${r.excelRow}`} value={choiceValue(r.index)} disabled={busy} onChange={(e) => {
                             const v = e.target.value;
                             const next = { ...choices };
                             if (v === '') delete next[String(r.index)];

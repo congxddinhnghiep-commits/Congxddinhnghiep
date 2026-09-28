@@ -205,7 +205,7 @@ export interface RegionalPreview {
   totals: { before: { direct: number; gxdtt: number; gxd: number }; after: { direct: number; gxdtt: number; gxd: number }; delta: { direct: number; gxdtt: number; gxd: number } };
   resources: { code: string; name: string; unit: string; type: 'VL' | 'NC' | 'M'; quantity: number; oldPrice: number; newPrice: number; oldSource: string; newSource: string; delta: number; note: string | null }[];
   unpriced: { code: string; name: string; unit: string; type: 'VL' | 'NC' | 'M'; price: number; source: string }[];
-  items: { itemId: number; name: string; normCode: string; oldUnit: number; newUnit: number; delta: number; missingPrices: number }[];
+  items: { itemId: number; name: string; normCode: string; oldUnit: number; newUnit: number; delta: number; missingPrices: number; fixed: boolean }[];
   normSet: { dataset: string; label: string; total: number; sample: number; needsReview: number };
   remap: { itemId: number; name: string; normCode: string; unit: string; resolution: CodeResolutionDTO }[];
   warnings: string[];

@@ -290,7 +290,10 @@ export function RegionalUpdateDialog({
                   {preview.items.map((i) => (
                     <tr key={i.itemId}>
                       <td>{i.normCode}</td>
-                      <td>{i.name}</td>
+                      <td>
+                        {i.name}
+                        {i.fixed && <span className="hint"> · giá file/GTT giữ nguyên – đơn giá bên cạnh là giá theo định mức (so sánh)</span>}
+                      </td>
                       <td className="num">{money(i.oldUnit)}</td>
                       <td className="num">{money(i.newUnit)}</td>
                       <td className="num">{delta(i.delta)}</td>
