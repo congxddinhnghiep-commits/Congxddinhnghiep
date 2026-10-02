@@ -335,3 +335,21 @@ button.pm { border: none; cursor: pointer; }
 .block-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .block-head b { font-size: 13px; }
 .block-head .spacer { flex: 1; }
+
+/* Update 5: Bóc khối lượng theo cấu kiện */
+.subtabs { display: flex; gap: 2px; margin-bottom: 10px; }
+.subtabs button { border: 1px solid var(--line-soft); background: #fff; border-radius: 6px 6px 0 0; padding: 6px 12px; }
+.subtabs button.active { background: var(--brand-soft); font-weight: 600; }
+.takeoff-elements { display: flex; gap: 16px; align-items: flex-start; }
+.takeoff-side { width: 280px; flex: none; }
+.takeoff-detail { flex: 1; min-width: 0; }
+.takeoff-list { list-style: none; margin: 8px 0; padding: 0; max-height: 260px; overflow-y: auto; border: 1px solid var(--line-soft); border-radius: 6px; }
+.takeoff-list li { padding: 6px 8px; border-bottom: 1px solid var(--line-soft); cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+.takeoff-list li.active { background: var(--brand-soft); }
+.push-plan { margin-top: 8px; }
+.push-plan tr.conflict td { background: #fff6d6; }
+.takeoff-tab .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.takeoff-tab .row label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 2px; }
+.takeoff-tab .row input, .takeoff-tab .row select { padding: 4px 6px; }
+.element-editor .params { gap: 14px; }
+.element-editor .params label { width: 110px; }

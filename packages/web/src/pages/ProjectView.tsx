@@ -10,11 +10,13 @@ import { MultiSheetImport } from '../components/MultiSheetImport';
 import { PricesTab } from '../components/PricesTab';
 import { ResourceSummaryTab } from '../components/ResourceSummaryTab';
 import { SettingsTab } from '../components/SettingsTab';
+import { TakeoffTab } from '../components/TakeoffTab';
 import { ValidationTab } from '../components/ValidationTab';
 import { money } from '../format';
 
 const TABS = [
   ['estimate', 'Dự toán chi tiết'],
+  ['takeoff', 'Bóc khối lượng'],
   ['prices', 'Giá vật liệu/NC/Máy'],
   ['analysis', 'Phân tích vật tư'],
   ['resources', 'Tổng hợp vật tư'],
@@ -177,6 +179,7 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
               onReimportCategory={(cid) => { setReimportCat(cid); setShowImport(true); }}
             />
           )}
+          {tab === 'takeoff' && <TakeoffTab projectId={projectId} categories={data.categories.map((c) => ({ id: c.id, name: c.name }))} onPushed={reload} />}
           {tab === 'prices' && <PricesTab project={data.project} config={config} onChanged={reload} />}
           {tab === 'analysis' && <AnalysisTab data={data} />}
           {tab === 'resources' && <ResourceSummaryTab data={data} />}

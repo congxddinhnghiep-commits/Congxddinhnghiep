@@ -3,6 +3,8 @@ import type {
   BuildingType,
   CategoryResult,
   CostSummary,
+  ElementParams,
+  ElementType,
   Intent,
   LegalDocument,
   LegalSet,
@@ -12,6 +14,7 @@ import type {
   PendingField,
   ProjectCostSettings,
   RateTable,
+  RebarGroup,
   Reply,
   Resource,
   ResourceSummaryRow,
@@ -73,6 +76,90 @@ export interface EstimateResponse {
 }
 
 export type MixDesignSummary = Pick<MixDesign, 'code' | 'section' | 'spec' | 'kind' | 'grade' | 'page' | 'status'>;
+
+// ---------------------------------------------------------------------------
+// Update 5 — Bóc khối lượng theo cấu kiện
+// ---------------------------------------------------------------------------
+
+export interface StoryDTO {
+  id: number;
+  projectId: number;
+  name: string;
+  heightM: number;
+  elevationM: number;
+  order: number;
+}
+
+export interface GeneratedTaskDTO {
+  key: string;
+  name: string;
+  unit: string;
+  formula: string;
+  perUnit: number;
+  value: number;
+  computedValue: number;
+  overrideValue: number | null;
+  overrideReason: string | null;
+  normCode: string;
+  codeStatus: '' | 'auto';
+  confidence: number | null;
+}
+
+export interface TakeoffElementDTO {
+  id: number;
+  projectId: number;
+  categoryId: number | null;
+  storyId: number | null;
+  type: ElementType;
+  name: string;
+  count: number;
+  params: ElementParams;
+  enabled: Record<string, boolean>;
+  overrides: Record<string, { value: number; reason?: string | null }>;
+  material: string | null;
+  note: string | null;
+  source: 'manual' | 'excel' | 'etabs';
+  sourceRef: string | null;
+  order: number;
+}
+
+export interface ManualSheetRowDTO {
+  id: number;
+  projectId: number;
+  mode: 'expression' | 'quick';
+  drawingName: string;
+  category: string;
+  expression: string | null;
+  quick: { n: number; a: number; l: number; h: number } | null;
+  result: number | null;
+  targetItemId: number | null;
+  order: number;
+}
+
+export interface RebarScheduleRowDTO {
+  id: number;
+  projectId: number;
+  elementId: number | null;
+  cauKien: string;
+  soHieu: string | null;
+  shapeCode: string | null;
+  lengths: (number | null)[];
+  note: string | null;
+  diaMm: number;
+  chieuDai1ThanhMm: number | null;
+  soCauKien: number;
+  soThanh1CauKien: number;
+  order: number;
+  computed: { chieuDai1ThanhMm: number; tongChieuDaiM: number; tongTrongLuongKg: number; group: RebarGroup };
+}
+
+export interface PushPlanRowDTO {
+  group: { key: string; categoryId: number; storyId: number | null; templateKey: string; name: string; unit: string; quantity: number; normCode: string; codeStatus: '' | 'auto'; confidence: number | null; lines: { description: string; result: number; sourceReference: string }[] };
+  existingItemId: number | null;
+  kind: 'create' | 'update' | 'unchanged';
+  conflict: boolean;
+  previousQuantity: number | null;
+}
 
 export interface PriceSourceInfo {
   kind: 'manual' | 'book' | 'base';
@@ -651,6 +738,44 @@ export const api = {
     request<AnalyzeMultiResult>('POST', '/import/analyze-multi', body),
   importSheets: (pid: number, body: { fileId: string; sheetIndexes?: number[]; pricingOption?: 'file' | 'norm'; equipmentAsQuote?: boolean; amountFidelity?: 'file' | 'calc'; autoAssignThreshold?: number }) =>
     request<ImportSheetsResult>('POST', `/projects/${pid}/import-sheets`, body),
+
+  // Update 5 — Bóc khối lượng theo cấu kiện
+  elementTypes: () => request<{ labels: Record<ElementType, string>; defaults: Record<ElementType, ElementParams> }>('GET', '/takeoff/element-types'),
+  stories: (pid: number) => request<StoryDTO[]>('GET', `/projects/${pid}/stories`),
+  createStory: (pid: number, body: { name: string; heightM?: number; elevationM?: number }) => request<StoryDTO>('POST', `/projects/${pid}/stories`, body),
+  updateStory: (pid: number, sid: number, body: Partial<{ name: string; heightM: number; elevationM: number; order: number }>) => request<StoryDTO>('PUT', `/projects/${pid}/stories/${sid}`, body),
+  deleteStory: (pid: number, sid: number) => request('DELETE', `/projects/${pid}/stories/${sid}`),
+
+  takeoffElements: (pid: number) => request<{ element: TakeoffElementDTO; tasks: GeneratedTaskDTO[] }[]>('GET', `/projects/${pid}/takeoff/elements`),
+  createElement: (pid: number, body: { type: ElementType; name: string; count?: number; categoryId?: number | null; storyId?: number | null; params?: ElementParams; material?: string | null; note?: string | null }) =>
+    request<{ element: TakeoffElementDTO; tasks: GeneratedTaskDTO[] }>('POST', `/projects/${pid}/takeoff/elements`, body),
+  updateElement: (
+    pid: number,
+    eid: number,
+    body: Partial<{ name: string; count: number; categoryId: number | null; storyId: number | null; params: ElementParams; enabled: Record<string, boolean>; overrides: Record<string, { value: number; reason?: string | null }>; material: string | null; note: string | null; order: number }>,
+  ) => request<{ element: TakeoffElementDTO; tasks: GeneratedTaskDTO[] }>('PUT', `/projects/${pid}/takeoff/elements/${eid}`, body),
+  deleteElement: (pid: number, eid: number) => request('DELETE', `/projects/${pid}/takeoff/elements/${eid}`),
+
+  manualRows: (pid: number) => request<ManualSheetRowDTO[]>('GET', `/projects/${pid}/takeoff/manual`),
+  evalManual: (pid: number, body: { mode: 'expression' | 'quick'; expression?: string; quick?: { n: number; a: number; l: number; h: number }; drawingName?: string; category?: string }) =>
+    request<{ result: number; variables: Record<string, number>; quick: { area: number; length: number; volume: number; lateralArea: number } | null; row: ManualSheetRowDTO | null }>('POST', `/projects/${pid}/takeoff/manual/eval`, body),
+  saveManual: (pid: number, body: { mode: 'expression' | 'quick'; expression?: string; quick?: { n: number; a: number; l: number; h: number }; drawingName?: string; category?: string }) =>
+    request<{ result: number; variables: Record<string, number>; quick: { area: number; length: number; volume: number; lateralArea: number } | null; row: ManualSheetRowDTO | null }>('POST', `/projects/${pid}/takeoff/manual`, body),
+  deleteManualRow: (pid: number, rid: number) => request('DELETE', `/projects/${pid}/takeoff/manual/${rid}`),
+  sendManualRow: (pid: number, rid: number, itemId: number) => request('POST', `/projects/${pid}/takeoff/manual/${rid}/send`, { itemId }),
+
+  rebarRows: (pid: number) => request<RebarScheduleRowDTO[]>('GET', `/projects/${pid}/takeoff/rebar`),
+  rebarSummary: (pid: number) => request<{ type: string; groups: Record<RebarGroup, number> }[]>('GET', `/projects/${pid}/takeoff/rebar/summary`),
+  saveRebarRow: (
+    pid: number,
+    body: { id?: number; elementId?: number | null; cauKien: string; soHieu?: string | null; shapeCode?: string | null; lengths?: (number | null)[]; note?: string | null; diaMm: number; chieuDai1ThanhMm?: number | null; soCauKien: number; soThanh1CauKien: number },
+  ) => request<RebarScheduleRowDTO>('PUT', `/projects/${pid}/takeoff/rebar`, body),
+  deleteRebarRow: (pid: number, rid: number) => request('DELETE', `/projects/${pid}/takeoff/rebar/${rid}`),
+
+  takeoffPushPreview: (pid: number, body: { elementIds?: number[]; splitByStory?: boolean } = {}) => request<{ rows: PushPlanRowDTO[]; conflicts: number }>('POST', `/projects/${pid}/takeoff/push/preview`, body),
+  takeoffPushApply: (pid: number, body: { elementIds?: number[]; splitByStory?: boolean; overwriteKeys?: string[] } = {}) =>
+    request<{ created: number; updated: number; skipped: number; conflicts: number; revisionId: number }>('POST', `/projects/${pid}/takeoff/push/apply`, body),
+  takeoffUndoPush: (pid: number, revisionId: number) => request('POST', `/projects/${pid}/takeoff/push/${revisionId}/undo`),
 };
 
 /** Download the Excel export (needs the auth header, so fetch → blob → link). */

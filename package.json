@@ -25,7 +25,8 @@
     "e2e:update4": "node e2e/update4.mjs",
     "e2e:update4-ai": "node e2e/update4-ai.mjs",
     "check:private-import": "tsx packages/server/src/scripts/check-private-import.ts",
-    "e2e:update4-multi": "node e2e/update4-multi.mjs"
+    "e2e:update4-multi": "node e2e/update4-multi.mjs",
+    "e2e:update5": "node e2e/update5.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
