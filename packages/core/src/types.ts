@@ -78,7 +78,10 @@ export interface EstimateItem {
    * How the norm code was set: '' none, 'manual' typed by the user, 'imported' from a source file,
    * 'auto' assigned by the suggestion engine (needs confirmation), 'confirmed' accepted by the user.
    */
-  codeStatus?: '' | 'manual' | 'imported' | 'auto' | 'confirmed';
+  /** 'tbvt' = thiết bị / vật tư theo báo giá: no norm code needed. */
+  codeStatus?: '' | 'manual' | 'imported' | 'auto' | 'confirmed' | 'tbvt';
+  /** Chinese name of a bilingual estimate (kept for bilingual reports). */
+  nameZh?: string | null;
   codeConfidence?: number | null;
   /** Provenance of imported/assigned items – never overwritten. */
   source?: ItemSource | null;

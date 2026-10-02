@@ -215,6 +215,19 @@ CREATE TABLE IF NOT EXISTS import_sources (
 );
 CREATE INDEX IF NOT EXISTS idx_import_sources_project ON import_sources(project_id);
 
+-- Update 4 A-bis: the summary sheet (TONGHOP) of a multi-sheet import – kept for reconciliation only, no items come from it.
+CREATE TABLE IF NOT EXISTS import_summaries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  sheet_name TEXT NOT NULL DEFAULT '',
+  lines_json TEXT NOT NULL,
+  check_json TEXT NOT NULL DEFAULT '{}',
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_import_summaries_project ON import_summaries(project_id);
+
 -- Non-secret application settings (AI provider / model choice). API keys are NEVER stored here.
 CREATE TABLE IF NOT EXISTS app_settings (
   key TEXT PRIMARY KEY,
@@ -334,6 +347,7 @@ export function migrate(db: DB): void {
     // Section F
     ['source_raw_text', 'TEXT'],
     ['source_flags', 'TEXT'],
+    ['name_zh', 'TEXT'],
     ['pricing_method', "TEXT NOT NULL DEFAULT 'NORM_BASED'"],
     ['custom_vl', 'REAL'],
     ['custom_nc', 'REAL'],

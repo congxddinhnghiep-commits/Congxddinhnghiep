@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import { detectDominantEncoding, detectEncoding, toUnicode, type Merge, type TextEncoding } from '@dutoan/core';
+import { detectDominantEncoding, detectEncoding, fixVniCell, hasVniMarkers, toUnicode, type Merge, type TextEncoding } from '@dutoan/core';
 import { evaluateFormula, evaluateSheetFormula, isFormula, normalizeText, parseFlexibleNumber, parseVnNumber, type ResourceType } from '@dutoan/core';
 import { HttpError, type Repo } from './repo.js';
 
@@ -20,6 +20,8 @@ export interface CellIssue {
 
 export interface ParsedSheet {
   name: string;
+  /** Hidden sheet (workbook flag Hidden / VeryHidden). */
+  hidden?: boolean;
   /** Cell values, legacy-encoded text converted to Unicode. */
   rows: CellValue[][];
   /** Merged ranges (0-based), used to read multi-row headers. */
@@ -125,9 +127,15 @@ function normaliseEncoding(sheet: ParsedSheet): ParsedSheet {
       const v = r[c];
       if (!nonAscii(v)) return;
       const cellEnc = detectEncoding(v);
-      const enc: TextEncoding | null = cellEnc === 'vni' || cellEnc === 'tcvn3' ? cellEnc : (colEnc === 'vni' || colEnc === 'tcvn3') && !REAL_UNICODE.test(v) ? colEnc : null;
+      // Per cell (docs/update4/vni.py): text with a VNI tell is converted – a whole cell, or only the VNI tokens of a mixed
+      // "Eùp coïc thử tĩnh Φ400" cell. Without a tell a VNI-column cell stays as is ("CÔNG TÁC BÊ TÔNG" is real Unicode).
+      const tcvn = cellEnc === 'tcvn3' || (colEnc === 'tcvn3' && cellEnc !== 'unicode');
+      let enc: TextEncoding | null = null;
+      if (tcvn) enc = 'tcvn3';
+      else if (hasVniMarkers(v)) enc = 'vni';
+      else if (colEnc === 'tcvn3' && !REAL_UNICODE.test(v)) enc = 'tcvn3';
       if (!enc) return;
-      const u = toUnicode(v, enc);
+      const u = enc === 'vni' ? fixVniCell(v) : toUnicode(v, enc);
       if (u !== v) {
         sheet.raw![`${ri}:${c}`] = v;
         r[c] = u;
@@ -322,6 +330,7 @@ export async function parseBuffer(buf: Buffer, fileName: string, fileIssues: str
     }
     const merges = (ws['!merges'] ?? []).map((m) => ({ s: { r: m.s.r, c: m.s.c }, e: { r: m.e.r, c: m.e.c } }));
     const sheet: ParsedSheet = { name, rows, merges, formulas: xmlFormulas(wb, sheetIndex) };
+    if ((wb.Workbook?.Sheets?.[sheetIndex]?.Hidden ?? 0) > 0) sheet.hidden = true;
     sheet.hiddenCols = xmlHiddenCols(wb, sheetIndex);
     fillMerged(sheet);
     for (const addr of Object.keys(ws)) {

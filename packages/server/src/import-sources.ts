@@ -23,6 +23,9 @@ export interface StoredImportOptions {
   rowTypes?: Record<string, string>;
   pricingOption?: 'file' | 'norm';
   allowNumericName?: boolean;
+  blockIndex?: number;
+  categoryPrefix?: string;
+  equipmentAsQuote?: boolean;
 }
 
 /** Keep the parsed sheet (values after formula evaluation / encoding conversion, raw text, merges) of an import. */

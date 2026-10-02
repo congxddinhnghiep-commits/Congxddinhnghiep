@@ -112,7 +112,7 @@ describe('import a bilingual Vietnamese–Chinese BOQ', () => {
     const r = (await request(app).post(`/api/projects/${pid}/import-estimate`).set(A()).send({ fileId })).body;
     expect(r.created).toBe(5);
     const list = await items(pid);
-    expect([...new Set(list.map((i: { category: string }) => i.category))]).toEqual(['基础工程 / PHẦN MÓNG', '主体工程 / PHẦN THÂN']);
+    expect([...new Set(list.map((i: { category: string }) => i.category))]).toEqual(['PHẦN MÓNG', 'PHẦN THÂN']); // Vietnamese shown; the Chinese part is split off (Update 4 A-bis)
     const sugg = (await request(app).get(`/api/projects/${pid}/suggestions`).set(A())).body;
     const lot = sugg.find((s: { candidates: { code: string }[] }) => s.candidates[0]?.code === 'AF.11111');
     expect(lot).toBeTruthy();

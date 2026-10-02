@@ -72,6 +72,14 @@ Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/UPDATE
    phí và “giá theo định mức” để so sánh (không cộng vào tổng); mỗi công việc giữ file/sheet/dòng/ô gốc.
 9. Tùy chọn: đặt tên **mẫu nhập** để lần sau file cùng mẫu tự nhận ánh xạ. Nhập nhầm thì bấm **↶ Hoàn tác** ở khung trợ lý.
 
+**File thật nhiều sheet (ví dụ hồ sơ BIFF .xls cũ, 40+ sheet, mỗi sheet một nhà xưởng/hạng mục, có sheet ẩn và sheet tổng hợp
+TONGHOP)**: một sheet có thể lặp lại dòng tiêu đề cho từng hạng mục con – mỗi bảng như vậy (`khối`) được nhận ra riêng
+(`POST /import/analyze-multi`, `POST /projects/:id/import-sheets`) và nhập thành một hạng mục của nó; sheet ẩn không tự chọn;
+sheet tổng hợp chỉ dùng để đối chiếu tổng tiền, không tạo công việc. Dòng “diễn giải khối lượng” (Dài×Rộng×Cao×Số cấu kiện) dưới
+một công việc được gắn vào công việc đó mà không đổi khối lượng của file. Sheet MEP/điện nước không cần mã định mức cho mỗi dòng –
+đánh dấu “thiết bị/vật tư theo báo giá”. Không bao giờ commit file thật của khách: đặt vào `data/private/` (đã có trong
+`.gitignore`) rồi chạy `npm run check:private-import` để xem đối chiếu từng sheet/khối trước khi nhập vào phần mềm.
+
 ### 1b. Cập nhật định mức & đơn giá theo khu vực
 Nút **Cập nhật định mức & đơn giá theo khu vực** (thanh công cụ công trình; hoặc gõ “cập nhật đơn giá theo khu vực” cho trợ lý):
 1. Chọn tỉnh/thành (34 đơn vị) và khu vực (nếu bộ giá chia khu vực), kỳ giá (mặc định tự chọn bộ mới nhất ≤ ngày lập giá; hoặc chọn tháng/quý),

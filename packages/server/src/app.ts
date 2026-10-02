@@ -25,6 +25,7 @@ import { downloadDriveFile } from './gdrive.js';
 import { applyImport, getParsed, parseAndStore, previewOf, type ImportTarget } from './importer.js';
 import { analyze, importEstimate, listTemplates } from './estimate-import.js';
 import { importInfoForCategory, reopenImport } from './import-sources.js';
+import { analyzeSheets, importSheets, sheetOverview } from './import-multi.js';
 import { RegionalUpdateService } from './regional-update.js';
 import { PriceBookService, provinceMergers, regions, seedHcmJune2026PriceBook, seedPriceBookExample, seedTt38PriceBookAugust2026 } from './pricebooks.js';
 import { validateProject } from './validation.js';
@@ -837,7 +838,38 @@ export function createApp(db: DB, opts: { serveWeb?: boolean; ai?: { cfg?: AiCon
     rowTypes: b.rowTypes && typeof b.rowTypes === 'object' ? (b.rowTypes as Record<string, RowType | 'skip'>) : undefined,
     allowNumericName: b.allowNumericName === true,
     pricingOption: (b.pricingOption === 'norm' ? 'norm' : b.pricingOption === 'file' ? 'file' : undefined) as 'file' | 'norm' | undefined,
+    blockIndex: b.blockIndex !== undefined && b.blockIndex !== null ? Number(b.blockIndex) : undefined,
+    equipmentAsQuote: b.equipmentAsQuote === false ? false : undefined,
   });
+  const sheetIndexesOf = (v: unknown) => (Array.isArray(v) ? v.map(Number).filter((n) => Number.isInteger(n) && n >= 0) : undefined);
+  api.post(
+    '/import/analyze-multi',
+    h((req) => {
+      const b = req.body ?? {};
+      const f = getParsed(String(b.fileId), req.user!.id);
+      const projectId = b.projectId ? repo.requireProject(id(String(b.projectId)), req.user!.id, req.user!.role === 'admin').id : undefined;
+      return analyzeSheets(db, repo, f, { projectId, sheetIndexes: sheetIndexesOf(b.sheetIndexes), pricingOption: b.pricingOption === 'norm' ? 'norm' : 'file', equipmentAsQuote: b.equipmentAsQuote !== false });
+    }),
+  );
+  api.post(
+    '/projects/:id/import-sheets',
+    h((req) => {
+      const p = proj(req);
+      const b = req.body ?? {};
+      const f = getParsed(String(b.fileId), req.user!.id);
+      const r = importSheets(db, repo, f, p.id, { sheetIndexes: sheetIndexesOf(b.sheetIndexes), pricingOption: b.pricingOption === 'norm' ? 'norm' : 'file', equipmentAsQuote: b.equipmentAsQuote !== false, saveSummary: b.saveSummary !== false }, req.user!.username);
+      if (r.created) assistant.record(p.id, req.user!.id, `Nhập ${r.created} công việc từ ${f.fileName} (${r.blocks.length} bảng)`, { tool: 'importEstimate', file: f.fileName }, r.undo);
+      let autoText = '';
+      const t = b.autoAssignThreshold;
+      if (t !== undefined && t !== null && r.created) {
+        const plan = autoAssignPlan(repo, p.id, threshold(t));
+        const mine = plan.assign.filter((a) => r.itemIds.includes(a.itemId));
+        if (mine.length) autoText = ` ${assistant.confirm(p.id, req.user!.id, { tool: 'autoAssignCodes', params: { assignments: mine } }, `Gắn mã tự động sau khi nhập ${f.fileName}`).text}`;
+      }
+      const { undo: _u, ...rest } = r;
+      return { ...rest, message: r.message + autoText };
+    }),
+  );
   api.post(
     '/import/analyze',
     h((req) => {

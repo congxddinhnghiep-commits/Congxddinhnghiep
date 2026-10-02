@@ -133,6 +133,7 @@ interface ItemRow {
   source_code: string | null;
   source_raw_text: string | null;
   source_flags: string | null;
+  name_zh: string | null;
   pricing_method: EstimateItem['pricingMethod'] | null;
   custom_vl: number | null;
   custom_nc: number | null;
@@ -178,6 +179,7 @@ const toItem = (r: ItemRow): EstimateItem & { sourceRawText: string | null; sour
       : null,
   sourceRawText: r.source_raw_text,
   sourceFlags: r.source_flags ? JSON.parse(r.source_flags) : [],
+  nameZh: r.name_zh ?? null,
   pricingMethod: r.pricing_method ?? 'NORM_BASED',
   custom: r.pricing_method && r.pricing_method !== 'NORM_BASED' ? { vl: r.custom_vl ?? 0, nc: r.custom_nc ?? 0, m: r.custom_m ?? 0 } : null,
   priceSource: r.price_source,
@@ -446,6 +448,7 @@ export class Repo {
       source?: EstimateItem['source'];
       sourceRawText?: string | null;
       sourceFlags?: string[];
+      nameZh?: string | null;
       pricing?: PricingInput;
       quantitySource?: string;
       normCodeRaw?: string | null;
@@ -485,6 +488,7 @@ export class Repo {
     this.db
       .prepare('UPDATE estimate_items SET source_raw_text = ?, source_flags = ?, quantity_source = ? WHERE id = ?')
       .run(data.sourceRawText ?? null, data.sourceFlags?.length ? JSON.stringify(data.sourceFlags) : null, data.quantitySource ?? (data.quantityFormula ? 'FORMULA' : 'MANUAL'), newId);
+    if (data.nameZh) this.db.prepare('UPDATE estimate_items SET name_zh = ? WHERE id = ?').run(data.nameZh, newId);
     if (data.source?.cells) this.db.prepare('UPDATE estimate_items SET source_cells = ? WHERE id = ?').run(JSON.stringify(data.source.cells), newId);
     if (data.normCodeRaw !== undefined || data.codeCheck !== undefined) {
       this.db.prepare('UPDATE estimate_items SET norm_code_raw = ?, code_check = ?, code_check_note = ? WHERE id = ?').run(data.normCodeRaw ?? null, data.codeCheck ?? null, data.codeCheckNote ?? null, newId);
@@ -594,6 +598,15 @@ export class Repo {
     }));
   }
 
+  /**
+   * Attach imported "diễn giải khối lượng" rows (Dài × Rộng × Cao × Số cấu kiện) to an item WITHOUT changing the item quantity,
+   * which stays the file's value (the caller warns when the sum differs).
+   */
+  attachImportedLines(itemId: number, lines: { description: string; expression: string; result: number | null }[]) {
+    const ins = this.db.prepare('INSERT INTO quantity_lines (item_id, sort_order, description, expression, variables_json, sign, unit, result, factor) VALUES (?, ?, ?, ?, ?, 1, NULL, ?, 1)');
+    lines.forEach((l, i) => ins.run(itemId, i + 1, l.description, l.expression || String(l.result ?? 0), '{}', l.result));
+  }
+
   /** Replace the quantity lines of an item; the item quantity becomes their sum. */
   saveQuantityLines(projectId: number, itemId: number, lines: QuantityLineInput[]) {
     const item = this.getItem(projectId, itemId);
@@ -685,13 +698,23 @@ export class Repo {
   /** Items that still need a norm code (no code, or code not in the project's norm dataset). */
   unassignedItems(projectId: number): EstimateItem[] {
     const ds = this.datasetOf(projectId);
-    return this.listItems(projectId).filter((i) => (i.pricingMethod ?? 'NORM_BASED') === 'NORM_BASED' && (!i.normCode || !this.getNorm(i.normCode, ds)));
+    // Items priced from the imported file (CUSTOM_GTT "Giá file") still need a norm code; deliberate GTT / quotes and TB/VT do not.
+    const fromFile = (i: EstimateItem) => i.pricingMethod === 'CUSTOM_GTT' && /^File Excel/.test(i.priceSource ?? '');
+    return this.listItems(projectId).filter((i) => ((i.pricingMethod ?? 'NORM_BASED') === 'NORM_BASED' || fromFile(i)) && i.codeStatus !== 'tbvt' && (!i.normCode || !this.getNorm(i.normCode, ds)));
   }
 
   suggestFor(projectId: number, item: EstimateItem, limit = 5) {
     const text = item.source?.description || item.name;
     const unit = item.source?.unit || item.unit || undefined;
-    return this.normIndex(this.datasetOf(projectId)).suggest(text, unit, limit);
+    return this.normIndex(this.datasetOf(projectId)).suggest(text, unit, limit, { allowRepair: this.isRepairContext(projectId, item, text) });
+  }
+
+  /** PL6 repair norms (S*) are only suggested for a project / hạng mục / work that is marked "sửa chữa". */
+  isRepairContext(projectId: number, item: EstimateItem, text: string): boolean {
+    const re = /\b(sua chua|cai tao|bao tri|nang cap|tu sua)\b/;
+    const p = this.db.prepare('SELECT name, location FROM projects WHERE id = ?').get(projectId) as { name: string; location: string } | undefined;
+    const c = this.db.prepare('SELECT name FROM categories WHERE id = ?').get(item.categoryId) as { name: string } | undefined;
+    return [p?.name, c?.name, text, item.name].some((t) => !!t && re.test(normalizeText(t)));
   }
 
   snapshotItem(projectId: number, itemId: number): ItemSnapshot {

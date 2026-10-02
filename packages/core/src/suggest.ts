@@ -60,7 +60,10 @@ export function extractParams(norm: string): WorkParams {
   const p: WorkParams = {};
   // Work type (order matters: "be tong cot thep" is concrete work, "cot thep" alone is rebar)
   let s = norm.replace(/be tong cot thep/g, 'be tong');
-  if (/\bvan khuon\b/.test(s)) p.work = 'van_khuon';
+  // "Đập đầu cọc" (pile-head breaking) and "đắp" (embankment fill) both lose their diacritics to "dap" – match the whole
+  // phrase first so the query and the norm text agree on `work` instead of being penalised as a mismatch.
+  if (/\b(dap|pha|cat)\b[^.]{0,12}\bdau coc\b/.test(s)) p.work = 'pha_dau_coc';
+  else if (/\bvan khuon\b/.test(s)) p.work = 'van_khuon';
   else if (/\bcot thep\b|\bthep tron\b/.test(s) && !/\bcoc\b/.test(s)) p.work = 'cot_thep';
   else if (/\b(ep|dong|nen)\b.*\bcoc\b/.test(s)) p.work = 'ep_coc';
   else if (/\bnoi coc\b/.test(s)) p.work = 'noi_coc';
@@ -151,6 +154,7 @@ export function extractParams(norm: string): WorkParams {
 export function chapterHints(normalizedDescription: string): string[] | null {
   const n = ` ${normalizedDescription} `;
   const has = (re: RegExp) => re.test(n);
+  if (has(/\b(dap|cat|pha) dau coc\b/)) return ['AA.']; // pile-head breaking (not "tháo dỡ ván khuôn" – dismantling formwork is AF.8)
   if (has(/\b(ep|dong|nen|noi)\b.*\bcoc\b|\bcoc\b/)) return ['AC.'];
   if (has(/\bvan khuon\b/)) return ['AF.8'];
   if (has(/\bcot thep\b|\bthep tron\b/)) return ['AF.6'];
@@ -301,7 +305,7 @@ export class NormIndex<T extends SuggestNorm = SuggestNorm> {
    * Rank norms for a work description (+ optional unit). Unit compatibility is a hard filter.
    * Returns candidates sorted by score with a confidence for the top ones.
    */
-  suggest(description: string, unit?: string | null, limit = 5): Suggestion<T>[] {
+  suggest(description: string, unit?: string | null, limit = 5, opts: { allowRepair?: boolean } = {}): Suggestion<T>[] {
     const qn = normalizeWork(description);
     const qTokens = [...new Set(workTokens(qn))].filter((t) => this.idf.has(t));
     const qParams = extractParams(qn);
@@ -312,6 +316,8 @@ export class NormIndex<T extends SuggestNorm = SuggestNorm> {
     const scored: (Suggestion<T> & { conflicts: number; missing: number })[] = [];
     for (const d of this.docs) {
       if (hints && !hints.some((h) => d.norm.code.toUpperCase().startsWith(h))) continue;
+      // PL6 = repair norms (chapters SA, SB, SF, …): only for a project / hạng mục / work marked "sửa chữa"
+      if (!opts.allowRepair && /^S[A-Z]/i.test(d.norm.code)) continue;
       let factor = 1;
       if (unit) {
         const f = unitFactor(unit, d.norm.unit);

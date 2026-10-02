@@ -1,3 +1,4 @@
+import { splitChinese } from './encoding.js';
 import { normalizeText } from './text.js';
 import { canonicalUnit, isKnownUnit } from './units.js';
 
@@ -38,7 +39,13 @@ export type ImportField =
   | 'note'
   | 'spec'
   | 'price'
-  | 'subArea';
+  | 'subArea'
+  | 'nameZh'
+  | 'dimL'
+  | 'dimW'
+  | 'dimH'
+  | 'dimN'
+  | 'brand';
 
 export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
   stt: 'STT / phân cấp',
@@ -59,9 +66,15 @@ export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
   spec: 'Quy cách / thông số',
   price: 'Giá',
   subArea: 'Khu vực',
+  nameZh: 'Tên tiếng Trung (内容)',
+  dimL: 'Kích thước – Dài',
+  dimW: 'Kích thước – Rộng',
+  dimH: 'Kích thước – Cao',
+  dimN: 'Số cấu kiện',
+  brand: 'Nhãn hiệu / Xuất xứ',
 };
 
-export const ESTIMATE_FIELDS: ImportField[] = ['stt', 'code', 'name', 'unit', 'quantity', 'formula', 'priceVL', 'priceNC', 'priceM', 'unitPrice', 'amount', 'amountVL', 'amountNC', 'amountM', 'note'];
+export const ESTIMATE_FIELDS: ImportField[] = ['stt', 'code', 'name', 'nameZh', 'spec', 'brand', 'unit', 'dimL', 'dimW', 'dimH', 'dimN', 'quantity', 'formula', 'priceVL', 'priceNC', 'priceM', 'unitPrice', 'amount', 'amountVL', 'amountNC', 'amountM', 'note'];
 export const PRICE_FIELDS: ImportField[] = ['stt', 'code', 'name', 'spec', 'unit', 'price', 'subArea', 'note'];
 
 /** Synonyms (normalised, no diacritics) and Chinese headers of bilingual files. */
@@ -69,7 +82,7 @@ const SYNONYMS: Record<ImportField, string[]> = {
   stt: ['stt', 'tt', 'so tt', 'so thu tu', 'thu tu', '序号'],
   code: ['ma hieu don gia', 'ma hieu dinh muc', 'ma hieu dm', 'ma hieu', 'ma dinh muc', 'ma dm', 'ma cong viec', 'ma cv', 'ma so', 'ma vat tu', 'ma vt', 'ma tai nguyen', 'ma', '编码', '项目编码', '定额编号', '编号'],
   name: [
-    'ten cong viec', 'noi dung cong viec', 'ten cong tac', 'hang muc cong viec', 'noi dung', 'hang muc', 'dien giai', 'mo ta', 'ten vat tu',
+    'ten cong viec', 'noi dung cong viec', 'cong viec', 'ten cong tac', 'hang muc cong viec', 'noi dung', 'hang muc', 'dien giai', 'mo ta', 'ten vat tu',
     'ten vat lieu', 'ten hang', 'ten', 'vat tu', 'vat lieu', 'loai vat lieu', '项目名称', '名称', '工作内容', '材料名称',
   ],
   unit: ['don vi tinh', 'don vi', 'dvt', 'dv', '单位'],
@@ -84,16 +97,24 @@ const SYNONYMS: Record<ImportField, string[]> = {
   amountNC: [],
   amountM: [],
   note: ['ghi chu', '备注'],
-  spec: ['quy cach ky thuat', 'quy cach', 'thong so ky thuat', 'thong so', 'tieu chuan', '规格', '规格型号'],
+  spec: ['quy cach ky thuat', 'quy cach', 'thong so ky thuat', 'thong so', 'tieu chi ky thuat', 'tieu chuan ky thuat', 'tieu chuan', '规格', '规格型号', '技术要求'],
   price: ['gia chua thue', 'gia chua vat', 'gia truoc thue', 'gia ban', 'gia cong bo', 'gia vat lieu', 'gia', 'don gia', '单价', '价格'],
   subArea: ['khu vuc', 'dia ban', 'dia diem'],
+  nameZh: ['内容', '中文名称', '中文'],
+  dimL: ['chieu dai', 'dai', 'length', '长'],
+  dimW: ['chieu rong', 'rong', 'width', '宽'],
+  dimH: ['chieu cao', 'cao', 'height', '高'],
+  dimN: ['so cau kien', 'so luong cau kien', 'so cau', 'cau kien', 'so lan', 'he so'],
+  brand: ['nhan hieu', 'xuat xu', 'hang san xuat', 'brand', 'origin', '品牌', '产地'],
 };
 
 const SHORT_EXACT = new Set(['tt', 'ma', 'kl', 'sl', 'dv', 'dg', 'ten', 'gia', 'stt', 'dvt']);
 
 function labelOf(v: Cell): string {
   if (v === null || v === undefined) return '';
-  return normalizeText(String(v).replace(/[\r\n]+/g, ' ').replace(/[()（）:：.]/g, ' '));
+  // "Công việc内容" → "Công việc 内容": Latin and Chinese text glued together must still match word-wise
+  const spaced = String(v).replace(/([^\s\u2e80-\u9fff\uff00-\uffef])([\u2e80-\u9fff\uff00-\uffef])/g, '$1 $2').replace(/([\u2e80-\u9fff\uff00-\uffef])([^\s\u2e80-\u9fff\uff00-\uffef])/g, '$1 $2');
+  return normalizeText(spaced.replace(/[\r\n]+/g, ' ').replace(/[()（）:：.]/g, ' '));
 }
 
 function synMatch(label: string, syn: string): boolean {
@@ -103,7 +124,7 @@ function synMatch(label: string, syn: string): boolean {
   return label === syn || label.startsWith(syn + ' ') || label.endsWith(' ' + syn) || label.includes(' ' + syn + ' ');
 }
 
-const VL_RE = /\b(vat lieu|vl)\b|材料/;
+const VL_RE = /\b(vat lieu|vat tu|vl)\b|材料/;
 const NC_RE = /\b(nhan cong|nc)\b|人工/;
 const M_RE = /\b(may thi cong|may|mtc|m)\b|机械/;
 
@@ -124,7 +145,9 @@ function fieldOf(label: string, fields: ImportField[]): [ImportField, number] | 
   }
   let best: [ImportField, number] | null = null;
   for (const f of fields) {
+    if (f === 'nameZh' && /[a-z]/.test(label)) continue; // only a purely Chinese header ("内容")
     for (const syn of SYNONYMS[f]) {
+      if (f === 'name' && syn === 'cong viec' && isPrice) continue; // "Đơn giá công việc" is a price column
       if (synMatch(label, syn) && (!best || syn.length > best[1])) best = [f, syn.length];
     }
   }
@@ -238,6 +261,91 @@ export function detectHeader(rows: Cell[][], merges: Merge[] = [], fields: Impor
   return rest;
 }
 
+/** "1.2 Hạng mục : Cầu nối 连廊" → "Cầu nối" (numbering, "Hạng mục :" prefix and the Chinese tail removed). */
+export function cleanBlockTitle(raw: string): string {
+  let t = splitChinese(raw.replace(/\s+/g, ' ').trim()).vi;
+  t = t.replace(/^\(\d+(?:\.\d+)*\)\s*/, '').replace(/^\d+(?:\.\d+)*[A-Za-z]?\.?\s+/, '');
+  t = t.replace(/^(hạng mục|hang muc|hm)\s*[:：]?\s*/i, '').replace(/^\d+(?:\.\d+)*[A-Za-z]?\.?\s+/, '');
+  t = t.replace(/[\s:：]+$/, '').trim();
+  // generic headings are no title
+  return /^(bang khoi luong|bang gia tri du toan|cong trinh|bang tong hop|hang muc|du toan)\b/.test(normalizeText(t)) && normalizeText(t).split(' ').length <= 4 ? '' : t;
+}
+
+/** One table of a sheet: an estimate sheet may repeat its header row for every sub-hạng-mục. */
+export interface SheetBlock extends HeaderDetection {
+  index: number;
+  /** Title line above the header ("1.2B. Hạng mục : …"), cleaned; '' when none. */
+  title: string;
+  titleRow: number | null;
+  /** First data row (0-based) and last row of the block (inclusive). */
+  first: number;
+  last: number;
+}
+
+const isTextCell = (v: Cell | undefined) => typeof v === 'string' && v.trim() !== '';
+
+/**
+ * Find every table of a sheet (a header row repeated for each sub-hạng-mục, each preceded by a title line and closed
+ * by a "Cộng trước thuế" row). A sheet with a single header gives one block.
+ */
+export function detectBlocks(rows: Cell[][], merges: Merge[] = [], fields: ImportField[] = ESTIMATE_FIELDS): SheetBlock[] {
+  const width = Math.max(0, ...rows.map((r) => r?.length ?? 0));
+  type Cand = HeaderDetection & { score: number };
+  const cands = new Map<string, Cand>();
+  for (let r = 0; r < rows.length; r++) {
+    if (!(rows[r] ?? []).some(isTextCell)) continue;
+    for (const span of [1, 2] as const) {
+      if (span === 2 && r + 1 >= rows.length) continue;
+      const { raw, labels } = headerTexts(rows, merges, r, span, width);
+      const { mapping, score } = mapLabels(labels, fields);
+      const hasValue = mapping.quantity !== undefined || mapping.unitPrice !== undefined || mapping.priceVL !== undefined;
+      if (mapping.name === undefined || !hasValue || score < 5) continue;
+      cands.set(`${r}:${span}`, { headerRow: r, headerRows: span, labels, rawLabels: raw, mapping, confidence: Math.min(1, score / 10), score: score - (span === 2 ? 0.25 : 0) });
+    }
+  }
+  // best candidates first; a candidate never overlaps an accepted header (a 2-row header's second row is not a header of its own)
+  const taken = new Set<number>();
+  const accepted: Cand[] = [];
+  for (const c of [...cands.values()].sort((a, b) => b.score - a.score || a.headerRow - b.headerRow || a.headerRows - b.headerRows)) {
+    const rowsOf = c.headerRows === 2 ? [c.headerRow, c.headerRow + 1] : [c.headerRow];
+    if (rowsOf.some((x) => taken.has(x))) continue;
+    // vertically merged cells make the 2nd header row look complete on its own: prefer the two-row header that starts on the row above
+    let pick = c;
+    if (c.headerRows === 1) {
+      const two = cands.get(`${c.headerRow - 1}:2`);
+      if (two && two.score >= c.score - 0.25 - 1e-9 && !taken.has(two.headerRow)) pick = two;
+    }
+    (pick.headerRows === 2 ? [pick.headerRow, pick.headerRow + 1] : [pick.headerRow]).forEach((x) => taken.add(x));
+    accepted.push(pick);
+  }
+  const found: HeaderDetection[] = accepted.sort((a, b) => a.headerRow - b.headerRow).map(({ score: _s, ...rest }) => rest);
+  const isTotalRow = (row: Cell[]) => SUBTOTAL_RE.test(normalizeText(row.filter(isTextCell).slice(0, 2).join(' '))) || SUBTOTAL_CN.test(row.map((c) => String(c ?? '')).join(' '));
+  // title = the nearest text-only line above the header (preferring "Hạng mục : …"), never a total row
+  const titleOf = (h: HeaderDetection, from: number): { title: string; row: number | null } => {
+    let nearest: { title: string; row: number } | null = null;
+    for (let r = h.headerRow - 1; r >= Math.max(from, h.headerRow - 6); r--) {
+      const row = rows[r] ?? [];
+      const texts = row.filter(isTextCell);
+      if (!texts.length || row.some((c) => typeof c === 'number') || texts.length > 3 || isTotalRow(row)) continue;
+      const t = String(texts[0]).trim();
+      if (/^(hang muc|\d+(\.\d+)*[a-z]?\.?\s*(hang muc|hm))/i.test(normalizeText(t))) return { title: cleanBlockTitle(t), row: r };
+      nearest ??= { title: cleanBlockTitle(t), row: r };
+    }
+    return nearest ?? { title: '', row: null };
+  };
+  const blocks: SheetBlock[] = [];
+  found.forEach((h, i) => {
+    const prevEnd = i > 0 ? blocks[i - 1].first : 0;
+    const t = titleOf(h, Math.max(prevEnd, i > 0 ? found[i - 1].headerRow + found[i - 1].headerRows : 0));
+    blocks.push({ ...h, index: i, title: t.title, titleRow: t.row, first: h.headerRow + h.headerRows, last: rows.length - 1 });
+  });
+  blocks.forEach((b, i) => {
+    if (i + 1 < blocks.length) b.last = (blocks[i + 1].titleRow ?? blocks[i + 1].headerRow) - 1;
+    while (b.last > b.first && (rows[b.last] ?? []).every((c) => c === null || c === undefined || c === '')) b.last--;
+  });
+  return blocks;
+}
+
 /** Stable fingerprint of a header layout (normalised non-empty labels and their positions). */
 export function headerFingerprint(labels: string[], headerRows: number): string {
   const key = headerRows + '|' + labels.map((l, i) => (l ? `${i}:${l}` : '')).filter(Boolean).join('|');
@@ -281,16 +389,28 @@ export function parseFlexibleNumber(v: Cell): number | null {
   return neg ? -n : n;
 }
 
-export type RowType = 'header' | 'category' | 'item' | 'subtotal' | 'note' | 'empty';
+export type RowType = 'header' | 'category' | 'item' | 'detail' | 'subtotal' | 'note' | 'empty';
 
 export const ROW_TYPE_LABELS: Record<RowType, string> = {
   header: 'Tiêu đề',
   category: 'Hạng mục',
   item: 'Công việc',
+  detail: 'Diễn giải khối lượng',
   subtotal: 'Cộng/Tổng (bỏ qua)',
   note: 'Ghi chú',
   empty: 'Trống',
 };
+
+/** Kích thước of a quantity-breakdown row ("Móng M1: 1 × 20 × 10 = 200"). */
+export interface DetailLine {
+  index: number;
+  text: string;
+  dims: { l: number | null; w: number | null; h: number | null; n: number | null };
+  /** "Khối lượng" of the line as in the file (or the product of the dimensions). */
+  quantity: number | null;
+  /** Product of the filled dimensions, "1*20*10" ("" without dimensions). */
+  expression: string;
+}
 
 export interface ClassifiedRow {
   /** 0-based index in the sheet. */
@@ -308,12 +428,18 @@ export interface ClassifiedRow {
   /** Price-book mode: the quoted price of the row. */
   price: number | null;
   spec: string;
+  brand: string;
   subArea: string;
   note: string;
   category: string | null;
   warnings: string[];
+  /** Chinese name (own column, or the Chinese tail of a bilingual cell). */
+  nameZh: string;
+  /** Breakdown rows directly under this item (items only). */
+  details: DetailLine[];
 }
 
+const noPriceParts = (r: ClassifiedRow) => r.prices.vl === null && r.prices.nc === null && r.prices.m === null && r.prices.unit === null;
 const NOTE_START = /^(ghi chu|luu y|chu thich|note|dien giai|ke hoach|nguon|can cu|theo|ma so thue|dia chi)\b/;
 /** A row that carries only a short heading text (nothing numeric anywhere) is a category header. */
 function isBareHeading(cells: string[], name: string, mapping: Partial<Record<ImportField, number>>): boolean {
@@ -322,11 +448,22 @@ function isBareHeading(cells: string[], name: string, mapping: Partial<Record<Im
   return others.length === 0 && !/\d{3,}/.test(name);
 }
 
-const SUBTOTAL_RE = /^(cong|tong cong|tong|cong hang muc|cong phan|tong gia tri|tong so|gia tri|cong truoc thue|cong sau thue|tong chi phi)\b/;
+// "Cộng"/"Tổng" close a block; "CÔNG TÁC BÊ TÔNG", "CÔNG TRÌNH…" are headings, not totals.
+const SUBTOTAL_RE = /^(cong(?!\s+(tac|trinh|viec|nghiep|ty|suat|dung|van|nhan|tho|cu|ich|nghe|thuc))|tong cong|tong(?!\s+(dai|the|thau|giam|thanh|nhan|dien|kho|luc|bo|quan|cuc|cot))|cong hang muc|cong phan|tong gia tri|tong so|gia tri|cong truoc thue|cong sau thue|tong chi phi|tong tien)\b/;
 const SUBTOTAL_CN = /小计|合计|总计/;
 const ROMAN_RE = /^(i|ii|iii|iv|v|vi|vii|viii|ix|x|xi|xii|xiii|xiv|xv|xvi|xvii|xviii|xix|xx)\.?$/;
 
+/** "Cổng xếp" (gate) normalises to "cong" like "Cộng" (sum): with diacritics the first word must really be Cộng / Tổng. */
+function subtotalWordOk(name: string): boolean {
+  const first = name.trim().split(/\s+/)[0] ?? '';
+  if (!/[^\x00-\x7f]/.test(first)) return true;
+  const f = first.normalize('NFC').toLowerCase();
+  return !/^(cong|tong)$/.test(normalizeText(first)) || f === 'cộng' || f === 'tổng';
+}
+
 const str = (v: Cell | undefined): string => (v === null || v === undefined ? '' : String(v).replace(/\s+/g, ' ').trim());
+/** Work names keep their inner spacing ("Φ400  L=20m") – only line breaks / tabs become spaces. */
+const strKeep = (v: Cell | undefined): string => (v === null || v === undefined ? '' : String(v).replace(/[\r\n\t]+/g, ' ').trim());
 
 /** Classify data rows below the header. */
 export function classifyRows(
@@ -341,14 +478,28 @@ export function classifyRows(
   const priceMode = m.quantity === undefined && m.price !== undefined;
   const out: ClassifiedRow[] = [];
   let category: string | null = null;
+  let lastItem: ClassifiedRow | null = null;
+  const lumps: ClassifiedRow[] = [];
   const seen = new Map<string, number>();
+  const finishItem = (it: ClassifiedRow | null) => {
+    if (!it || !it.details.length) return;
+    const sum = it.details.reduce((a, d) => a + (d.quantity ?? 0), 0);
+    if (it.quantity !== null && Math.abs(sum - it.quantity) > Math.max(1e-6, Math.abs(it.quantity) * 0.0005)) {
+      it.warnings.push(`Tổng diễn giải khối lượng (${Math.round(sum * 1e6) / 1e6}) khác khối lượng của file (${it.quantity}) – giữ khối lượng của file`);
+    }
+  };
   for (let i = header.headerRow + header.headerRows; i < rows.length; i++) {
     const r = rows[i] ?? [];
     const cells = r.map(str);
     const stt = str(get(r, 'stt'));
     const code = str(get(r, 'code'));
-    const name = str(get(r, 'name'));
+    const split = splitChinese(strKeep(get(r, 'name')));
+    const name = split.vi;
+    const nameZh = split.zh || str(get(r, 'nameZh'));
     const unit = str(get(r, 'unit'));
+    const numOf = (f: ImportField) => parseFlexibleNumber(get(r, f) ?? null);
+    const dims = { l: numOf('dimL'), w: numOf('dimW'), h: numOf('dimH'), n: numOf('dimN') };
+    const hasDims = Object.values(dims).some((x) => x !== null);
     const qRaw = priceMode ? get(r, 'price') : get(r, 'quantity');
     const qVal = parseFlexibleNumber(qRaw ?? null);
     const quantity = priceMode ? null : qVal;
@@ -376,10 +527,13 @@ export function classifyRows(
       })(),
       price,
       spec: str(get(r, 'spec')),
+      brand: str(get(r, 'brand')),
       subArea: str(get(r, 'subArea')),
       note: str(get(r, 'note')),
       category,
       warnings: [],
+      nameZh,
+      details: [],
     };
     if (cells.every((c) => !c)) {
       row.type = 'empty';
@@ -395,19 +549,45 @@ export function classifyRows(
     }
     const firstText = normalizeText([stt, code, name, ...cells.slice(0, 4)].filter(Boolean).join(' '));
     const nameN = normalizeText(name || firstText);
-    if (SUBTOTAL_RE.test(nameN) || SUBTOTAL_CN.test(cells.join(' ')) || (!name && SUBTOTAL_RE.test(firstText)) || (sumRows?.has(i) && quantity === null)) {
+    if ((SUBTOTAL_RE.test(nameN) && subtotalWordOk(name || firstText)) || SUBTOTAL_CN.test(cells.join(' ')) || stt === '***' || (!name && SUBTOTAL_RE.test(firstText) && subtotalWordOk(firstText)) || (sumRows?.has(i) && quantity === null)) {
       row.type = 'subtotal';
+      finishItem(lastItem);
+      lastItem = null;
       out.push(row);
       continue;
     }
     const hasQty = qVal !== null;
-    if (priceMode && (name || code) && hasQty) {
+    const noPrice = row.prices.vl === null && row.prices.nc === null && row.prices.m === null && row.prices.unit === null && row.amount === null;
+    if (!priceMode && lastItem && !stt && !code && !unit && name && (hasQty || hasDims) && noPrice) {
+      // Quantity-breakdown row ("Móng M1: Dài × Rộng × Cao × Số cấu kiện") under an item: a diễn giải line, not a new item.
+      const factors = [dims.l, dims.w, dims.h, dims.n].filter((x): x is number => x !== null);
+      const expression = factors.join('*');
+      const product = factors.length ? factors.reduce((a, x) => a * x, 1) : null;
+      const q = quantity ?? (product !== null ? Math.round(product * 1e9) / 1e9 : null);
+      row.type = 'detail';
+      const line: DetailLine = { index: i, text: name, dims, quantity: q, expression: expression && (quantity === null || product === null || Math.abs(product - quantity) < 1e-9) ? expression : q !== null ? String(q) : expression };
+      lastItem.details.push(line);
+      out.push(row);
+      continue;
+    }
+    if (!priceMode && name && !hasQty && !unit && !hasDims && !sumRows?.has(i) && row.amount !== null && row.amount > 0 && noPriceParts(row) && !ROMAN_RE.test(normalizeText(stt)) && !/^[a-e]\.?$/.test(normalizeText(stt)) && name !== name.toUpperCase() && !NOTE_START.test(normalizeText(name))) {
+      // lump-sum row ("Cổng xếp tự động … 60.000.000"): only a Thành tiền → 1 trọn gói, never dropped from the total
+      row.type = 'item';
+      row.quantity = 1;
+      row.prices.unit = row.amount;
+      row.warnings.push('Trọn gói: file chỉ có Thành tiền – khối lượng đặt = 1');
+      lumps.push(row);
+      finishItem(lastItem);
+      lastItem = row;
+    } else if (priceMode && (name || code) && hasQty) {
       row.type = 'item';
       if (!unit) row.warnings.push('Thiếu đơn vị');
       else if (!isKnownUnit(unit)) row.warnings.push(`Đơn vị lạ "${unit}"`);
       if (qVal! <= 0) row.warnings.push('Giá bằng 0 hoặc âm');
-    } else if (!priceMode && (name || code) && hasQty && (unit || code)) {
+    } else if (!priceMode && (name || code) && hasQty && (unit || code || (stt && !ROMAN_RE.test(normalizeText(stt))))) {
       row.type = 'item';
+      finishItem(lastItem);
+      lastItem = row;
       if (!unit) row.warnings.push('Thiếu đơn vị');
       else if (!isKnownUnit(unit)) row.warnings.push(`Đơn vị lạ "${unit}"`);
       if (quantity === 0) row.warnings.push('Khối lượng bằng 0');
@@ -423,16 +603,47 @@ export function classifyRows(
       const upper = name === name.toUpperCase() && /[A-ZÀ-Ỹ]/.test(name);
       if (ROMAN_RE.test(sttN) || /^[a-e]\.?$/.test(sttN) || upper || /^(hang muc|phan|hm)\b/.test(normalizeText(name)) || /^[ivx]+[.\s]/i.test(name)) {
         row.type = 'category';
+        finishItem(lastItem);
+        lastItem = null;
         category = name.replace(/^[IVX]+[.\s]+/, '').trim();
         row.category = category;
       } else if (isBareHeading(cells, name, m)) {
         // only a capitalised phrase and no quantity / unit / price / code anywhere in the row
         row.type = 'category';
+        finishItem(lastItem);
+        lastItem = null;
         category = name.replace(/^[IVX]+[.\s]+/, '').trim();
         row.category = category;
       } else row.type = 'note';
     } else row.type = 'note';
     out.push(row);
+  }
+  finishItem(lastItem);
+  // A "lump-sum" row whose amount equals the sum of the items right below it is a group heading carrying its own subtotal
+  // (not an item – counting it would double the total).
+  for (const lump of lumps) {
+    let acc = 0;
+    let n = 0;
+    let match = false;
+    for (let k = out.indexOf(lump) + 1; k < out.length; k++) {
+      const x = out[k];
+      if (x.type === 'subtotal' || (x.type === 'category' && n > 0)) break;
+      if (x.type !== 'item' || lumps.includes(x)) continue;
+      acc += x.amount ?? 0;
+      n++;
+      if (Math.abs(acc - lump.amount!) <= 1) {
+        match = true;
+        break;
+      }
+      if (acc > lump.amount! + 1) break;
+    }
+    if (match) {
+      lump.type = 'category';
+      lump.category = lump.name;
+      lump.quantity = null;
+      lump.prices.unit = null;
+      lump.warnings = lump.warnings.filter((w) => !w.startsWith('Trọn gói'));
+    }
   }
   return out;
 }

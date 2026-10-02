@@ -23,7 +23,8 @@
     "e2e": "node e2e/update3.mjs",
     "fixtures:import": "node scripts/make-import-fixtures.mjs",
     "e2e:update4": "node e2e/update4.mjs",
-    "e2e:update4-ai": "node e2e/update4-ai.mjs"
+    "e2e:update4-ai": "node e2e/update4-ai.mjs",
+    "check:private-import": "tsx packages/server/src/scripts/check-private-import.ts"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

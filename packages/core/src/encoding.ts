@@ -135,3 +135,44 @@ export function detectDominantEncoding(texts: string[]): { encoding: TextEncodin
   const encoding: TextEncoding = legacy > votes.unicode ? (votes.vni >= votes.tcvn3 ? 'vni' : 'tcvn3') : votes.unicode ? 'unicode' : 'plain';
   return { encoding, votes };
 }
+
+// ---------------- mixed / bilingual cells ----------------
+/**
+ * Strict VNI tells (reference: docs/update4/vni.py): tone marks after a vowel, "ñ/Ñ", horn letters + tone,
+ * circumflex/breve + tone. A lone "ô" or "Ô" is NOT a tell – it is a normal Unicode letter ("CÔNG TÁC BÊ TÔNG").
+ */
+export const VNI_MARKERS = /[øùûõïåäëüÑñöÖ]|[aeoAEO][âàáåãä]|[aA][êèéúüë]|[ôö][øùûõï]/;
+const UNI_ONLY = /[ăĂđĐơƠưƯẠ-ỹ]/;
+
+/** True when the text carries a VNI tell (and is not TCVN3 ABC text, whose letters overlap). */
+export function hasVniMarkers(s: string): boolean {
+  return VNI_MARKERS.test(s);
+}
+
+/**
+ * Convert a cell that may mix VNI and Unicode ("Eùp coïc thử tĩnh Φ400"): a cell without Unicode-only Vietnamese letters is converted as a whole,
+ * otherwise only the space-separated tokens that carry a VNI tell.
+ */
+export function fixVniCell(s: string): string {
+  if (!hasVniMarkers(s)) return s;
+  if (!UNI_ONLY.test(s)) return vniToUnicode(s);
+  return s
+    .split(' ')
+    .map((t) => (hasVniMarkers(t) ? vniToUnicode(t) : t))
+    .join(' ');
+}
+
+const CJK_START = /[⺀-鿿豈-﫿＀-￯　-〿]/;
+/** Split "Đào đất móng挖土基础" into the Vietnamese text and the trailing Chinese text. */
+export function splitChinese(s: string): { vi: string; zh: string } {
+  const i = s.search(CJK_START);
+  if (i < 0) return { vi: s.trim(), zh: '' };
+  if (i === 0) {
+    // Chinese first ("混凝土垫层 / Bê tông lót móng"): the Vietnamese text is what follows the Chinese run
+    const m = /^[^A-Za-zÀ-ỹ]*?(?=[A-Za-zÀ-ỹ])/u.exec(s);
+    if (m && m[0].length > 0) return { vi: s.slice(m[0].length).trim(), zh: m[0].replace(/[\s,;:/\-–]+$/, '').trim() };
+    return { vi: '', zh: s.trim() };
+  }
+  return { vi: s.slice(0, i).replace(/[\s,;:/\-–]+$/, '').trim(), zh: s.slice(i).trim() };
+}
+export const hasChinese = (s: string): boolean => CJK_START.test(s);

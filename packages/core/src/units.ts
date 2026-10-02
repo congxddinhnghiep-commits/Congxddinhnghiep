@@ -30,7 +30,7 @@ const ALIASES: Record<string, string> = {
 /** Units recognised when importing (warn on anything else). */
 export const KNOWN_UNITS = new Set([
   'm', 'm2', 'm3', 'km', 'ha', 'tan', 'kg', 'cai', 'bo', 'vien', 'cay', 'cong', 'ca', 'lit', 'moinoi', 'coc', 'tam', 'hop', 'cuon',
-  'tb', 'thung', 'bao', 'lo', 'ht', 'goi', 'diem', 'vi tri', 'lan', 'thang', 'nam', 'ngay', 'kw', 'kwh', 'khoan', 'mau', 'bo',
+  'tb', 'thung', 'bao', 'lo', 'ht', 'goi', 'diem', 'vi tri', 'lan', 'thang', 'nam', 'ngay', 'kw', 'kwh', 'khoan', 'mau', 'bo', 'tim', 'cap', 'may', 'tu', 'cot', 'dau',
 ]);
 
 /**

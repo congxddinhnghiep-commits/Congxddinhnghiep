@@ -2,6 +2,7 @@ import {
   canonicalNormCode,
   classifyRows,
   classifySheet,
+  detectBlocks,
   detectHeader,
   ESTIMATE_FIELDS,
   evaluateFormula,
@@ -17,6 +18,7 @@ import {
   ROW_TYPE_LABELS,
   SHEET_KIND_LABELS,
   type ClassifiedRow,
+  type SheetBlock,
   type HeaderDetection,
   type ImportField,
   type RowType,
@@ -51,6 +53,25 @@ export interface AnalyzeOptions {
   pricingOption?: 'file' | 'norm';
   /** The user confirmed a mostly-numeric column as the work name ("Vẫn dùng"). */
   allowNumericName?: boolean;
+  /** Which table of the sheet (0-based): a sheet repeats its header row for every sub-hạng-mục. */
+  blockIndex?: number;
+  /** MEP / equipment sheets: rows without a norm code are "thiết bị / vật tư theo báo giá" (default true). */
+  equipmentAsQuote?: boolean;
+}
+
+const MEP_NAME = /^\d{1,2}\s*[-_.]|\b(dien(?! tich)|nuoc|pccc|chua chay|thong gio|dieu hoa|mep|thiet bi|tbvt|camera|bao chay|chong set|thang may)\b/;
+/** MEP / equipment sheet: a "Tiêu chí kỹ thuật" / "Nhãn hiệu" column or a numbered discipline sheet ("01-Điện trung thế"). */
+export function isMepSheet(name: string, mapping: Partial<Record<ImportField, number>>): boolean {
+  return mapping.spec !== undefined || mapping.brand !== undefined || MEP_NAME.test(normalizeText(name));
+}
+
+/** "01-Điện trung thế " → "Điện trung thế"; "NHÀ XƯỞNG A厂房 (50mx40m)" → "NHÀ XƯỞNG A (50mx40m)". */
+export function sheetLabel(name: string): string {
+  return name
+    .replace(/[\u2e80-\u9fff\uff00-\uffef]+/g, ' ')
+    .replace(/^\s*\d{1,2}\s*[-_.]\s*/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export const colLetter = (c: number): string => {
@@ -98,6 +119,10 @@ export interface AnalyzedRow extends ClassifiedRow {
   pricingMethod?: 'NORM_BASED' | 'CUSTOM_GTT' | null;
   /** Original (legacy-encoded) description when it was converted to Unicode. */
   rawName?: string | null;
+  /** Equipment / material priced by quotation (MEP sheet, no norm code): "TB/VT", no code needed. */
+  tbvt?: boolean;
+  /** Unit proposed from the best norm when the file leaves it empty. */
+  unitProposal?: string;
   /** FLAG_EXTERNAL_LINK_OR_BROKEN_FORMULA etc. */
   flags?: string[];
   codeKnown?: boolean;
@@ -122,7 +147,9 @@ export interface Reconciliation {
 }
 
 const TOL = 1;
-const GRAND_RE = /^(tong cong|tong|tong gia tri|tong so|tong chi phi|total|grand total)\b|总计|合计/;
+/** Rows after the pre-tax total (VAT, management cost, …) never take part in the reconciliation of the items. */
+const AFTER_TAX_RE = /\b(sau thue|vat|gtgt|gia tri gia tang)\b|chi phi (quan ly|chung)|du phong|thu nhap chiu thue|^thue\b/;
+const GRAND_RE = /^(tong cong|tong|tong gia tri|tong so|tong chi phi|tong tien|cong truoc thue|total|grand total)\b|总计|合计/;
 
 /** Analyse one sheet: sheet kinds, header (detected, template or user mapping), classified rows. */
 export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
@@ -131,14 +158,18 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
   const sheetInfo = f.sheets.map((s, i) => {
     const h = detectHeader(s.rows, s.merges, fields);
     const k = classifySheet(s.name, h);
-    return { index: i, name: s.name, rowCount: s.rows.length, kind: k, kindLabel: SHEET_KIND_LABELS[k], detected: !!h };
+    return { index: i, name: s.name, rowCount: s.rows.length, kind: k, kindLabel: SHEET_KIND_LABELS[k], detected: !!h, hidden: !!s.hidden };
   });
   const wanted = kind === 'estimate' ? 'du_toan_chi_tiet' : 'gia_vat_lieu';
-  const sheetIndex = o.sheetIndex ?? sheetInfo.find((s) => s.kind === wanted && s.detected)?.index ?? sheetInfo.find((s) => s.detected)?.index ?? 0;
+  const visible = sheetInfo.filter((s) => !s.hidden);
+  const sheetIndex = o.sheetIndex ?? visible.find((s) => s.kind === wanted && s.detected)?.index ?? visible.find((s) => s.detected)?.index ?? sheetInfo.find((s) => s.detected)?.index ?? 0;
   const sheet = f.sheets[sheetIndex];
   if (!sheet) throw new HttpError(400, 'Sheet không tồn tại');
 
-  const detected = detectHeader(sheet.rows, sheet.merges, fields);
+  // A sheet may hold several tables (header row repeated per sub-hạng-mục): analyse one block at a time.
+  const allBlocks: SheetBlock[] = kind === 'estimate' ? detectBlocks(sheet.rows, sheet.merges, fields) : [];
+  const blockIndex = allBlocks.length ? Math.min(Math.max(o.blockIndex ?? 0, 0), allBlocks.length - 1) : 0;
+  const detected: HeaderDetection | null = allBlocks.length ? allBlocks[blockIndex] : detectHeader(sheet.rows, sheet.merges, fields);
   let header: HeaderDetection | null = detected;
   if (o.headerRow !== undefined) {
     const headerRows = o.headerRows ?? 1;
@@ -170,6 +201,8 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
       fingerprint: null,
       template: null,
       rows: [] as AnalyzedRow[],
+      blocks: [] as { index: number; title: string; headerRow: number; headerRows: number; first: number; last: number }[],
+      blockIndex: 0,
       counts: {} as Record<RowType, number>,
       fields: fields.map((k) => ({ key: k, label: IMPORT_FIELD_LABELS[k] })),
       rowTypeLabels: ROW_TYPE_LABELS,
@@ -214,10 +247,13 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
       if (c === m.amount && isSumFormula(formula)) sumRows.add(r);
     }
   }
-  let classified = classifyRows(sheet.rows, header, sumRows);
-  const first0 = o.firstRow !== undefined ? o.firstRow - 1 : -Infinity;
-  const last0 = o.lastRow !== undefined ? o.lastRow - 1 : Infinity;
+  const activeBlock = allBlocks.find((b) => b.headerRow === header!.headerRow) ?? null;
+  const first0 = o.firstRow !== undefined ? o.firstRow - 1 : activeBlock ? activeBlock.first : -Infinity;
+  const last0 = o.lastRow !== undefined ? o.lastRow - 1 : activeBlock ? activeBlock.last : Infinity;
+  let classified = classifyRows(Number.isFinite(last0) ? sheet.rows.slice(0, last0 + 1) : sheet.rows, header, sumRows);
   classified = classified.filter((r) => r.index >= first0 && r.index <= last0);
+  const mep = kind === 'estimate' && isMepSheet(sheet.name, m);
+  const equipmentAsQuote = mep && o.equipmentAsQuote !== false;
   const dataset = o.projectId ? repo.datasetOf(o.projectId) : null;
   const issuesByRow = new Map<number, NonNullable<typeof sheet.issues>>();
   for (const is of sheet.issues ?? []) issuesByRow.set(is.row, [...(issuesByRow.get(is.row) ?? []), is]);
@@ -267,10 +303,18 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
       else if (out.codeKnown && cc.normalized !== r.code.trim().toUpperCase()) out.warnings = [...out.warnings, `Mã chuẩn hóa ${r.code} → ${cc.normalized}`];
       if (res.status === 'mismatch') out.warnings = [...out.warnings, res.message];
       const s0 = res.candidates[0];
+      if (!r.unit && (s0 || res.code)) {
+        const proposed = repo.getNorm(res.code || s0!.code, dataset)?.unit;
+        if (proposed) {
+          out.unitProposal = proposed;
+          out.warnings = [...out.warnings, `Thiếu đơn vị – đề xuất "${proposed}" theo định mức ${res.code || s0!.code} (không tự điền)`];
+        }
+      }
       if (!out.codeKnown && s0) out.suggestion = { code: s0.code, name: s0.name, confidence: s0.confidence, why: s0.reason };
       if (res.code) out.normUnit = repo.normUnitCost(dataset, res.code, o.projectId!)?.total ?? null;
       else if (s0) out.normUnit = repo.normUnitCost(dataset, s0.code, o.projectId!)?.total ?? null;
     }
+    if (equipmentAsQuote && out.type === 'item' && !out.codeKnown) out.tbvt = true;
     const q = r.quantity;
     const usedUnit = (o.pricingOption ?? 'file') === 'norm' ? out.normUnit ?? null : out.fileUnitPrice;
     out.computedAmount = q !== null && usedUnit !== null && usedUnit !== undefined ? q * usedUnit : null;
@@ -302,6 +346,7 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
         recon.grand.computed += r.computedAmount ?? 0;
       } else if (t === 'category') catComputed = 0;
       else if (t === 'subtotal' && r.amount !== null) {
+        if (AFTER_TAX_RE.test(normalizeText(r.name || r.code || ''))) continue;
         if (GRAND_RE.test(normalizeText(r.name || r.code || ''))) grandFile = r.amount;
         else {
           const diff = catComputed - r.amount;
@@ -359,6 +404,10 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
         unitPrice,
         amount: r.computedAmount ?? null,
         nameIsNumeric: parseFlexibleNumber(r.name) !== null,
+        nameZh: r.nameZh || null,
+        details: r.details.length,
+        tbvt: !!r.tbvt,
+        unpriced: t === 'item' && !(r.computedAmount && r.computedAmount > 0),
       };
     });
   const zeroItems = rows.filter((r) => typeOf(r) === 'item' && (r.quantity ?? 0) > 0 && !(r.computedAmount && r.computedAmount > 0));
@@ -374,6 +423,10 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
     sheetIndex,
     preview,
     header: { headerRow: header.headerRow, headerRows: header.headerRows, labels: header.rawLabels, mapping: header.mapping, confidence: header.confidence },
+    blocks: allBlocks.map((b) => ({ index: b.index, title: b.title, headerRow: b.headerRow + 1, headerRows: b.headerRows, first: b.first + 1, last: b.last + 1 })),
+    blockIndex,
+    mep,
+    equipmentAsQuote,
     range: { first: bodyRows.length ? Math.min(...bodyRows) : dataStart + 1, last: bodyRows.length ? Math.max(...bodyRows) : sheet.rows.length },
     columns,
     fingerprint,
@@ -416,6 +469,8 @@ export interface ImportEstimateOptions extends AnalyzeOptions {
   /** Re-import: replace the items of this stored import / of these categories (as an undoable revision). */
   replaceImportId?: number;
   replaceCategoryIds?: number[];
+  /** Multi-sheet import: hạng mục names are "<prefix> – <category row>" (or just the prefix when the block has no category rows). */
+  categoryPrefix?: string;
 }
 
 /**
@@ -450,9 +505,11 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
     }
     const existing = new Map(repo.listCategories(projectId).map((c) => [normalizeText(c.name), c.id]));
     let currentCat: number | null = null;
+    const prefix = (o.categoryPrefix ?? '').trim();
+    const catName = (n: string) => (prefix ? `${prefix} – ${n}` : n);
     const ensureDefault = () => {
       if (currentCat) return currentCat;
-      const name = `Nhập từ ${f.fileName}`;
+      const name = prefix || `Nhập từ ${f.fileName}`;
       const key = normalizeText(name);
       let id = existing.get(key);
       if (!id) {
@@ -468,7 +525,7 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
     for (const r of a.rows) {
       const type = o.rowTypes?.[String(r.index)] ?? r.type;
       if (type === 'category') {
-        const name = (r.category ?? r.name ?? r.code).trim() || `Hạng mục dòng ${r.excelRow}`;
+        const name = catName((r.category ?? r.name ?? r.code).trim() || `Hạng mục dòng ${r.excelRow}`);
         const key = normalizeText(name);
         let id = existing.get(key);
         if (!id) {
@@ -489,7 +546,7 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
       const isGtt = res.status === 'gtt';
       const chosen = Object.prototype.hasOwnProperty.call(o.codeChoices ?? {}, String(r.index)) ? o.codeChoices![String(r.index)] : undefined;
       let code = '';
-      let codeStatus: 'imported' | 'confirmed' | '' = '';
+      let codeStatus: 'imported' | 'confirmed' | 'tbvt' | '' = '';
       if (!isGtt) {
         if (chosen) {
           const n = repo.getNorm(chosen, dataset);
@@ -501,6 +558,7 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
           codeStatus = 'imported';
         }
       }
+      if (!code && r.tbvt && !isGtt) codeStatus = 'tbvt';
       let formula: string | null = null;
       if (r.formula && isFormula(r.formula)) {
         try {
@@ -511,20 +569,29 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
         }
       }
       const p = r.prices;
-      const hasFilePrice = p.vl !== null || p.nc !== null || p.m !== null || p.unit !== null;
-      const fileMode = (o.pricingOption ?? 'norm') === 'file';
+      // a price of 0 / empty is "chưa có giá": the item is kept and stays norm-priced (no file price is invented)
+      const hasFilePrice = [p.vl, p.nc, p.m, p.unit].some((x) => x !== null && x > 0);
+      const fileMode = (o.pricingOption ?? 'file') === 'file';
       const useFile = isGtt || (fileMode && hasFilePrice);
       const cells = r.cells ?? {};
       const priceCells = [cells.vl, cells.nc, cells.m].filter(Boolean) as string[];
       if (!priceCells.length && cells.unitPrice) priceCells.push(cells.unitPrice);
+      const noteParts = [
+        r.formula && !formula ? `Diễn giải gốc: ${r.formula}` : r.note,
+        r.spec && `Quy cách: ${r.spec}`,
+        r.brand && `Nhãn hiệu/Xuất xứ: ${r.brand}`,
+        !hasFilePrice && !(r.amount && r.amount > 0) && 'Chưa có đơn giá',
+        !r.unit && 'Thiếu đơn vị',
+      ].filter(Boolean);
       const item = repo.createItem(projectId, {
         categoryId: ensureDefault(),
         normCode: code,
         name: r.name || code || r.code,
+        nameZh: r.nameZh || null,
         unit: r.unit || undefined,
         quantity: r.quantity ?? 0,
         quantityFormula: formula,
-        note: r.formula && !formula ? `Diễn giải gốc: ${r.formula}` : r.note || null,
+        note: noteParts.length ? noteParts.join(' · ') : null,
         codeStatus,
         normCodeRaw: r.code || null,
         codeCheck: res.status === 'none' || res.status === 'gtt' ? null : res.status,
@@ -545,15 +612,16 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
         pricing: useFile
           ? {
               pricingMethod: 'CUSTOM_GTT',
-              custom: { vl: p.vl ?? p.unit ?? 0, nc: p.nc ?? 0, m: p.m ?? 0 },
+              custom: p.vl !== null || p.nc !== null || p.m !== null ? { vl: p.vl ?? 0, nc: p.nc ?? 0, m: p.m ?? 0 } : { vl: p.unit ?? 0, nc: 0, m: 0 },
               priceSource: !hasFilePrice
                 ? null
-                : fileMode
+                : fileMode && !isGtt
                   ? `File Excel ${f.fileName}, ô ${priceCells.length ? priceCells.join('/') : `dòng ${r.excelRow}`}`
                   : `Đơn giá trong file ${f.fileName} / ${sheetName} / dòng ${r.excelRow} (chưa xác minh)`,
             }
           : undefined,
       });
+      if (r.details.length) repo.attachImportedLines(item.id, r.details.map((d) => ({ description: d.text, expression: d.expression, result: d.quantity })));
       created.push(item.id);
       undo.unshift({ op: 'deleteItem', itemId: item.id });
     }
@@ -564,7 +632,7 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
       sheetIndex: a.sheetIndex,
       header: { headerRow: a.header!.headerRow, headerRows: a.header!.headerRows },
       mapping: a.header!.mapping as Record<string, number>,
-      options: { firstRow: o.firstRow, lastRow: o.lastRow, rowTypes: o.rowTypes as Record<string, string> | undefined, pricingOption: o.pricingOption, allowNumericName: o.allowNumericName },
+      options: { firstRow: o.firstRow ?? a.range?.first, lastRow: o.lastRow ?? a.range?.last, blockIndex: a.blockIndex, categoryPrefix: o.categoryPrefix, equipmentAsQuote: o.equipmentAsQuote, rowTypes: o.rowTypes as Record<string, string> | undefined, pricingOption: o.pricingOption, allowNumericName: o.allowNumericName },
       user,
     });
     for (const id of created) db.prepare('UPDATE estimate_items SET import_id = ? WHERE id = ?').run(importId, id);

@@ -283,3 +283,23 @@ Nguồn: `docs/LEGAL-UPDATE-2026.md` (đã xác minh metadata ngày 2026-09-27).
 94. **Giới hạn & dự phòng**: tối đa 6 vòng, 6000 token đầu ra tích lũy, 60 giây/yêu cầu, lịch sử gửi lên ≤ 10 tin. Lỗi nhà cung cấp (khóa sai, hết hạn mức, giới hạn tốc độ, mạng,
     quá thời gian, mô hình sai) → thông báo tiếng Việt và xử lý lại bằng bộ quy tắc ngoại tuyến; không có khóa thì dùng ngoại tuyến ngay.
 95. **Kiểm thử không gọi mạng thật**: nhà cung cấp giả (test đơn vị) và máy chủ OpenAI giả qua `OPENAI_BASE_URL` (E2E). Khi có khóa thật, nút “Kiểm tra kết nối” là cách xác nhận.
+96. **Update 4 A-bis (docs/update4/REAL-FILE-FINDINGS.md)**: từ file .xls thật của khách (không commit – đã chuyển vào `data/private/`, nằm trong `.gitignore`), bổ sung một fixture tổng hợp
+    `packages/server/test/fixtures/import_tuchang_like.xls` + `.expected.json` (số liệu bịa) cùng script tham khảo Python `docs/update4/vni.py`/`ref.py`, rồi chuyển logic sang TypeScript.
+    `npm run check:private-import` đọc `data/private/*.xls|xlsx` (không commit) và in đối chiếu từng sheet/khối để nhà phát triển tự kiểm tra với file thật.
+97. **VNI theo từng ô, không theo cả cột**: `hasVniMarkers`/`fixVniCell` ([[core/encoding]]) phát hiện dấu hiệu VNI thật (nguyên âm + dấu phụ, “ñ/Ñ”) khác với chữ Unicode thường có
+    “ô/ê” (không phải dấu hiệu); một ô vừa VNI vừa Unicode thật (“Eùp coïc thử tĩnh Φ400”) chỉ các từ có dấu hiệu được chuyển, từ còn lại giữ nguyên. `splitChinese` tách phần tiếng Trung
+    cuối một ô song ngữ (hoặc đầu ô kiểu “混凝土垫层 / Bê tông lót móng”) thành `nameZh`, hiển thị trong cột ghi chú/mới `name_zh` của `estimate_items`.
+98. **`detectBlocks`**: một sheet có thể lặp lại dòng tiêu đề cho từng hạng mục con (mỗi bảng = 1 khối); tiêu đề lấy từ dòng chữ gần nhất phía trên khối (ưu tiên “Hạng mục : …”),
+    bỏ số thứ tự và phần tiếng Trung (`cleanBlockTitle`). `classifyRows` nhận biết thêm dòng **diễn giải khối lượng** (Dài×Rộng×Cao×Số cấu kiện ngay dưới 1 công việc, không có mã/ĐVT) –
+    gắn vào công việc đó qua `quantity_lines` **mà không đổi khối lượng của file** (chỉ cảnh báo nếu tổng diễn giải lệch); và dòng **trọn gói** (chỉ có Thành tiền, không ĐVT/KL) – nhập
+    với khối lượng = 1, trừ khi Thành tiền đó khớp tổng các dòng ngay dưới (khi đó là dòng hạng mục mang luôn số tổng, không phải 1 công việc).
+99. **Nhập nhiều sheet một lần** (`import-multi.ts`, route `POST /import/analyze-multi` + `POST /projects/:id/import-sheets`): mỗi khối của mỗi sheet được chọn → 1 hạng mục (tên theo
+    tiêu đề khối, trùng tên thì thêm hậu tố); sheet ẩn không tự chọn. Sheet tổng hợp kiểu TONGHOP (`isSummarySheet`) không tạo công việc, chỉ dùng để đối chiếu: so khớp tên gần đúng +
+    số tiền giữa các dòng của nó và các khối đã phân tích (`import_summaries`, lưu lại để xem sau). Giao diện chọn nhiều sheet cho web là việc tiếp theo; màn hình nhập 1 file hiện có
+    vẫn hoạt động (dùng khối đầu tiên của sheet được phát hiện).
+100. **Thiết bị/vật tư theo báo giá (TB/VT)**: sheet MEP (`isMepSheet`: có cột “Tiêu chí kỹ thuật”/“Nhãn hiệu” hoặc tên theo “01-Điện…”) không ép từng dòng phải có mã định mức –
+    công việc không có mã được đánh dấu `codeStatus = 'tbvt'`, loại khỏi danh sách “cần xem lại”/gợi ý mã tự động, không phải lỗi. `unassignedItems` cũng bao quát công việc dùng giá
+    file (CUSTOM_GTT nguồn “File Excel …”) thay vì chỉ NORM_BASED.
+101. **PL6 (sửa chữa) không mặc định**: `NormIndex.suggest(..., { allowRepair })` loại các mã S* trừ khi dự án/hạng mục/mô tả có từ “sửa chữa/cải tạo/bảo trì/nâng cấp”
+    (`Repo.isRepairContext`). Thêm chương AA cho “đập/phá đầu cọc” và gộp `work` của câu hỏi lẫn tên định mức thành cùng nhãn `pha_dau_coc` (tránh điểm bị trừ do “đập” và “đắp” cùng
+    mất dấu thành “dap”). Đơn vị vẫn là bộ lọc cứng: khối lượng đếm bằng “cái” trong khi định mức chính thức tính theo m3 (đập đầu cọc) thì KHÔNG có gợi ý tin cậy – người dùng tự quy đổi.
