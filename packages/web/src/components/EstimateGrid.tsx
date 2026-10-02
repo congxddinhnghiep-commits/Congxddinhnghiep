@@ -88,7 +88,18 @@ function Cell({
   );
 }
 
-export function EstimateGrid({ data, reload, onEditImport }: { data: EstimateResponse; reload: () => Promise<void>; onEditImport?: (categoryId: number) => void }) {
+export function EstimateGrid({
+  data,
+  reload,
+  onEditImport,
+  onReimportCategory,
+}: {
+  data: EstimateResponse;
+  reload: () => Promise<void>;
+  onEditImport?: (categoryId: number) => void;
+  /** "Nhập lại từ file Excel (thay thế hạng mục đã nhập)": re-upload a fresh file and replace this category's items. */
+  onReimportCategory?: (categoryId: number) => void;
+}) {
   const pid = data.project.id;
   const [error, setError] = useState('');
   const [search, setSearch] = useState<{ q: string; apply: (n: Norm) => void } | null>(null);
@@ -227,6 +238,11 @@ export function EstimateGrid({ data, reload, onEditImport }: { data: EstimateRes
                       {onEditImport && cat.items.some((i) => i.source?.file) && (
                         <button className="icon" data-testid={`edit-import-${cat.id}`} title="Sửa lại cột đã nhập (ánh xạ cột của file Excel)" onClick={() => onEditImport(cat.id)}>
                           ⚙
+                        </button>
+                      )}
+                      {onReimportCategory && cat.items.some((i) => i.source?.file) && (
+                        <button className="icon" data-testid={`reimport-${cat.id}`} title="Nhập lại từ file Excel (thay thế hạng mục đã nhập)" onClick={() => onReimportCategory(cat.id)}>
+                          ↻
                         </button>
                       )}
                       {confirmCat === cat.id ? (

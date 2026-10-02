@@ -72,13 +72,22 @@ Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/UPDATE
    phí và “giá theo định mức” để so sánh (không cộng vào tổng); mỗi công việc giữ file/sheet/dòng/ô gốc.
 9. Tùy chọn: đặt tên **mẫu nhập** để lần sau file cùng mẫu tự nhận ánh xạ. Nhập nhầm thì bấm **↶ Hoàn tác** ở khung trợ lý.
 
-**File thật nhiều sheet (ví dụ hồ sơ BIFF .xls cũ, 40+ sheet, mỗi sheet một nhà xưởng/hạng mục, có sheet ẩn và sheet tổng hợp
-TONGHOP)**: một sheet có thể lặp lại dòng tiêu đề cho từng hạng mục con – mỗi bảng như vậy (`khối`) được nhận ra riêng
-(`POST /import/analyze-multi`, `POST /projects/:id/import-sheets`) và nhập thành một hạng mục của nó; sheet ẩn không tự chọn;
-sheet tổng hợp chỉ dùng để đối chiếu tổng tiền, không tạo công việc. Dòng “diễn giải khối lượng” (Dài×Rộng×Cao×Số cấu kiện) dưới
-một công việc được gắn vào công việc đó mà không đổi khối lượng của file. Sheet MEP/điện nước không cần mã định mức cho mỗi dòng –
-đánh dấu “thiết bị/vật tư theo báo giá”. Không bao giờ commit file thật của khách: đặt vào `data/private/` (đã có trong
-`.gitignore`) rồi chạy `npm run check:private-import` để xem đối chiếu từng sheet/khối trước khi nhập vào phần mềm.
+### 1c. Nhập nhiều sheet (file thật nhiều sheet/nhiều bảng)
+Dùng cho hồ sơ nhiều sheet (ví dụ .xls cũ dạng BIFF, 40+ sheet, mỗi sheet một nhà xưởng/hạng mục, có sheet ẩn và sheet tổng hợp
+kiểu TONGHOP). Nút **⤓ Nhập nhiều sheet**:
+1. Tải file → tích chọn sheet cần nhập (sheet ẩn gập lại, mặc định không chọn; sheet tổng hợp chỉ để đối chiếu, không tạo công việc).
+2. Một sheet có thể lặp lại dòng tiêu đề cho từng hạng mục con – mỗi bảng như vậy (**khối**) được nhận ra riêng và sẽ thành **một
+   hạng mục** của nó; bấm **Xem trước** để xem 15 dòng đầu như sẽ lên lưới (tên đã chuyển Unicode, phần tiếng Trung tách riêng).
+   Dòng “diễn giải khối lượng” (Dài×Rộng×Cao×Số cấu kiện) dưới một công việc gắn vào công việc đó mà không đổi khối lượng của file.
+3. Mỗi khối có dấu ✔/⚠ đối chiếu Σ Thành tiền với dòng “Cộng trước thuế” của khối, và nếu có sheet tổng hợp thì đối chiếu thêm
+   với dòng của nó. Sheet điện nước/MEP: dòng không có mã định mức đánh dấu “thiết bị/vật tư theo báo giá”, không bắt buộc mã.
+4. **Nhập dữ liệu** tạo tất cả hạng mục đã chọn trong một thao tác, hoàn tác được bằng **↶ Hoàn tác** ở khung trợ lý.
+
+Nút **↻ Nhập lại từ file Excel (thay thế hạng mục đã nhập)** cạnh ⚙ trên mỗi hạng mục đã nhập: luôn tải file mới và thay thế
+đúng hạng mục đó thành phiên bản hoàn tác được (khác với ⚙ “Sửa lại cột đã nhập” – mở lại dữ liệu đã lưu, không cần tải lại file).
+
+Không bao giờ commit file thật của khách: đặt vào `data/private/` (đã có trong `.gitignore`) rồi chạy
+`npm run check:private-import` để xem bảng đối chiếu từng sheet/khối (và dòng gây lệch nếu có) trước khi nhập vào phần mềm.
 
 ### 1b. Cập nhật định mức & đơn giá theo khu vực
 Nút **Cập nhật định mức & đơn giá theo khu vực** (thanh công cụ công trình; hoặc gõ “cập nhật đơn giá theo khu vực” cho trợ lý):

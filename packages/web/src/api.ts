@@ -272,6 +272,100 @@ export interface Analysis {
   sha256?: string | null;
 }
 
+// ---------------- Update 4 A-bis: multi-sheet import ----------------
+export interface SheetOverviewDTO {
+  index: number;
+  name: string;
+  label: string;
+  hidden: boolean;
+  rowCount: number;
+  blocks: number;
+  summary: boolean;
+  importable: boolean;
+}
+export interface BlockPreviewRowDTO {
+  excelRow: number;
+  type: string;
+  stt: string;
+  code: string;
+  name: string;
+  unit: string;
+  quantity: number | null;
+  unitPrice: number | null;
+  amount: number | null;
+  nameIsNumeric: boolean;
+  nameZh: string | null;
+  details: number;
+  tbvt: boolean;
+  unpriced: boolean;
+}
+export interface BlockPlanDTO {
+  key: string;
+  sheetIndex: number;
+  sheetName: string;
+  blockIndex: number;
+  blockCount: number;
+  title: string;
+  prefix: string;
+  headerRow: number;
+  first: number;
+  last: number;
+  mep: boolean;
+  mapping: { field: string; label: string; letter: string; header: string }[];
+  items: number;
+  details: number;
+  categories: string[];
+  unpriced: number;
+  missingUnit: number;
+  tbvt: number;
+  fileTotal: number | null;
+  computedTotal: number;
+  total: number;
+  diff: number | null;
+  ok: boolean | null;
+  warnings: string[];
+  blocking: string | null;
+  preview: BlockPreviewRowDTO[];
+}
+export interface SummaryLineDTO {
+  row: number;
+  stt: string;
+  label: string;
+  amount: number | null;
+  kind: 'line' | 'total' | 'tax';
+}
+export interface SummaryDTO {
+  sheetIndex: number;
+  sheetName: string;
+  lines: SummaryLineDTO[];
+  total: SummaryLineDTO | null;
+  matches: { line: SummaryLineDTO; matched: { kind: 'block' | 'sheet'; label: string; amount: number } | null; ok: boolean | null }[];
+  totalCheck: { file: number; computed: number; diff: number; ok: boolean } | null;
+}
+export interface AnalyzeMultiResult {
+  fileId: string;
+  fileName: string;
+  sheets: SheetOverviewDTO[];
+  selected: number[];
+  blocks: BlockPlanDTO[];
+  skipped: { sheetIndex: number; sheetName: string; blockIndex: number; reason: string }[];
+  summary: SummaryDTO | null;
+  grand: { computed: number; total: number };
+  allOk: boolean;
+}
+export interface ImportSheetsResult {
+  created: number;
+  categories: number;
+  blocks: { sheetName: string; title: string; prefix: string; created: number; categories: number; importId: number }[];
+  withCode: number;
+  withoutCode: number;
+  tbvt: number;
+  itemIds: number[];
+  summarySaved: boolean;
+  allOk: boolean;
+  message: string;
+}
+
 export interface QuantityLineDTO {
   id?: number;
   description: string;
@@ -549,6 +643,10 @@ export const api = {
   importPreview: (fileId: string, sheetIndex: number, target: ImportTarget) =>
     request<ImportPreview>('POST', '/import/preview', { fileId, sheetIndex, target }),
   importApply: (body: Record<string, unknown>) => request<{ message: string; count: number }>('POST', '/import/apply', body),
+  importAnalyzeMulti: (body: { fileId: string; projectId: number; sheetIndexes?: number[]; pricingOption?: 'file' | 'norm'; equipmentAsQuote?: boolean }) =>
+    request<AnalyzeMultiResult>('POST', '/import/analyze-multi', body),
+  importSheets: (pid: number, body: { fileId: string; sheetIndexes?: number[]; pricingOption?: 'file' | 'norm'; equipmentAsQuote?: boolean; autoAssignThreshold?: number }) =>
+    request<ImportSheetsResult>('POST', `/projects/${pid}/import-sheets`, body),
 };
 
 /** Download the Excel export (needs the auth header, so fetch → blob → link). */

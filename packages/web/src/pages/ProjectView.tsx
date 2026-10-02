@@ -6,6 +6,7 @@ import { RegionalUpdateDialog } from '../components/RegionalUpdateDialog';
 import { CostSummaryTab } from '../components/CostSummaryTab';
 import { EstimateGrid } from '../components/EstimateGrid';
 import { ImportPanel } from '../components/ImportPanel';
+import { MultiSheetImport } from '../components/MultiSheetImport';
 import { PricesTab } from '../components/PricesTab';
 import { ResourceSummaryTab } from '../components/ResourceSummaryTab';
 import { SettingsTab } from '../components/SettingsTab';
@@ -30,6 +31,8 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
   const [showAssistant, setShowAssistant] = useState(true);
   const [showImport, setShowImport] = useState(false);
   const [editImportCat, setEditImportCat] = useState<number | undefined>(undefined);
+  const [reimportCat, setReimportCat] = useState<number | undefined>(undefined);
+  const [showMultiImport, setShowMultiImport] = useState(false);
   const [showRegional, setShowRegional] = useState(false);
   const [newBooks, setNewBooks] = useState(0);
   const [notice, setNotice] = useState('');
@@ -115,6 +118,9 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
             </button>
           )}
           <button onClick={() => setShowImport(true)}>⤓ Nhập dữ liệu</button>
+          <button data-testid="open-multi-import" onClick={() => setShowMultiImport(true)} title="File Excel nhiều sheet, mỗi sheet một hạng mục (có thể nhiều bảng trong một sheet)">
+            ⤓ Nhập nhiều sheet
+          </button>
           <button data-testid="open-regional" onClick={() => setShowRegional(true)} title="Chọn tỉnh/thành, kỳ giá, xem trước rồi áp dụng">
             Cập nhật định mức &amp; đơn giá theo khu vực
           </button>
@@ -163,7 +169,14 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
           ))}
         </nav>
         <div className="tab-body">
-          {tab === 'estimate' && <EstimateGrid data={data} reload={reload} onEditImport={(cid) => { setEditImportCat(cid); setShowImport(true); }} />}
+          {tab === 'estimate' && (
+            <EstimateGrid
+              data={data}
+              reload={reload}
+              onEditImport={(cid) => { setEditImportCat(cid); setShowImport(true); }}
+              onReimportCategory={(cid) => { setReimportCat(cid); setShowImport(true); }}
+            />
+          )}
           {tab === 'prices' && <PricesTab project={data.project} config={config} onChanged={reload} />}
           {tab === 'analysis' && <AnalysisTab data={data} />}
           {tab === 'resources' && <ResourceSummaryTab data={data} />}
@@ -202,7 +215,24 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
           }}
         />
       )}
-      {showImport && <ImportPanel config={config} user={user} data={data} editCategoryId={editImportCat} onClose={() => { setShowImport(false); setEditImportCat(undefined); }} onImported={reload} />}
+      {showImport && (
+        <ImportPanel
+          config={config}
+          user={user}
+          data={data}
+          editCategoryId={editImportCat}
+          reimportCategoryId={reimportCat}
+          onClose={() => { setShowImport(false); setEditImportCat(undefined); setReimportCat(undefined); }}
+          onImported={reload}
+        />
+      )}
+      {showMultiImport && (
+        <MultiSheetImport
+          projectId={projectId}
+          onClose={() => setShowMultiImport(false)}
+          onImported={(m) => { setNotice(m); setShowMultiImport(false); reload(); }}
+        />
+      )}
     </div>
   );
 }

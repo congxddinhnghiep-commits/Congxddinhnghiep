@@ -303,3 +303,13 @@ Nguồn: `docs/LEGAL-UPDATE-2026.md` (đã xác minh metadata ngày 2026-09-27).
 101. **PL6 (sửa chữa) không mặc định**: `NormIndex.suggest(..., { allowRepair })` loại các mã S* trừ khi dự án/hạng mục/mô tả có từ “sửa chữa/cải tạo/bảo trì/nâng cấp”
     (`Repo.isRepairContext`). Thêm chương AA cho “đập/phá đầu cọc” và gộp `work` của câu hỏi lẫn tên định mức thành cùng nhãn `pha_dau_coc` (tránh điểm bị trừ do “đập” và “đắp” cùng
     mất dấu thành “dap”). Đơn vị vẫn là bộ lọc cứng: khối lượng đếm bằng “cái” trong khi định mức chính thức tính theo m3 (đập đầu cọc) thì KHÔNG có gợi ý tin cậy – người dùng tự quy đổi.
+102. **Giao diện nhập nhiều sheet** (`MultiSheetImport.tsx`, nút “⤓ Nhập nhiều sheet”): tải file → chọn sheet (sheet ẩn gập lại, mặc định không chọn) → mỗi bảng (khối) hiện số công việc/diễn giải/chưa giá/thiếu ĐVT/TB-VT,
+    nút “Xem trước” hiện 15 dòng đầu như sẽ lên lưới (tên đã chuyển Unicode, phần tiếng Trung tách riêng), dấu ✔/⚠ đối chiếu với “Cộng trước thuế” của khối và với sheet tổng hợp (TONGHOP) nếu có; đổi
+    “Giữ nguyên đơn giá file/Tính lại theo định mức” hoặc tick “sheet điện nước/MEP…” gọi lại `POST /import/analyze-multi` ngay. “Nhập dữ liệu” gọi `POST /projects/:id/import-sheets` một lần, tạo TẤT CẢ
+    hạng mục trong một giao dịch, một bước hoàn tác duy nhất (↶ Hoàn tác ở khung trợ lý hoàn tác cả lần nhập). Bảng bị chặn (cột tên công việc không hợp lệ) vô hiệu hoá nút nhập cho tới khi bỏ chọn sheet đó.
+103. **Tiêu đề phụ trong khối không tạo thêm hạng mục**: khi nhập theo khối (`categoryPrefix`), dòng tiêu đề La Mã bên trong khối (“I PHẦN MÓNG”, “II CÔNG TÁC BÊ TÔNG”) không còn tách thành hạng mục riêng
+    (sẽ làm vỡ quy tắc 1 khối = 1 hạng mục) mà ghi vào ghi chú “Nhóm: …” của từng công việc, giữ nguyên ngữ cảnh mà không làm vỡ cấu trúc hạng mục.
+104. **Nút “Nhập lại từ file Excel (thay thế hạng mục đã nhập)”** (↻, cạnh ⚙ trên mỗi hạng mục đã nhập): luôn tải file mới (khác với ⚙ “Sửa lại cột đã nhập” mở lại dữ liệu đã lưu), dùng lại cơ chế
+    `replaceCategoryIds` sẵn có của màn hình nhập 1 sheet – thay thế đúng hạng mục đó thành phiên bản hoàn tác được, không đụng hạng mục khác.
+105. **`npm run check:private-import` in thêm bảng tóm tắt** (sheet, khối, số công việc, tổng file, tổng nhập, lệch) và với mỗi khối lệch, liệt kê các dòng gây lệch nhiều nhất (so Thành tiền file với
+    Thành tiền tính lại của từng dòng) để biết ngay lý do (thường là Thành tiền = 0 trong file nhưng có đơn giá VL/NC → tính lại ra số khác 0, hoặc dòng cộng/trọn gói không khớp Σ công việc).

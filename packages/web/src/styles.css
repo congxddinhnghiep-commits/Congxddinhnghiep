@@ -41,6 +41,7 @@ button.danger { background: var(--danger); color: #fff; border-color: var(--dang
 button.danger-outline { color: var(--danger); }
 button.link { border: none; background: none; color: var(--brand); padding: 4px 6px; }
 button.icon { border: none; background: none; padding: 2px 6px; font-size: 16px; color: var(--muted); }
+button.icon + button.icon { margin-left: 2px; }
 button.icon:hover { color: var(--danger); }
 button.icon.tiny { font-size: 12px; padding: 0 2px; }
 button.small { padding: 2px 8px; font-size: 12px; }
@@ -327,3 +328,10 @@ button.pm { border: none; cursor: pointer; }
 .agent-trace .tool.fail { background: #fdecea; color: #b42318; }
 .agent-preview { border: 1px solid #f0dc9a; background: #fffbea; border-radius: 6px; padding: 8px; margin: 6px 0; }
 .assistant-provider { font-size: 11px; color: #667085; font-weight: 400; margin-left: 6px; }
+
+/* Update 4 A-bis: multi-sheet import */
+.hidden-sheets { margin: 6px 0 14px; }
+.block-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; margin: 10px 0; }
+.block-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.block-head b { font-size: 13px; }
+.block-head .spacer { flex: 1; }

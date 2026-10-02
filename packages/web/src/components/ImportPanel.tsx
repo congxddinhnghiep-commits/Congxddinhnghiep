@@ -33,6 +33,7 @@ export function ImportPanel({
   user,
   data,
   editCategoryId,
+  reimportCategoryId,
   onClose,
   onImported,
 }: {
@@ -41,6 +42,8 @@ export function ImportPanel({
   data: EstimateResponse;
   /** "Sửa lại cột đã nhập" for this imported category. */
   editCategoryId?: number;
+  /** "Nhập lại từ file Excel (thay thế hạng mục đã nhập)": skip reopening stored data, go straight to a fresh upload. */
+  reimportCategoryId?: number;
   onClose: () => void;
   onImported: () => void;
 }) {
@@ -74,6 +77,11 @@ export function ImportPanel({
     setMapping(p.mapping);
     setMsg('');
   };
+
+  // "Nhập lại từ file Excel (thay thế hạng mục đã nhập)": always a fresh upload, never reopen stored data.
+  useEffect(() => {
+    if (reimportCategoryId) setReplace({ categoryIds: [reimportCategoryId] });
+  }, [reimportCategoryId]);
 
   // "Sửa lại cột đã nhập": re-open the stored rows of the category's import (no upload), or ask for the file again
   useEffect(() => {
@@ -160,7 +168,7 @@ export function ImportPanel({
   };
 
   return (
-    <Modal title={editCategoryId ? 'Sửa lại cột đã nhập' : 'Nhập dữ liệu'} onClose={onClose} wide>
+    <Modal title={reimportCategoryId ? 'Nhập lại từ file Excel (thay thế hạng mục đã nhập)' : editCategoryId ? 'Sửa lại cột đã nhập' : 'Nhập dữ liệu'} onClose={onClose} wide>
       {legacy && (
         <div className="warn-box" data-testid="legacy-import">
           Lần nhập này (file {legacy.fileName}) chưa lưu dữ liệu gốc. <b>Hãy tải lại file Excel</b> – việc nhập lại sẽ THAY THẾ hạng mục này (tạo phiên bản mới, hoàn tác được).

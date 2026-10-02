@@ -505,6 +505,7 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
     }
     const existing = new Map(repo.listCategories(projectId).map((c) => [normalizeText(c.name), c.id]));
     let currentCat: number | null = null;
+    let subHeading = '';
     const prefix = (o.categoryPrefix ?? '').trim();
     const catName = (n: string) => (prefix ? `${prefix} – ${n}` : n);
     const ensureDefault = () => {
@@ -525,6 +526,12 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
     for (const r of a.rows) {
       const type = o.rowTypes?.[String(r.index)] ?? r.type;
       if (type === 'category') {
+        // Multi-sheet import: one hạng mục per BLOCK already (categoryPrefix) – a roman-numeral sub-heading inside the
+        // block ("I PHẦN MÓNG") stays a note on its items instead of fragmenting the block into more hạng mục.
+        if (prefix) {
+          subHeading = (r.category ?? r.name ?? r.code).trim();
+          continue;
+        }
         const name = catName((r.category ?? r.name ?? r.code).trim() || `Hạng mục dòng ${r.excelRow}`);
         const key = normalizeText(name);
         let id = existing.get(key);
@@ -577,6 +584,7 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
       const priceCells = [cells.vl, cells.nc, cells.m].filter(Boolean) as string[];
       if (!priceCells.length && cells.unitPrice) priceCells.push(cells.unitPrice);
       const noteParts = [
+        subHeading && `Nhóm: ${subHeading}`,
         r.formula && !formula ? `Diễn giải gốc: ${r.formula}` : r.note,
         r.spec && `Quy cách: ${r.spec}`,
         r.brand && `Nhãn hiệu/Xuất xứ: ${r.brand}`,
