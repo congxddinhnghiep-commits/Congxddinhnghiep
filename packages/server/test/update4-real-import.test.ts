@@ -125,3 +125,65 @@ describe('A-bis .xls (BIFF) with hidden sheets, several blocks per sheet and a T
     }
   });
 });
+
+describe('fidelity: a row whose own Thành tiền disagrees with KL×đơn giá (stt 8, "Lợp tole…": file ghi 0 dù có đơn giá VL/NC)', () => {
+  const fm = expected.fidelity_mismatch as { stt: string; name: string; fileAmount: number; calcAmount: number };
+
+  it('analyze-multi: the block still reconciles exactly with "Cộng trước thuế" by default (keeps the file\'s Thành tiền)', async () => {
+    const fileId = await upload();
+    const pid = await newProject('Fidelity – analyze');
+    const r = (await request(app).post('/api/import/analyze-multi').set(A()).send({ fileId, projectId: pid })).body;
+    const b1 = r.blocks.find((b: { sheetName: string; blockIndex: number }) => b.sheetName === expected.sheet_building && b.blockIndex === 0);
+    expect(b1.ok).toBe(true);
+    expect(b1.total).toBe(expected.blocks[0].total); // 788.454.000, unchanged by the mismatched row
+    const row = b1.preview.find((p: { name: string }) => p.name === fm.name);
+    expect(row.amount).toBe(fm.fileAmount); // the grid preview shows what will actually be imported
+    expect(row.amountMode).toBe('file');
+  });
+
+  it('import: the item\'s applied amount is the file\'s Thành tiền, flagged and toggleable; the block total matches the file exactly', async () => {
+    const fileId = await upload();
+    const pid = await newProject('Fidelity – import default');
+    const r = (await request(app).post(`/api/projects/${pid}/import-sheets`).set(A()).send({ fileId })).body;
+    expect(r.allOk).toBe(true);
+
+    const est = async () => (await request(app).get(`/api/projects/${pid}/estimate`).set(A())).body as {
+      categories: { name: string; total: { total: number }; items: { id: number; name: string; amount: { total: number }; amountMode?: string | null; note?: string | null }[] }[];
+    };
+    let data = await est();
+    const items = data.categories.flatMap((c) => c.items);
+    const row = items.find((x) => x.name === fm.name)!;
+    expect(row).toBeTruthy();
+    expect(row.amount.total).toBe(fm.fileAmount); // 0 đ, exactly the file's own Thành tiền
+    expect(row.amountMode).toBe('file');
+    expect(row.note ?? '').toMatch(/Thành tiền theo file/);
+    const cat = data.categories.find((c) => c.items.some((x) => x.id === row.id))!;
+    const catTotalBefore = cat.total.total;
+
+    // per-row toggle: "Tính lại theo KL×đơn giá"
+    await request(app).put(`/api/projects/${pid}/items/${row.id}/amount-mode`).set(A()).send({ mode: 'calc' }).expect(200);
+    data = await est();
+    const after = data.categories.flatMap((c) => c.items).find((x) => x.id === row.id)!;
+    expect(after.amount.total).toBe(fm.calcAmount); // 300 × (180.000 + 95.000) = 82.500.000
+    expect(after.amountMode).toBe('calc');
+    const catAfter = data.categories.find((c) => c.items.some((x) => x.id === row.id))!;
+    expect(catAfter.total.total).toBe(catTotalBefore + fm.calcAmount);
+
+    // toggle back
+    await request(app).put(`/api/projects/${pid}/items/${row.id}/amount-mode`).set(A()).send({ mode: 'file' }).expect(200);
+    data = await est();
+    expect(data.categories.flatMap((c) => c.items).find((x) => x.id === row.id)!.amount.total).toBe(fm.fileAmount);
+  });
+
+  it('bulk "Tính lại theo KL×đơn giá" option: the whole import recomputes from KL×đơn giá, correctly breaking the match with the file', async () => {
+    const fileId = await upload();
+    const pid = await newProject('Fidelity – bulk calc');
+    const r = (await request(app).post(`/api/projects/${pid}/import-sheets`).set(A()).send({ fileId, amountFidelity: 'calc' })).body;
+    expect(r.allOk).toBe(false); // correct: the file's own "Cộng trước thuế" no longer matches Σ KL×đơn giá
+    const est = (await request(app).get(`/api/projects/${pid}/estimate`).set(A())).body as { categories: { name: string; items: { name: string; amount: { total: number }; amountMode?: string | null }[] }[] };
+    const items = est.categories.flatMap((c) => c.items);
+    const row = items.find((x) => x.name === fm.name)!;
+    expect(row.amount.total).toBe(fm.calcAmount);
+    expect(row.amountMode).toBe('calc');
+  });
+});

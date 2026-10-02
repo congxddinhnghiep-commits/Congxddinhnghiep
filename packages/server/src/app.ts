@@ -430,6 +430,15 @@ export function createApp(db: DB, opts: { serveWeb?: boolean; ai?: { cfg?: AiCon
       });
     }),
   );
+  // Update 4 fidelity: toggle an imported item between "Thành tiền theo file" and "Tính lại theo KL×đơn giá"
+  api.put(
+    '/projects/:id/items/:itemId/amount-mode',
+    h((req) => {
+      const mode = req.body?.mode;
+      if (mode !== 'file' && mode !== 'calc') throw new HttpError(400, 'Chế độ áp dụng Thành tiền không hợp lệ');
+      return repo.setAmountMode(proj(req).id, id(req.params.itemId), mode);
+    }),
+  );
   const linesOf = (v: unknown) => {
     if (!Array.isArray(v)) throw new HttpError(400, 'Danh sách dòng khối lượng không hợp lệ');
     if (v.length > 500) throw new HttpError(400, 'Tối đa 500 dòng khối lượng');
@@ -840,6 +849,11 @@ export function createApp(db: DB, opts: { serveWeb?: boolean; ai?: { cfg?: AiCon
     pricingOption: (b.pricingOption === 'norm' ? 'norm' : b.pricingOption === 'file' ? 'file' : undefined) as 'file' | 'norm' | undefined,
     blockIndex: b.blockIndex !== undefined && b.blockIndex !== null ? Number(b.blockIndex) : undefined,
     equipmentAsQuote: b.equipmentAsQuote === false ? false : undefined,
+    amountFidelity: (b.amountFidelity === 'calc' ? 'calc' : b.amountFidelity === 'file' ? 'file' : undefined) as 'file' | 'calc' | undefined,
+    amountModeOverrides:
+      b.amountModeOverrides && typeof b.amountModeOverrides === 'object'
+        ? (Object.fromEntries(Object.entries(b.amountModeOverrides as Record<string, unknown>).filter(([, v]) => v === 'file' || v === 'calc')) as Record<string, 'file' | 'calc'>)
+        : undefined,
   });
   const sheetIndexesOf = (v: unknown) => (Array.isArray(v) ? v.map(Number).filter((n) => Number.isInteger(n) && n >= 0) : undefined);
   api.post(
@@ -848,7 +862,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean; ai?: { cfg?: AiCon
       const b = req.body ?? {};
       const f = getParsed(String(b.fileId), req.user!.id);
       const projectId = b.projectId ? repo.requireProject(id(String(b.projectId)), req.user!.id, req.user!.role === 'admin').id : undefined;
-      return analyzeSheets(db, repo, f, { projectId, sheetIndexes: sheetIndexesOf(b.sheetIndexes), pricingOption: b.pricingOption === 'norm' ? 'norm' : 'file', equipmentAsQuote: b.equipmentAsQuote !== false });
+      return analyzeSheets(db, repo, f, { projectId, sheetIndexes: sheetIndexesOf(b.sheetIndexes), pricingOption: b.pricingOption === 'norm' ? 'norm' : 'file', equipmentAsQuote: b.equipmentAsQuote !== false, amountFidelity: headerOpts(b).amountFidelity, amountModeOverrides: headerOpts(b).amountModeOverrides });
     }),
   );
   api.post(
@@ -857,7 +871,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean; ai?: { cfg?: AiCon
       const p = proj(req);
       const b = req.body ?? {};
       const f = getParsed(String(b.fileId), req.user!.id);
-      const r = importSheets(db, repo, f, p.id, { sheetIndexes: sheetIndexesOf(b.sheetIndexes), pricingOption: b.pricingOption === 'norm' ? 'norm' : 'file', equipmentAsQuote: b.equipmentAsQuote !== false, saveSummary: b.saveSummary !== false }, req.user!.username);
+      const r = importSheets(db, repo, f, p.id, { sheetIndexes: sheetIndexesOf(b.sheetIndexes), pricingOption: b.pricingOption === 'norm' ? 'norm' : 'file', equipmentAsQuote: b.equipmentAsQuote !== false, saveSummary: b.saveSummary !== false, amountFidelity: headerOpts(b).amountFidelity, amountModeOverrides: headerOpts(b).amountModeOverrides }, req.user!.username);
       if (r.created) assistant.record(p.id, req.user!.id, `Nhập ${r.created} công việc từ ${f.fileName} (${r.blocks.length} bảng)`, { tool: 'importEstimate', file: f.fileName }, r.undo);
       let autoText = '';
       const t = b.autoAssignThreshold;

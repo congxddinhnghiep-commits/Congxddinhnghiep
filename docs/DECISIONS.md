@@ -313,3 +313,9 @@ Nguồn: `docs/LEGAL-UPDATE-2026.md` (đã xác minh metadata ngày 2026-09-27).
     `replaceCategoryIds` sẵn có của màn hình nhập 1 sheet – thay thế đúng hạng mục đó thành phiên bản hoàn tác được, không đụng hạng mục khác.
 105. **`npm run check:private-import` in thêm bảng tóm tắt** (sheet, khối, số công việc, tổng file, tổng nhập, lệch) và với mỗi khối lệch, liệt kê các dòng gây lệch nhiều nhất (so Thành tiền file với
     Thành tiền tính lại của từng dòng) để biết ngay lý do (thường là Thành tiền = 0 trong file nhưng có đơn giá VL/NC → tính lại ra số khác 0, hoặc dòng cộng/trọn gói không khớp Σ công việc).
+106. **Trung thực với file khi Thành tiền của dòng khác KL×đơn giá** (`amountModeCustom`/`amountMismatch` trong `core/calc.ts`): mặc định (`amountFidelity: 'file'`) khoá Thành tiền áp dụng đúng bằng Thành tiền
+    trong file (co giãn tỷ lệ VL/NC/M để quantity×(vl+nc+m) ra đúng số đó, kể cả khi số đó là 0 dù có đơn giá VL/NC – ví dụ dòng “Lợp tole mái tôn…” file ghi 0) để Σ từng khối và sheet khớp đúng “Cộng
+    trước thuế”/TONGHOP; diễn giải khác biệt được ghi vào ghi chú công việc (`Thành tiền theo file: … (khác KL×đơn giá …)`). Lưu `source.filePrices` (đơn giá + Thành tiền gốc của file) và `item.amountMode`
+    để **chuyển đổi không cần tải lại file**: nút 🔒/🧮 cạnh “Giá file” trên mỗi công việc (`PUT /projects/:id/items/:itemId/amount-mode`), và tuỳ chọn gộp “Tính lại theo KL×đơn giá” (`amountFidelity: 'calc'`)
+    ở cả hai màn hình nhập (1 sheet và nhiều sheet) khi muốn cố ý bỏ qua Thành tiền của file. Bảng đối chiếu (`reconciliation`) vẫn tính Σ theo "KL×đơn giá" làm chẩn đoán riêng (phát hiện dòng file tự mâu
+    thuẫn) nhưng không còn đánh dấu “chưa khớp” cho những dòng đã khoá theo file – chỉ còn báo khi người dùng chủ động chọn tính lại, hoặc khi chính file tự mâu thuẫn ở mức dòng cộng/tổng.

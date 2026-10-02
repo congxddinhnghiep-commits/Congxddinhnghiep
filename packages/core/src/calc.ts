@@ -149,6 +149,33 @@ export function customUnitCost(it: Pick<EstimateItem, 'custom' | 'pricingMethod'
   return u;
 }
 
+/**
+ * Fidelity between an imported file's own Thành tiền and KL × đơn giá (Update 4): when they disagree (a stray 0 in the
+ * price cell, rows priced before VAT/rounding at the file's own level…), `'file'` reproduces the file's Thành tiền exactly
+ * (scaling the VL/NC/M breakdown so their sum × quantity equals it); `'calc'` ignores the file's total and uses the raw
+ * unit prices as given. Both read from the same `ItemSource.filePrices`, so toggling needs no re-upload.
+ */
+export function amountModeCustom(
+  filePrices: { vl: number | null; nc: number | null; m: number | null; unit: number | null; amount: number | null },
+  quantity: number,
+  mode: 'file' | 'calc',
+): CostTriple {
+  const rawVl = filePrices.vl ?? 0;
+  const rawNc = filePrices.nc ?? 0;
+  const rawM = filePrices.m ?? 0;
+  const rawUnit = rawVl || rawNc || rawM ? rawVl + rawNc + rawM : (filePrices.unit ?? 0);
+  if (mode === 'calc' || filePrices.amount === null || !quantity) return rawVl || rawNc || rawM ? { vl: rawVl, nc: rawNc, m: rawM } : { vl: rawUnit, nc: 0, m: 0 };
+  const target = filePrices.amount / quantity;
+  if (!rawUnit) return { vl: target, nc: 0, m: 0 };
+  const k = target / rawUnit;
+  return { vl: rawVl * k, nc: rawNc * k, m: rawM * k };
+}
+
+/** True when the file's own Thành tiền disagrees with its KL × đơn giá (beyond rounding) – the case `amountModeCustom` resolves. */
+export function amountMismatch(fileAmount: number | null, computedFromPrice: number | null): boolean {
+  return fileAmount !== null && computedFromPrice !== null && Math.abs(fileAmount - computedFromPrice) > 1;
+}
+
 export function computeEstimate(input: EstimateInput): EstimateResult {
   const resources = new Map(input.resources.map((r) => [r.code, r]));
   const byNorm = new Map<string, NormResource[]>();

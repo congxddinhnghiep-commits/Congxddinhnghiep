@@ -348,6 +348,10 @@ export function migrate(db: DB): void {
     ['source_raw_text', 'TEXT'],
     ['source_flags', 'TEXT'],
     ['name_zh', 'TEXT'],
+    // Update 4 fidelity: the file's own unit prices/Thành tiền (JSON) + which one is applied ('file' keeps the file's
+    // Thành tiền when it disagrees with KL×đơn giá, 'calc' recomputes from KL×đơn giá; null = no disagreement).
+    ['source_file_prices', 'TEXT'],
+    ['amount_mode', 'TEXT'],
     ['pricing_method', "TEXT NOT NULL DEFAULT 'NORM_BASED'"],
     ['custom_vl', 'REAL'],
     ['custom_nc', 'REAL'],

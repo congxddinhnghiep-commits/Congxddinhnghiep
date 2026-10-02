@@ -29,6 +29,8 @@ export function EstimateImportReview({
   const [overrides, setOverrides] = useState<Record<string, RowType | 'skip'>>({});
   const [choices, setChoices] = useState<Record<string, string | null>>({});
   const [pricing, setPricing] = useState<'file' | 'norm'>('file');
+  /** Update 4 fidelity: 'file' (default) keeps a row's own Thành tiền when it disagrees with KL×đơn giá; 'calc' recomputes. */
+  const [amountFidelity, setAmountFidelity] = useState<'file' | 'calc'>('file');
   const [onlyItems, setOnlyItems] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [templateName, setTemplateName] = useState('');
@@ -54,7 +56,7 @@ export function EstimateImportReview({
     setBusy(true);
     setError('');
     try {
-      const r = await api.importAnalyze({ fileId: a.fileId, projectId, pricingOption: pricing, ...body });
+      const r = await api.importAnalyze({ fileId: a.fileId, projectId, pricingOption: pricing, amountFidelity, ...body });
       apply(r, keepRange);
       if (!keepOverrides) setOverrides({});
       if (!keepChoices) setChoices({});
@@ -113,6 +115,7 @@ export function EstimateImportReview({
         lastRow,
         rowTypes: overrides,
         pricingOption: pricing,
+        amountFidelity,
         codeChoices: choices,
         allowNumericName,
         replaceImportId: replace?.importId,
@@ -284,6 +287,30 @@ export function EstimateImportReview({
         <label className="check">
           <input type="radio" name="pricing" data-testid="pricing-norm" checked={pricing === 'norm'} onChange={() => { setPricing('norm'); reanalyze({ pricingOption: 'norm' }); }} /> Tính lại theo định mức &amp; bộ giá của công trình
         </label>
+        {pricing === 'file' && (
+          <>
+            <label className="check">
+              <input
+                type="radio"
+                name="fidelity"
+                data-testid="fidelity-file"
+                checked={amountFidelity === 'file'}
+                onChange={() => { setAmountFidelity('file'); reanalyze({ amountFidelity: 'file' }); }}
+              />{' '}
+              Khi Thành tiền trong file khác KL×đơn giá: giữ Thành tiền theo file (khuyến nghị – khớp đúng Cộng trước thuế/TONGHOP)
+            </label>
+            <label className="check">
+              <input
+                type="radio"
+                name="fidelity"
+                data-testid="fidelity-calc"
+                checked={amountFidelity === 'calc'}
+                onChange={() => { setAmountFidelity('calc'); reanalyze({ amountFidelity: 'calc' }); }}
+              />{' '}
+              Tính lại theo KL×đơn giá (có thể khác tổng trong file)
+            </label>
+          </>
+        )}
       </div>
 
       <h4>Xem trước như sẽ hiện trong lưới dự toán (15 dòng đầu)</h4>
@@ -318,7 +345,15 @@ export function EstimateImportReview({
                   <td>{r.unit}</td>
                   <td className="num">{r.quantity === null ? '' : qty(r.quantity)}</td>
                   <td className="num">{r.unitPrice === null ? '' : money(r.unitPrice)}</td>
-                  <td className={`num ${!r.amount ? 'bad-cell' : ''}`}>{r.amount === null ? '' : money(r.amount)}</td>
+                  <td className={`num ${!r.amount ? 'bad-cell' : ''}`}>
+                    {r.amount === null ? '' : money(r.amount)}
+                    {r.amountMode && (
+                      <span className="hint" title="Thành tiền của file khác KL×đơn giá" data-testid="amount-mode-flag">
+                        {' '}
+                        {r.amountMode === 'file' ? '(theo file)' : '(tính lại)'}
+                      </span>
+                    )}
+                  </td>
                 </tr>
               ),
             )}

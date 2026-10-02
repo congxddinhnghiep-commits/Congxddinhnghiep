@@ -81,7 +81,11 @@ kiểu TONGHOP). Nút **⤓ Nhập nhiều sheet**:
    Dòng “diễn giải khối lượng” (Dài×Rộng×Cao×Số cấu kiện) dưới một công việc gắn vào công việc đó mà không đổi khối lượng của file.
 3. Mỗi khối có dấu ✔/⚠ đối chiếu Σ Thành tiền với dòng “Cộng trước thuế” của khối, và nếu có sheet tổng hợp thì đối chiếu thêm
    với dòng của nó. Sheet điện nước/MEP: dòng không có mã định mức đánh dấu “thiết bị/vật tư theo báo giá”, không bắt buộc mã.
-4. **Nhập dữ liệu** tạo tất cả hạng mục đã chọn trong một thao tác, hoàn tác được bằng **↶ Hoàn tác** ở khung trợ lý.
+4. **Trung thực với file**: khi Thành tiền của một dòng khác KL×đơn giá (ví dụ file ghi 0 dù vẫn có đơn giá vật liệu/nhân công),
+   mặc định phần mềm **giữ đúng Thành tiền trong file** (ghi rõ trong ghi chú công việc) để tổng từng khối/sheet luôn khớp
+   “Cộng trước thuế”/TONGHOP – chọn **Tính lại theo KL×đơn giá** nếu muốn bỏ qua số của file (áp dụng cho cả lần nhập, hoặc bấm
+   🔒/🧮 cạnh “Giá file” trên từng công việc sau khi đã nhập để đổi riêng dòng đó, không cần tải lại file).
+5. **Nhập dữ liệu** tạo tất cả hạng mục đã chọn trong một thao tác, hoàn tác được bằng **↶ Hoàn tác** ở khung trợ lý.
 
 Nút **↻ Nhập lại từ file Excel (thay thế hạng mục đã nhập)** cạnh ⚙ trên mỗi hạng mục đã nhập: luôn tải file mới và thay thế
 đúng hạng mục đó thành phiên bản hoàn tác được (khác với ⚙ “Sửa lại cột đã nhập” – mở lại dữ liệu đã lưu, không cần tải lại file).

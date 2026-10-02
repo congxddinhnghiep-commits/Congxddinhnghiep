@@ -81,7 +81,7 @@ try {
   step('import all 3 blocks in one go (undoable)');
   await page.getByTestId('import-sheets').click();
   await page.getByTestId('notice').waitFor();
-  assert.match(await page.getByTestId('notice').innerText(), /Đã nhập 14 công việc vào 3 hạng mục/);
+  assert.match(await page.getByTestId('notice').innerText(), /Đã nhập 15 công việc vào 3 hạng mục/);
   const catNames = await page.locator('.tab-body .cat-name').allInnerTexts();
   assert.deepEqual(catNames.sort(), ['CẦU NỐI', 'ĐIỆN TRUNG THẾ', 'NHÀ XƯỞNG A'].sort());
   await shot('3-imported');

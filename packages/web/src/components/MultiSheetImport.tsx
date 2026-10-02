@@ -54,7 +54,10 @@ function BlockPreview({ b }: { b: BlockPlanDTO }) {
                 <td>{r.unit}</td>
                 <td className="num">{r.quantity === null ? '' : qty(r.quantity)}</td>
                 <td className="num">{r.unitPrice === null ? '' : money(r.unitPrice)}</td>
-                <td className={`num ${r.unpriced ? 'bad-cell' : ''}`}>{r.amount === null ? '' : money(r.amount)}</td>
+                <td className={`num ${r.unpriced ? 'bad-cell' : ''}`}>
+                  {r.amount === null ? '' : money(r.amount)}
+                  {r.amountMode && <span className="hint" title="Thành tiền của file khác KL×đơn giá"> {r.amountMode === 'file' ? '(theo file)' : '(tính lại)'}</span>}
+                </td>
               </tr>
             ),
           )}
@@ -85,15 +88,24 @@ export function MultiSheetImport({
   const [showHidden, setShowHidden] = useState(false);
   const [pricingOption, setPricingOption] = useState<'file' | 'norm'>('file');
   const [equipmentAsQuote, setEquipmentAsQuote] = useState(true);
+  /** Update 4 fidelity: 'file' (default) keeps a row's own Thành tiền when it disagrees with KL×đơn giá; 'calc' recomputes. */
+  const [amountFidelity, setAmountFidelity] = useState<'file' | 'calc'>('file');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [openPreview, setOpenPreview] = useState<Set<string>>(new Set());
 
-  const analyze = async (sheetIndexes: number[], id = fileId, opts?: { pricingOption?: 'file' | 'norm'; equipmentAsQuote?: boolean }) => {
+  const analyze = async (sheetIndexes: number[], id = fileId, opts?: { pricingOption?: 'file' | 'norm'; equipmentAsQuote?: boolean; amountFidelity?: 'file' | 'calc' }) => {
     setBusy(true);
     setError('');
     try {
-      const r = await api.importAnalyzeMulti({ fileId: id, projectId, sheetIndexes, pricingOption: opts?.pricingOption ?? pricingOption, equipmentAsQuote: opts?.equipmentAsQuote ?? equipmentAsQuote });
+      const r = await api.importAnalyzeMulti({
+        fileId: id,
+        projectId,
+        sheetIndexes,
+        pricingOption: opts?.pricingOption ?? pricingOption,
+        equipmentAsQuote: opts?.equipmentAsQuote ?? equipmentAsQuote,
+        amountFidelity: opts?.amountFidelity ?? amountFidelity,
+      });
       setM(r);
     } catch (e) {
       setError((e as Error).message);
@@ -114,7 +126,7 @@ export function MultiSheetImport({
       setFileId(p.fileId);
       setFileName(file.name);
       setBusy(false);
-      const r = await api.importAnalyzeMulti({ fileId: p.fileId, projectId, pricingOption, equipmentAsQuote });
+      const r = await api.importAnalyzeMulti({ fileId: p.fileId, projectId, pricingOption, equipmentAsQuote, amountFidelity });
       setM(r);
       setSelected(new Set(r.selected));
     } catch (e) {
@@ -139,12 +151,16 @@ export function MultiSheetImport({
     setEquipmentAsQuote(v);
     analyze([...selected], fileId, { equipmentAsQuote: v });
   };
+  const changeFidelity = (v: 'file' | 'calc') => {
+    setAmountFidelity(v);
+    analyze([...selected], fileId, { amountFidelity: v });
+  };
 
   const doImport = async () => {
     setBusy(true);
     setError('');
     try {
-      const r = await api.importSheets(projectId, { fileId, sheetIndexes: [...selected], pricingOption, equipmentAsQuote });
+      const r = await api.importSheets(projectId, { fileId, sheetIndexes: [...selected], pricingOption, equipmentAsQuote, amountFidelity });
       onImported(r.message);
     } catch (e) {
       setError((e as Error).message);
@@ -256,6 +272,18 @@ export function MultiSheetImport({
               <input type="checkbox" checked={equipmentAsQuote} onChange={(e) => changeEquipment(e.target.checked)} /> Sheet điện nước/MEP: dòng không có mã là “thiết bị/vật tư
               theo báo giá” (không bắt buộc mã định mức)
             </label>
+            {pricingOption === 'file' && (
+              <>
+                <label className="check">
+                  <input type="radio" name="m-fidelity" checked={amountFidelity === 'file'} onChange={() => changeFidelity('file')} /> Khi Thành tiền trong file khác KL×đơn giá: giữ
+                  Thành tiền theo file (khuyến nghị – khớp đúng Cộng trước thuế/TONGHOP)
+                </label>
+                <label className="check">
+                  <input type="radio" name="m-fidelity" checked={amountFidelity === 'calc'} onChange={() => changeFidelity('calc')} /> Tính lại theo KL×đơn giá (có thể khác tổng trong
+                  file)
+                </label>
+              </>
+            )}
           </div>
 
           <h4>

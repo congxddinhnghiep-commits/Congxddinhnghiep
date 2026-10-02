@@ -309,6 +309,20 @@ export function EstimateGrid({
                                   {' '}ĐM {money(it.normUnitCost.total)}
                                 </span>
                               )}
+                              {it.amountMode && (
+                                <button
+                                  className="icon tiny amount-mode-flag"
+                                  data-testid={`amount-mode-${it.id}`}
+                                  title={
+                                    it.amountMode === 'file'
+                                      ? 'Thành tiền đang khoá theo file (khác KL×đơn giá) – bấm để tính lại theo KL×đơn giá'
+                                      : 'Đang tính theo KL×đơn giá (khác Thành tiền trong file) – bấm để dùng lại theo file'
+                                  }
+                                  onClick={() => run(() => api.setAmountMode(pid, it.id, it.amountMode === 'file' ? 'calc' : 'file'))}
+                                >
+                                  {it.amountMode === 'file' ? '🔒' : '🧮'}
+                                </button>
+                              )}
                             </>
                           ) : suggestions.has(it.id) ? (
                             <SuggestionCell projectId={pid} itemId={it.id} candidates={suggestions.get(it.id)!} onDone={reload} />

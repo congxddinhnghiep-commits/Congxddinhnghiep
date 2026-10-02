@@ -1,4 +1,5 @@
 import {
+  amountModeCustom,
   computeEstimate,
   computeUnitCost,
   computeProjectCost,
@@ -151,6 +152,8 @@ interface ItemRow {
   code_check: EstimateItem['codeCheck'];
   code_check_note: string | null;
   source_cells: string | null;
+  source_file_prices: string | null;
+  amount_mode: EstimateItem['amountMode'] | null;
 }
 const toItem = (r: ItemRow): EstimateItem & { sourceRawText: string | null; sourceFlags: string[] } => ({
   id: r.id,
@@ -175,11 +178,13 @@ const toItem = (r: ItemRow): EstimateItem & { sourceRawText: string | null; sour
           unit: r.source_unit,
           code: r.source_code,
           cells: r.source_cells ? JSON.parse(r.source_cells) : null,
+          filePrices: r.source_file_prices ? JSON.parse(r.source_file_prices) : null,
         }
       : null,
   sourceRawText: r.source_raw_text,
   sourceFlags: r.source_flags ? JSON.parse(r.source_flags) : [],
   nameZh: r.name_zh ?? null,
+  amountMode: r.amount_mode ?? null,
   pricingMethod: r.pricing_method ?? 'NORM_BASED',
   custom: r.pricing_method && r.pricing_method !== 'NORM_BASED' ? { vl: r.custom_vl ?? 0, nc: r.custom_nc ?? 0, m: r.custom_m ?? 0 } : null,
   priceSource: r.price_source,
@@ -454,6 +459,7 @@ export class Repo {
       normCodeRaw?: string | null;
       codeCheck?: EstimateItem['codeCheck'];
       codeCheckNote?: string | null;
+      amountMode?: EstimateItem['amountMode'];
     },
   ): EstimateItem {
     this.getCategory(projectId, data.categoryId);
@@ -490,6 +496,8 @@ export class Repo {
       .run(data.sourceRawText ?? null, data.sourceFlags?.length ? JSON.stringify(data.sourceFlags) : null, data.quantitySource ?? (data.quantityFormula ? 'FORMULA' : 'MANUAL'), newId);
     if (data.nameZh) this.db.prepare('UPDATE estimate_items SET name_zh = ? WHERE id = ?').run(data.nameZh, newId);
     if (data.source?.cells) this.db.prepare('UPDATE estimate_items SET source_cells = ? WHERE id = ?').run(JSON.stringify(data.source.cells), newId);
+    if (data.source?.filePrices) this.db.prepare('UPDATE estimate_items SET source_file_prices = ? WHERE id = ?').run(JSON.stringify(data.source.filePrices), newId);
+    if (data.amountMode) this.db.prepare('UPDATE estimate_items SET amount_mode = ? WHERE id = ?').run(data.amountMode, newId);
     if (data.normCodeRaw !== undefined || data.codeCheck !== undefined) {
       this.db.prepare('UPDATE estimate_items SET norm_code_raw = ?, code_check = ?, code_check_note = ? WHERE id = ?').run(data.normCodeRaw ?? null, data.codeCheck ?? null, data.codeCheckNote ?? null, newId);
     }
@@ -523,6 +531,21 @@ export class Repo {
         itemId,
       );
     if (touch) this.touchProject(projectId);
+    return this.getItem(projectId, itemId);
+  }
+
+  /**
+   * Toggle an imported item between "Thành tiền theo file" (keeps the file's own Thành tiền when it disagrees with
+   * KL×đơn giá) and "Tính lại theo KL×đơn giá" (Update 4 fidelity) – recomputes custom.{vl,nc,m} from the stored
+   * `source.filePrices`, no re-upload needed.
+   */
+  setAmountMode(projectId: number, itemId: number, mode: 'file' | 'calc'): EstimateItem {
+    const item = this.getItem(projectId, itemId);
+    const fp = item.source?.filePrices;
+    if (!fp) throw new HttpError(400, 'Công việc này không có dữ liệu đơn giá gốc từ file để chuyển chế độ');
+    const custom = amountModeCustom(fp, item.quantity, mode);
+    this.db.prepare('UPDATE estimate_items SET custom_vl = ?, custom_nc = ?, custom_m = ?, amount_mode = ? WHERE id = ?').run(custom.vl, custom.nc, custom.m, mode, itemId);
+    this.touchProject(projectId);
     return this.getItem(projectId, itemId);
   }
 

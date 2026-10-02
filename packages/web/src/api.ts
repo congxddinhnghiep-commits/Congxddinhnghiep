@@ -253,11 +253,13 @@ export interface Analysis {
     fileUnitPrice?: number | null;
     computedAmount?: number | null;
     normUnit?: number | null;
+    amountMode?: 'file' | 'calc' | null;
+    appliedAmount?: number | null;
     cells?: Record<string, string>;
     resolution?: CodeResolutionDTO;
   }[];
   columns: { index: number; letter: string; header: string; samples: string[]; label: string; hidden?: boolean }[];
-  gridPreview: { excelRow: number; type: string; stt: string; code: string; name: string; unit: string; quantity: number | null; unitPrice: number | null; amount: number | null; nameIsNumeric: boolean }[];
+  gridPreview: { excelRow: number; type: string; stt: string; code: string; name: string; unit: string; quantity: number | null; unitPrice: number | null; amount: number | null; nameIsNumeric: boolean; amountMode?: 'file' | 'calc' | null }[];
   columnWarnings: { field: string; column: number; letter: string; message: string; blocking: boolean }[];
   detectionNotes: string[];
   zeroAmountRows: number[];
@@ -298,6 +300,7 @@ export interface BlockPreviewRowDTO {
   details: number;
   tbvt: boolean;
   unpriced: boolean;
+  amountMode: 'file' | 'calc' | null;
 }
 export interface BlockPlanDTO {
   key: string;
@@ -594,6 +597,7 @@ export const api = {
   evaluateQuantity: (lines: QuantityLineDTO[], itemUnit: string) =>
     request<{ total: number; lines: QuantityLineDTO[]; errors: number }>('POST', '/quantity/evaluate', { lines, itemUnit }),
   setPricing: (pid: number, itemId: number, body: PricingDTO) => request('PUT', `/projects/${pid}/items/${itemId}/pricing`, body),
+  setAmountMode: (pid: number, itemId: number, mode: 'file' | 'calc') => request('PUT', `/projects/${pid}/items/${itemId}/amount-mode`, { mode }),
   mixDesigns: (params: { kind?: string; grade?: string; q?: string } = {}) =>
     request<MixDesignSummary[]>('GET', `/mix-designs?${new URLSearchParams(params as Record<string, string>).toString()}`),
   mixDesign: (code: string) => request<MixDesign>('GET', `/mix-designs/${encodeURIComponent(code)}`),
@@ -643,9 +647,9 @@ export const api = {
   importPreview: (fileId: string, sheetIndex: number, target: ImportTarget) =>
     request<ImportPreview>('POST', '/import/preview', { fileId, sheetIndex, target }),
   importApply: (body: Record<string, unknown>) => request<{ message: string; count: number }>('POST', '/import/apply', body),
-  importAnalyzeMulti: (body: { fileId: string; projectId: number; sheetIndexes?: number[]; pricingOption?: 'file' | 'norm'; equipmentAsQuote?: boolean }) =>
+  importAnalyzeMulti: (body: { fileId: string; projectId: number; sheetIndexes?: number[]; pricingOption?: 'file' | 'norm'; equipmentAsQuote?: boolean; amountFidelity?: 'file' | 'calc' }) =>
     request<AnalyzeMultiResult>('POST', '/import/analyze-multi', body),
-  importSheets: (pid: number, body: { fileId: string; sheetIndexes?: number[]; pricingOption?: 'file' | 'norm'; equipmentAsQuote?: boolean; autoAssignThreshold?: number }) =>
+  importSheets: (pid: number, body: { fileId: string; sheetIndexes?: number[]; pricingOption?: 'file' | 'norm'; equipmentAsQuote?: boolean; amountFidelity?: 'file' | 'calc'; autoAssignThreshold?: number }) =>
     request<ImportSheetsResult>('POST', `/projects/${pid}/import-sheets`, body),
 };
 

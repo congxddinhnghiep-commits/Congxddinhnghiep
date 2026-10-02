@@ -124,6 +124,9 @@ export interface MultiOptions {
   sheetIndexes?: number[];
   pricingOption?: 'file' | 'norm';
   equipmentAsQuote?: boolean;
+  /** Update 4 fidelity: 'file' (default) keeps a row's own Thành tiền when it disagrees with KL×đơn giá; 'calc' recomputes. */
+  amountFidelity?: 'file' | 'calc';
+  amountModeOverrides?: Record<string, 'file' | 'calc'>;
 }
 
 export function sheetOverview(f: ParsedFile) {
@@ -146,7 +149,7 @@ export function analyzeSheets(db: DB, repo: Repo, f: ParsedFile, o: MultiOptions
     const sheet = overview[idx];
     if (!sheet.importable) continue;
     for (let b = 0; b < sheet.blocks; b++) {
-      const a = analyze(db, repo, f, { sheetIndex: idx, blockIndex: b, projectId: o.projectId, pricingOption: o.pricingOption ?? 'file', equipmentAsQuote: o.equipmentAsQuote });
+      const a = analyze(db, repo, f, { sheetIndex: idx, blockIndex: b, projectId: o.projectId, pricingOption: o.pricingOption ?? 'file', equipmentAsQuote: o.equipmentAsQuote, amountFidelity: o.amountFidelity, amountModeOverrides: o.amountModeOverrides });
       if (!a.header) continue;
       const blk = a.blocks[b];
       let prefix = blk?.title || (sheet.blocks > 1 ? `${sheet.label} – khối ${b + 1}` : sheet.label);
@@ -179,7 +182,7 @@ export function analyzeSheets(db: DB, repo: Repo, f: ParsedFile, o: MultiOptions
         items: items.length,
         details: rows.filter((r) => r.type === 'detail').length,
         categories: rows.filter((r) => r.type === 'category').map((r) => r.category ?? r.name),
-        unpriced: items.filter((r) => !(r.computedAmount && r.computedAmount > 0)).length,
+        unpriced: items.filter((r) => !((r.appliedAmount ?? r.computedAmount) && (r.appliedAmount ?? r.computedAmount)! > 0)).length,
         missingUnit: items.filter((r) => !r.unit).length,
         tbvt: items.filter((r) => r.tbvt).length,
         fileTotal,
@@ -248,7 +251,7 @@ export function importSheets(db: DB, repo: Repo, f: ParsedFile, projectId: numbe
   let withCode = 0;
   db.transaction(() => {
     for (const p of plan.blocks) {
-      const r = importEstimate(db, repo, f, projectId, { sheetIndex: p.sheetIndex, blockIndex: p.blockIndex, pricingOption: o.pricingOption ?? 'file', equipmentAsQuote: o.equipmentAsQuote, categoryPrefix: p.prefix }, user);
+      const r = importEstimate(db, repo, f, projectId, { sheetIndex: p.sheetIndex, blockIndex: p.blockIndex, pricingOption: o.pricingOption ?? 'file', equipmentAsQuote: o.equipmentAsQuote, categoryPrefix: p.prefix, amountFidelity: o.amountFidelity, amountModeOverrides: o.amountModeOverrides }, user);
       undo = [...r.undo, ...undo];
       results.push({ sheetName: p.sheetName, title: p.title, prefix: p.prefix, created: r.created, categories: r.categories, importId: r.importId });
       itemIds.push(...r.itemIds);

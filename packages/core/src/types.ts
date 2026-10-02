@@ -82,6 +82,11 @@ export interface EstimateItem {
   codeStatus?: '' | 'manual' | 'imported' | 'auto' | 'confirmed' | 'tbvt';
   /** Chinese name of a bilingual estimate (kept for bilingual reports). */
   nameZh?: string | null;
+  /**
+   * Fidelity of an imported price that disagrees with KL×đơn giá (Update 4): 'file' keeps the file's own Thành tiền
+   * (default), 'calc' recomputes from KL × đơn giá instead. null/undefined = not applicable (no disagreement, or not imported).
+   */
+  amountMode?: 'file' | 'calc' | null;
   codeConfidence?: number | null;
   /** Provenance of imported/assigned items – never overwritten. */
   source?: ItemSource | null;
@@ -130,6 +135,11 @@ export interface ItemSource {
   code?: string | null;
   /** Excel cell of each imported field, e.g. { quantity: 'E6', vl: 'F6' }. */
   cells?: Record<string, string> | null;
+  /**
+   * The file's own unit prices and Thành tiền (Update 4 fidelity), kept so the applied amount can be toggled between
+   * "theo file" and "tính lại theo KL×đơn giá" (`amountMode`) without re-uploading the file.
+   */
+  filePrices?: { vl: number | null; nc: number | null; m: number | null; unit: number | null; amount: number | null } | null;
 }
 
 /** Cost settings stored per project. All rates are percentages (e.g. 6.5 means 6.5%). */

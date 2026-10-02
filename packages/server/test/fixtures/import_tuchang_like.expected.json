@@ -101,6 +101,15 @@
      "nc": 0,
      "tt": 0,
      "details": 0
+    },
+    {
+     "type": "item",
+     "stt": "8",
+     "qty": 300,
+     "vl": 180000,
+     "nc": 95000,
+     "tt": 0,
+     "details": 0
     }
    ]
   },
@@ -155,6 +164,12 @@
  },
  "chinese_expected": {
   "1": "挖土基础"
+ },
+ "fidelity_mismatch": {
+  "stt": "8",
+  "name": "Lợp tole mái tôn chống nóng dày 5cm",
+  "fileAmount": 0,
+  "calcAmount": 82500000
  },
  "expected_code_family": {
   "1b": "AC.2",

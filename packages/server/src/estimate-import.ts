@@ -1,4 +1,6 @@
 import {
+  amountMismatch,
+  amountModeCustom,
   canonicalNormCode,
   classifyRows,
   classifySheet,
@@ -6,6 +8,7 @@ import {
   detectHeader,
   ESTIMATE_FIELDS,
   evaluateFormula,
+  formatNumber,
   isSumFormula,
   headerFingerprint,
   headerTexts,
@@ -57,6 +60,13 @@ export interface AnalyzeOptions {
   blockIndex?: number;
   /** MEP / equipment sheets: rows without a norm code are "thiết bị / vật tư theo báo giá" (default true). */
   equipmentAsQuote?: boolean;
+  /**
+   * When a row's own Thành tiền disagrees with its KL×đơn giá (Update 4 fidelity): 'file' (default) applies the file's
+   * Thành tiền exactly so block/sheet totals match "Cộng trước thuế"/TONGHOP; 'calc' recomputes from KL×đơn giá instead.
+   * Per-row overrides via `amountModeOverrides` (0-based row index → mode).
+   */
+  amountFidelity?: 'file' | 'calc';
+  amountModeOverrides?: Record<string, 'file' | 'calc'>;
 }
 
 const MEP_NAME = /^\d{1,2}\s*[-_.]|\b(dien(?! tich)|nuoc|pccc|chua chay|thong gio|dieu hoa|mep|thiet bi|tbvt|camera|bao chay|chong set|thang may)\b/;
@@ -137,6 +147,14 @@ export interface AnalyzedRow extends ClassifiedRow {
   computedAmount?: number | null;
   /** Norm-based unit cost of the resolved code ("giá theo định mức"). */
   normUnit?: number | null;
+  /**
+   * Update 4 fidelity: set only when the file's own Thành tiền disagrees with KL×đơn giá. 'file' (default) applies the
+   * file's Thành tiền; 'calc' recomputes from KL×đơn giá instead (chosen in bulk via `amountFidelity` or per row via
+   * `amountModeOverrides`).
+   */
+  amountMode?: 'file' | 'calc' | null;
+  /** The amount actually applied on import / shown in the grid preview (`amount` when 'calc', the file's Thành tiền when 'file'). */
+  appliedAmount?: number | null;
 }
 
 export interface Reconciliation {
@@ -318,6 +336,20 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
     const q = r.quantity;
     const usedUnit = (o.pricingOption ?? 'file') === 'norm' ? out.normUnit ?? null : out.fileUnitPrice;
     out.computedAmount = q !== null && usedUnit !== null && usedUnit !== undefined ? q * usedUnit : null;
+    if (out.type === 'item' && (o.pricingOption ?? 'file') === 'file' && amountMismatch(r.amount, out.computedAmount ?? null)) {
+      const resolved = o.amountModeOverrides?.[String(r.index)] ?? o.amountFidelity ?? 'file';
+      out.amountMode = resolved;
+      out.appliedAmount = resolved === 'file' ? r.amount : out.computedAmount;
+      const vnd = (x: number | null) => (x === null ? '' : `${formatNumber(x, 0)} đ`);
+      out.warnings = [
+        ...out.warnings,
+        resolved === 'file'
+          ? `Thành tiền theo file: ${vnd(r.amount)} (khác KL×đơn giá ${vnd(out.computedAmount)}) – áp dụng theo file, không tính theo KL×đơn giá`
+          : `Tính theo KL×đơn giá: ${vnd(out.computedAmount)} (khác Thành tiền trong file ${vnd(r.amount)})`,
+      ];
+    } else {
+      out.appliedAmount = out.computedAmount;
+    }
     return out;
   });
   const counts = {} as Record<RowType, number>;
@@ -341,9 +373,12 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
         const diff = r.amount !== null && r.computedAmount !== null && r.computedAmount !== undefined ? r.computedAmount - r.amount : null;
         const ok = diff === null ? null : Math.abs(diff) <= TOL;
         recon.items.push({ excelRow: r.excelRow, name: r.name, quantity: r.quantity, unitPrice: (o.pricingOption ?? 'file') === 'norm' ? r.normUnit ?? null : r.fileUnitPrice ?? null, fileAmount: r.amount, computed: r.computedAmount ?? null, diff, ok });
-        if (ok === false) recon.allOk = false;
-        catComputed += r.computedAmount ?? 0;
-        recon.grand.computed += r.computedAmount ?? 0;
+        // A mismatch resolved by locking to the file's own Thành tiền is no longer a reason to flag the overall import –
+        // it is exactly why the applied total now matches the file; only an explicit "tính lại" override keeps it flagged.
+        if (ok === false && r.amountMode !== 'file') recon.allOk = false;
+        const applied = r.appliedAmount ?? r.computedAmount ?? 0;
+        catComputed += applied;
+        recon.grand.computed += applied;
       } else if (t === 'category') catComputed = 0;
       else if (t === 'subtotal' && r.amount !== null) {
         if (AFTER_TAX_RE.test(normalizeText(r.name || r.code || ''))) continue;
@@ -393,6 +428,7 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
     .map((r) => {
       const t = typeOf(r);
       const unitPrice = (o.pricingOption ?? 'file') === 'norm' ? r.normUnit ?? null : r.fileUnitPrice ?? null;
+      const applied = r.appliedAmount ?? r.computedAmount ?? null;
       return {
         excelRow: r.excelRow,
         type: t,
@@ -402,15 +438,16 @@ export function analyze(db: DB, repo: Repo, f: ParsedFile, o: AnalyzeOptions) {
         unit: r.unit,
         quantity: r.quantity,
         unitPrice,
-        amount: r.computedAmount ?? null,
+        amount: applied,
         nameIsNumeric: parseFlexibleNumber(r.name) !== null,
         nameZh: r.nameZh || null,
         details: r.details.length,
         tbvt: !!r.tbvt,
-        unpriced: t === 'item' && !(r.computedAmount && r.computedAmount > 0),
+        unpriced: t === 'item' && !(applied && applied > 0),
+        amountMode: r.amountMode ?? null,
       };
     });
-  const zeroItems = rows.filter((r) => typeOf(r) === 'item' && (r.quantity ?? 0) > 0 && !(r.computedAmount && r.computedAmount > 0));
+  const zeroItems = rows.filter((r) => typeOf(r) === 'item' && (r.quantity ?? 0) > 0 && !((r.appliedAmount ?? r.computedAmount) && (r.appliedAmount ?? r.computedAmount)! > 0));
   if (kind === 'estimate' && zeroItems.length) {
     warnings.push(`${zeroItems.length} công việc sẽ có thành tiền = 0 (chưa có đơn giá trong file${(o.pricingOption ?? 'file') === 'norm' ? '/định mức' : ''} hoặc chưa map cột đơn giá) – kiểm tra ánh xạ cột trước khi nhập.`);
   }
@@ -590,6 +627,8 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
         r.brand && `Nhãn hiệu/Xuất xứ: ${r.brand}`,
         !hasFilePrice && !(r.amount && r.amount > 0) && 'Chưa có đơn giá',
         !r.unit && 'Thiếu đơn vị',
+        r.amountMode === 'file' && `Thành tiền theo file: ${formatNumber(r.amount ?? 0, 0)} đ (khác KL×đơn giá ${formatNumber(r.computedAmount ?? 0, 0)} đ) – bấm "Tính lại KL×ĐG" nếu muốn dùng số tính lại`,
+        r.amountMode === 'calc' && `Tính theo KL×đơn giá: ${formatNumber(r.computedAmount ?? 0, 0)} đ (khác Thành tiền trong file ${formatNumber(r.amount ?? 0, 0)} đ)`,
       ].filter(Boolean);
       const item = repo.createItem(projectId, {
         categoryId: ensureDefault(),
@@ -613,14 +652,18 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
           unit: r.unit || null,
           code: r.code || null,
           cells,
+          filePrices: useFile ? { vl: p.vl, nc: p.nc, m: p.m, unit: p.unit, amount: r.amount } : null,
         },
         sourceRawText: r.rawName ?? null,
         sourceFlags: r.flags ?? [],
         quantitySource: 'IMPORTED',
+        amountMode: useFile ? r.amountMode ?? undefined : undefined,
         pricing: useFile
           ? {
               pricingMethod: 'CUSTOM_GTT',
-              custom: p.vl !== null || p.nc !== null || p.m !== null ? { vl: p.vl ?? 0, nc: p.nc ?? 0, m: p.m ?? 0 } : { vl: p.unit ?? 0, nc: 0, m: 0 },
+              // Update 4 fidelity: when the file's own Thành tiền disagrees with KL×đơn giá, scale VL/NC/M so quantity ×
+              // (vl+nc+m) reproduces the chosen total exactly ('file', default) instead of the raw per-unit prices ('calc').
+              custom: amountModeCustom({ vl: p.vl, nc: p.nc, m: p.m, unit: p.unit, amount: r.amount }, r.quantity ?? 0, r.amountMode === 'calc' ? 'calc' : 'file'),
               priceSource: !hasFilePrice
                 ? null
                 : fileMode && !isGtt
