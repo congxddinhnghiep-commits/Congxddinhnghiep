@@ -7,14 +7,18 @@ import {
   parseVariables,
   QuantityError,
   BUILDING_TYPE_LABELS,
+  ELEMENT_DEFAULTS,
+  ELEMENT_TYPE_LABELS,
   evaluateFormula,
   FormulaError,
   isFormula,
   TT36_WORK_CATEGORIES,
   type BuildingType,
+  type ElementType,
   type ProjectCostSettings,
   type RowType,
 } from '@dutoan/core';
+import { TakeoffService } from './takeoff.js';
 import { AiRegistry, type AiConfig, type ProviderFactory } from './ai/registry.js';
 import { AssistantService, autoAssignPlan } from './assistant.js';
 import { AuthService, requireAdmin, requirePasswordChanged } from './auth.js';
@@ -84,6 +88,7 @@ export function createApp(db: DB, opts: { serveWeb?: boolean; ai?: { cfg?: AiCon
   const priceBooks = new PriceBookService(db, repo);
   repo.priceResolver = (pid) => priceBooks.resolve(pid);
   const regional = new RegionalUpdateService(db, repo, priceBooks);
+  const takeoff = new TakeoffService(db, repo);
   const aiRegistry = new AiRegistry(db, opts.ai?.cfg, opts.ai?.factory);
   const assistant = new AssistantService(repo, aiRegistry, {
     regional,
@@ -957,6 +962,85 @@ export function createApp(db: DB, opts: { serveWeb?: boolean; ai?: { cfg?: AiCon
     requireAdmin,
     h((req) => {
       db.prepare('DELETE FROM import_templates WHERE id = ?').run(id(req.params.tid));
+    }),
+  );
+
+  // Update 5 — Bóc khối lượng theo cấu kiện
+  api.get('/takeoff/element-types', h(() => ({ labels: ELEMENT_TYPE_LABELS, defaults: ELEMENT_DEFAULTS })));
+
+  api.get('/projects/:id/stories', h((req) => takeoff.listStories(proj(req).id)));
+  api.post('/projects/:id/stories', h((req) => takeoff.createStory(proj(req).id, req.body ?? {})));
+  api.put('/projects/:id/stories/:sid', h((req) => takeoff.updateStory(proj(req).id, id(req.params.sid), req.body ?? {})));
+  api.delete(
+    '/projects/:id/stories/:sid',
+    h((req) => {
+      takeoff.deleteStory(proj(req).id, id(req.params.sid));
+    }),
+  );
+
+  const elementType = (v: unknown): ElementType => {
+    if (typeof v !== 'string' || !(v in ELEMENT_TYPE_LABELS)) throw new HttpError(400, 'Loại cấu kiện không hợp lệ');
+    return v as ElementType;
+  };
+  api.get('/projects/:id/takeoff/elements', h((req) => takeoff.elementsWithTasks(proj(req).id)));
+  api.post(
+    '/projects/:id/takeoff/elements',
+    h((req) => {
+      const b = req.body ?? {};
+      const el = takeoff.createElement(proj(req).id, { ...b, type: elementType(b.type) });
+      return { element: el, tasks: takeoff.tasksFor(proj(req).id, el) };
+    }),
+  );
+  api.put(
+    '/projects/:id/takeoff/elements/:eid',
+    h((req) => {
+      const el = takeoff.updateElement(proj(req).id, id(req.params.eid), req.body ?? {});
+      return { element: el, tasks: takeoff.tasksFor(proj(req).id, el) };
+    }),
+  );
+  api.delete(
+    '/projects/:id/takeoff/elements/:eid',
+    h((req) => {
+      takeoff.deleteElement(proj(req).id, id(req.params.eid));
+    }),
+  );
+  api.get(
+    '/projects/:id/takeoff/elements/:eid/tasks',
+    h((req) => takeoff.tasksFor(proj(req).id, takeoff.getElement(proj(req).id, id(req.params.eid)))),
+  );
+
+  api.get('/projects/:id/takeoff/manual', h((req) => takeoff.listManualRows(proj(req).id)));
+  api.post('/projects/:id/takeoff/manual/eval', h((req) => takeoff.evalManualRow(proj(req).id, req.body ?? {}, false)));
+  api.post('/projects/:id/takeoff/manual', h((req) => takeoff.evalManualRow(proj(req).id, req.body ?? {}, true)));
+  api.delete(
+    '/projects/:id/takeoff/manual/:rid',
+    h((req) => {
+      takeoff.deleteManualRow(proj(req).id, id(req.params.rid));
+    }),
+  );
+  api.post(
+    '/projects/:id/takeoff/manual/:rid/send',
+    h((req) => {
+      takeoff.sendManualRowToItem(proj(req).id, id(req.params.rid), id(String(req.body?.itemId)));
+    }),
+  );
+
+  api.get('/projects/:id/takeoff/rebar', h((req) => takeoff.listRebarRows(proj(req).id)));
+  api.get('/projects/:id/takeoff/rebar/summary', h((req) => takeoff.rebarSummary(proj(req).id)));
+  api.put('/projects/:id/takeoff/rebar', h((req) => takeoff.saveRebarRow(proj(req).id, req.body ?? {})));
+  api.delete(
+    '/projects/:id/takeoff/rebar/:rid',
+    h((req) => {
+      takeoff.deleteRebarRow(proj(req).id, id(req.params.rid));
+    }),
+  );
+
+  api.post('/projects/:id/takeoff/push/preview', h((req) => takeoff.pushPreview(proj(req).id, req.body ?? {})));
+  api.post('/projects/:id/takeoff/push/apply', h((req) => takeoff.pushApply(proj(req).id, req.body ?? {}, req.user!.username)));
+  api.post(
+    '/projects/:id/takeoff/push/:revisionId/undo',
+    h((req) => {
+      takeoff.undoPush(proj(req).id, id(req.params.revisionId));
     }),
   );
 

@@ -313,6 +313,71 @@ CREATE TABLE IF NOT EXISTS mix_design_materials (
   sort_order INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (mix_code, material, unit)
 );
+
+-- Update 5: element-based quantity take-off ("Bóc khối lượng theo cấu kiện").
+CREATE TABLE IF NOT EXISTS stories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  height_m REAL NOT NULL DEFAULT 0,
+  elevation_m REAL NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_stories_project ON stories(project_id);
+
+CREATE TABLE IF NOT EXISTS takeoff_elements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+  story_id INTEGER REFERENCES stories(id) ON DELETE SET NULL,
+  type TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  count INTEGER NOT NULL DEFAULT 1,
+  params_json TEXT NOT NULL DEFAULT '{}',
+  enabled_json TEXT NOT NULL DEFAULT '{}',
+  overrides_json TEXT NOT NULL DEFAULT '{}',
+  material TEXT,
+  note TEXT,
+  source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'excel', 'etabs')),
+  source_ref TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_takeoff_elements_project ON takeoff_elements(project_id);
+
+-- Manual calculation ("Bảng tính tay" + "Bảng tính nhanh", section E) rows, not tied to an element.
+CREATE TABLE IF NOT EXISTS manual_sheet_rows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  mode TEXT NOT NULL DEFAULT 'expression' CHECK (mode IN ('expression', 'quick')),
+  drawing_name TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT '',
+  expression TEXT,
+  quick_n REAL, quick_a REAL, quick_l REAL, quick_h REAL,
+  result REAL,
+  target_item_id INTEGER REFERENCES estimate_items(id) ON DELETE SET NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_manual_sheet_rows_project ON manual_sheet_rows(project_id);
+
+-- "Bảng thống kê cốt thép" (section D).
+CREATE TABLE IF NOT EXISTS rebar_schedule_rows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  element_id INTEGER REFERENCES takeoff_elements(id) ON DELETE SET NULL,
+  cau_kien TEXT NOT NULL DEFAULT '',
+  so_hieu TEXT,
+  shape_code TEXT,
+  l1 REAL, l2 REAL, l3 REAL, l4 REAL, l5 REAL, l6 REAL,
+  note TEXT,
+  dia_mm REAL NOT NULL DEFAULT 0,
+  chieu_dai_1_thanh_mm REAL,
+  so_cau_kien INTEGER NOT NULL DEFAULT 1,
+  so_thanh_1_cau_kien INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_rebar_rows_project ON rebar_schedule_rows(project_id);
 `;
 
 const columns = (db: DB, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
@@ -440,6 +505,15 @@ export function migrate(db: DB): void {
   ];
   for (const [c, t] of normCols) if (!ncols.includes(c)) db.exec(`ALTER TABLE norms ADD COLUMN ${c} ${t}`);
   if (!columns(db, 'norm_resources').includes('pct_base')) db.exec(`ALTER TABLE norm_resources ADD COLUMN pct_base TEXT`);
+
+  // Update 5: traceability of estimate_items created/updated by "Đẩy sang dự toán" (section F).
+  const icols2 = columns(db, 'estimate_items');
+  const takeoffItemCols: [string, string][] = [
+    ['takeoff_key', 'TEXT'],
+    ['takeoff_pushed_quantity', 'REAL'],
+  ];
+  for (const [c, t] of takeoffItemCols) if (!icols2.includes(c)) db.exec(`ALTER TABLE estimate_items ADD COLUMN ${c} ${t}`);
+  if (!columns(db, 'projects').includes('takeoff_settings')) db.exec(`ALTER TABLE projects ADD COLUMN takeoff_settings TEXT`);
 }
 
 export function openDb(file: string): DB {

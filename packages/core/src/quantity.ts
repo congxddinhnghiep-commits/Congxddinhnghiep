@@ -9,11 +9,38 @@ export type QNode =
   | { t: 'num'; v: number }
   | { t: 'var'; name: string }
   | { t: 'neg'; x: QNode }
-  | { t: 'bin'; op: '+' | '-' | '*' | '/'; a: QNode; b: QNode };
+  | { t: 'bin'; op: '+' | '-' | '*' | '/'; a: QNode; b: QNode }
+  | { t: 'call'; name: string; args: QNode[] };
 
 export class QuantityError extends Error {}
 
 export const QTY_LIMITS = { maxLength: 500, maxDepth: 40, maxNodes: 400 };
+
+/**
+ * Whitelisted functions for "Bảng tính tay" / manual formulas (Update 5 section E):
+ * tron = round(x, n decimals); chuvi_cn/dt_cn = chu vi/diện tích chữ nhật; dt_tron = diện tích hình tròn (d = đường kính);
+ * tt_hop/tt_tru/tt_chop_cut = thể tích hộp/trụ/chóp cụt (chóp cụt = same shape as the sloped-pit excavation formula).
+ */
+const FUNCTIONS: Record<string, (args: number[]) => number> = {
+  tron: (a) => {
+    const n = a[1] ?? 0;
+    const f = Math.pow(10, n);
+    return Math.round(a[0] * f) / f;
+  },
+  sqrt: (a) => {
+    if (a[0] < 0) throw new QuantityError('sqrt của số âm');
+    return Math.sqrt(a[0]);
+  },
+  min: (a) => Math.min(...a),
+  max: (a) => Math.max(...a),
+  abs: (a) => Math.abs(a[0]),
+  chuvi_cn: (a) => 2 * (a[0] + a[1]),
+  dt_cn: (a) => a[0] * a[1],
+  dt_tron: (a) => (Math.PI * a[0] * a[0]) / 4,
+  tt_hop: (a) => a[0] * a[1] * a[2],
+  tt_tru: (a) => (Math.PI * a[0] * a[0] * a[1]) / 4,
+  tt_chop_cut: ([a, b, a2, b2, h]) => (h / 6) * (a * b + (a + a2) * (b + b2) + a2 * b2),
+};
 
 type Tok = { k: 'num'; v: number } | { k: 'id'; v: string } | { k: 'op'; v: string };
 
@@ -32,7 +59,7 @@ function tokenize(src: string): Tok[] {
       i++;
       continue;
     }
-    if ('+-*/()'.includes(c)) {
+    if ('+-*/(),'.includes(c)) {
       out.push({ k: 'op', v: c });
       i++;
       continue;
@@ -125,6 +152,20 @@ export function parseQuantity(src: string): QNode {
     }
     if (t.k === 'id') {
       p++;
+      if (isOp('(')) {
+        p++;
+        const args: QNode[] = [];
+        if (!isOp(')')) {
+          args.push(expr(d + 1));
+          while (isOp(',')) {
+            p++;
+            args.push(expr(d + 1));
+          }
+        }
+        if (!isOp(')')) throw new QuantityError('Thiếu dấu ")"');
+        p++;
+        return node({ t: 'call', name: t.v, args });
+      }
       return node({ t: 'var', name: t.v });
     }
     throw new QuantityError(`Không mong đợi "${t.v}"`);
@@ -140,7 +181,10 @@ export function evalQuantity(ast: QNode, vars: Record<string, number> = {}): num
       return ast.v;
     case 'var': {
       const key = Object.keys(vars).find((k) => k.toLowerCase() === ast.name.toLowerCase());
-      if (key === undefined) throw new QuantityError(`Biến "${ast.name}" chưa có giá trị`);
+      if (key === undefined) {
+        if (ast.name.toLowerCase() === 'pi') return Math.PI;
+        throw new QuantityError(`Biến "${ast.name}" chưa có giá trị`);
+      }
       const v = vars[key];
       if (!Number.isFinite(v)) throw new QuantityError(`Biến "${ast.name}" không hợp lệ`);
       return v;
@@ -156,6 +200,11 @@ export function evalQuantity(ast: QNode, vars: Record<string, number> = {}): num
       if (b === 0) throw new QuantityError('Chia cho 0');
       return a / b;
     }
+    case 'call': {
+      const fn = FUNCTIONS[ast.name.toLowerCase()];
+      if (!fn) throw new QuantityError(`Hàm "${ast.name}" không được hỗ trợ`);
+      return fn(ast.args.map((a) => evalQuantity(a, vars)));
+    }
   }
 }
 
@@ -165,6 +214,8 @@ export function variablesOf(ast: QNode, acc = new Set<string>()): Set<string> {
   else if (ast.t === 'bin') {
     variablesOf(ast.a, acc);
     variablesOf(ast.b, acc);
+  } else if (ast.t === 'call') {
+    for (const a of ast.args) variablesOf(a, acc);
   }
   return acc;
 }
@@ -173,6 +224,37 @@ export function variablesOf(ast: QNode, acc = new Set<string>()): Set<string> {
 export function evaluateQuantity(expression: string, vars: Record<string, number> = {}): number {
   const v = evalQuantity(parseQuantity(expression), vars);
   return Math.round(v * 1e9) / 1e9;
+}
+
+export interface ManualFormulaResult {
+  value: number;
+  variables: Record<string, number>;
+}
+
+/**
+ * Evaluate a "Bảng tính tay" manual formula (Update 5 section E.1): named variables separated by
+ * ";" or newline, a trailing result expression, and "// ..." end-of-line comments, e.g.
+ * "a=3,5; b=4,2; 2*(a+b)*0,2*3 // tường bao" → { value: 9.24, variables: { a: 3.5, b: 4.2 } }.
+ */
+export function evaluateManualFormula(input: string): ManualFormulaResult {
+  const noComments = input
+    .split('\n')
+    .map((line) => line.replace(/\/\/.*$/, ''))
+    .join('\n');
+  const parts = noComments
+    .split(/[;\n]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (!parts.length) throw new QuantityError('Công thức rỗng');
+  const vars: Record<string, number> = {};
+  let value: number | null = null;
+  for (const part of parts) {
+    const m = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/.exec(part);
+    if (m) vars[m[1]] = evaluateQuantity(m[2], vars);
+    else value = evaluateQuantity(part, vars);
+  }
+  if (value === null) throw new QuantityError('Thiếu biểu thức kết quả');
+  return { value, variables: vars };
 }
 
 /** Parse "L=6,6; W=14.2 H=3,8" into a variable map. */
