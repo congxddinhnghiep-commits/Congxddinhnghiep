@@ -133,7 +133,7 @@
   }
  ],
  "sheet_mep": "01-Điện trung thế ",
- "mep_total": 447000000,
+ "mep_total": 827000000,
  "mep_rows": [
   {
    "stt": "1",
@@ -146,9 +146,19 @@
   {
    "stt": "3",
    "tt": 27000000
+  },
+  {
+   "stt": "II",
+   "tt": 380000000
   }
  ],
- "grand_total": 1430954000.0,
+ "mep_nested_categories": ["A", "I", "I.1"],
+ "mep_lump_sum": {
+  "stt": "II",
+  "name": "Vật tư phụ trợ trọn gói thi công",
+  "tt": 380000000
+ },
+ "grand_total": 1810954000.0,
  "names_expected": {
   "1b": "Ép cọc Φ400  L=20m",
   "1c": "Đập đầu cọc",

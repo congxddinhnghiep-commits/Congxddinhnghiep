@@ -76,12 +76,12 @@ try {
   step('TONGHOP reconciliation table: every line matched, total matches');
   await page.getByTestId('summary-check').waitFor();
   const summaryTxt = await page.getByTestId('summary-check').innerText();
-  for (const v of ['Nhà xưởng A', 'Cầu nối', 'Điện trung thế', '1.430.954.000']) assert.ok(summaryTxt.includes(v));
+  for (const v of ['Nhà xưởng A', 'Cầu nối', 'Điện trung thế', '1.810.954.000']) assert.ok(summaryTxt.includes(v));
 
   step('import all 3 blocks in one go (undoable)');
   await page.getByTestId('import-sheets').click();
   await page.getByTestId('notice').waitFor();
-  assert.match(await page.getByTestId('notice').innerText(), /Đã nhập 15 công việc vào 3 hạng mục/);
+  assert.match(await page.getByTestId('notice').innerText(), /Đã nhập 16 công việc vào 3 hạng mục/);
   const catNames = await page.locator('.tab-body .cat-name').allInnerTexts();
   assert.deepEqual(catNames.sort(), ['CẦU NỐI', 'ĐIỆN TRUNG THẾ', 'NHÀ XƯỞNG A'].sort());
   await shot('3-imported');

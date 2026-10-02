@@ -163,10 +163,11 @@ export function amountModeCustom(
   const rawVl = filePrices.vl ?? 0;
   const rawNc = filePrices.nc ?? 0;
   const rawM = filePrices.m ?? 0;
-  const rawUnit = rawVl || rawNc || rawM ? rawVl + rawNc + rawM : (filePrices.unit ?? 0);
-  if (mode === 'calc' || filePrices.amount === null || !quantity) return rawVl || rawNc || rawM ? { vl: rawVl, nc: rawNc, m: rawM } : { vl: rawUnit, nc: 0, m: 0 };
+  const split = rawVl || rawNc || rawM; // true when the file itself gives separate VL/NC/M columns, not just one combined price
+  const rawUnit = split ? rawVl + rawNc + rawM : (filePrices.unit ?? 0);
+  if (mode === 'calc' || filePrices.amount === null || !quantity) return split ? { vl: rawVl, nc: rawNc, m: rawM } : { vl: rawUnit, nc: 0, m: 0 };
   const target = filePrices.amount / quantity;
-  if (!rawUnit) return { vl: target, nc: 0, m: 0 };
+  if (!rawUnit || !split) return { vl: target, nc: 0, m: 0 };
   const k = target / rawUnit;
   return { vl: rawVl * k, nc: rawNc * k, m: rawM * k };
 }

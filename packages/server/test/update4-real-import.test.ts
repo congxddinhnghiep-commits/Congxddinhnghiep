@@ -45,6 +45,26 @@ describe('A-bis .xls (BIFF) with hidden sheets, several blocks per sheet and a T
     expect(r.blocks).toHaveLength(3);
   });
 
+  it('nested MEP subtotals ("A" ⊃ "I" ⊃ "I.1") never appear as công việc, and a lump-sum leaf ("II", chỉ có Thành tiền) is kept as 1 trọn gói', async () => {
+    const fileId = await upload();
+    const pid = await newProject('Tu Chang like – nested subtotals');
+    const r = (await request(app).post('/api/import/analyze-multi').set(A()).send({ fileId, projectId: pid })).body;
+    const mep = r.blocks.find((b: { sheetName: string }) => b.sheetName === expected.sheet_mep);
+    for (const stt of expected.mep_nested_categories) {
+      const row = mep.preview.find((p: { stt: string }) => p.stt === stt);
+      expect(row, `thiếu dòng hạng mục "${stt}"`).toBeTruthy();
+      expect(row.type, `"${stt}" phải là hạng mục, không phải công việc`).toBe('category');
+    }
+    const lump = expected.mep_lump_sum as { stt: string; name: string; tt: number };
+    const lumpRow = mep.preview.find((p: { name: string }) => p.name === lump.name);
+    expect(lumpRow, `thiếu dòng trọn gói "${lump.name}"`).toBeTruthy();
+    expect(lumpRow.quantity).toBe(1);
+    expect(lumpRow.amount).toBe(lump.tt);
+    // the block still reconciles exactly (827tr = 447tr của "I" + 380tr trọn gói của "II"), nested or not
+    expect(mep.ok).toBe(true);
+    expect(mep.total).toBe(expected.mep_total);
+  });
+
   it('reconciles every block against its own "Cộng trước thuế" and the sheet against TONGHOP', async () => {
     const fileId = await upload();
     const pid = await newProject('Tu Chang like – reconciliation');
@@ -75,7 +95,7 @@ describe('A-bis .xls (BIFF) with hidden sheets, several blocks per sheet and a T
     expect(r.tbvt).toBe(expected.mep_rows.length);
 
     const est = (await request(app).get(`/api/projects/${pid}/estimate`).set(A())).body as {
-      categories: { items: { id: number; name: string; nameZh?: string | null; unit: string; quantity: number; source: { code: string | null } | null; codeStatus: string; pricingMethod: string }[] }[];
+      categories: { items: { id: number; name: string; nameZh?: string | null; unit: string; quantity: number; amount: { total: number }; source: { code: string | null } | null; codeStatus: string; pricingMethod: string }[] }[];
     };
     const items = est.categories.flatMap((c) => c.items);
     // match by converted Vietnamese name (per names_expected)
@@ -101,6 +121,15 @@ describe('A-bis .xls (BIFF) with hidden sheets, several blocks per sheet and a T
     expect(recloser!.codeStatus).toBe('tbvt');
     const sugg = (await request(app).get(`/api/projects/${pid}/suggestions`).set(A())).body as { itemId: number }[];
     expect(sugg.some((s) => s.itemId === recloser!.id)).toBe(false);
+
+    // the lump-sum leaf ("II", no KL/ĐVT – only Thành tiền) imports as 1 trọn gói, not dropped nor double-counted,
+    // and the nested subtotal headings above it never show up as công việc of their own
+    const lump = expected.mep_lump_sum as { stt: string; name: string; tt: number };
+    const lumpItem = items.find((x) => x.name === lump.name);
+    expect(lumpItem, `thiếu công việc trọn gói "${lump.name}"`).toBeTruthy();
+    expect(lumpItem!.quantity).toBe(1);
+    expect(lumpItem!.amount.total).toBe(lump.tt);
+    for (const stt of ['A', 'I', 'I.1'] as const) expect(items.some((x) => x.name === stt)).toBe(false);
   });
 
   it('suggests the expected norm chapter per work (PL6 sửa chữa chapters excluded) for every coded line', async () => {

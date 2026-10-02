@@ -452,6 +452,11 @@ function isBareHeading(cells: string[], name: string, mapping: Partial<Record<Im
 const SUBTOTAL_RE = /^(cong(?!\s+(tac|trinh|viec|nghiep|ty|suat|dung|van|nhan|tho|cu|ich|nghe|thuc))|tong cong|tong(?!\s+(dai|the|thau|giam|thanh|nhan|dien|kho|luc|bo|quan|cuc|cot))|cong hang muc|cong phan|tong gia tri|tong so|gia tri|cong truoc thue|cong sau thue|tong chi phi|tong tien)\b/;
 const SUBTOTAL_CN = /小计|合计|总计/;
 const ROMAN_RE = /^(i|ii|iii|iv|v|vi|vii|viii|ix|x|xi|xii|xiii|xiv|xv|xvi|xvii|xviii|xix|xx)\.?$/;
+/**
+ * Outline STT of a group/subtotal heading: a roman numeral or single letter, optionally followed by dotted numeric
+ * sub-levels ("I", "A", "I.1", "II.2", "III.1.2") – never a leaf's own numbering ("6", "6.1"), which is always plain digits.
+ */
+const OUTLINE_RE = /^(i|ii|iii|iv|v|vi|vii|viii|ix|x|xi|xii|xiii|xiv|xv|xvi|xvii|xviii|xix|xx|[a-e])(\.\d+)*\.?$/;
 
 /** "Cổng xếp" (gate) normalises to "cong" like "Cộng" (sum): with diacritics the first word must really be Cộng / Tổng. */
 function subtotalWordOk(name: string): boolean {
@@ -558,8 +563,11 @@ export function classifyRows(
     }
     const hasQty = qVal !== null;
     const noPrice = row.prices.vl === null && row.prices.nc === null && row.prices.m === null && row.prices.unit === null && row.amount === null;
-    if (!priceMode && lastItem && !stt && !code && !unit && name && (hasQty || hasDims) && noPrice) {
+    if (!priceMode && lastItem && !stt && !code && name && (hasQty || hasDims) && noPrice) {
       // Quantity-breakdown row ("Móng M1: Dài × Rộng × Cao × Số cấu kiện") under an item: a diễn giải line, not a new item.
+      // A component sub-header ("Bê tông móng đá 1x2 M300", unit "m3", its own qty but no price) is the SAME thing – it
+      // still carries a unit (matching the parent's), unlike a pure dims breakdown, but a blank Stt/Mã and no price at
+      // all is what marks any row as belonging to the item right above it, never a separate (unpriced) work item.
       const factors = [dims.l, dims.w, dims.h, dims.n].filter((x): x is number => x !== null);
       const expression = factors.join('*');
       const product = factors.length ? factors.reduce((a, x) => a * x, 1) : null;
@@ -570,8 +578,11 @@ export function classifyRows(
       out.push(row);
       continue;
     }
-    if (!priceMode && name && !hasQty && !unit && !hasDims && !sumRows?.has(i) && row.amount !== null && row.amount > 0 && noPriceParts(row) && !ROMAN_RE.test(normalizeText(stt)) && !/^[a-e]\.?$/.test(normalizeText(stt)) && name !== name.toUpperCase() && !NOTE_START.test(normalizeText(name))) {
-      // lump-sum row ("Cổng xếp tự động … 60.000.000"): only a Thành tiền → 1 trọn gói, never dropped from the total
+    if (!priceMode && name && !hasDims && !sumRows?.has(i) && row.amount !== null && row.amount > 0 && noPriceParts(row) && name !== name.toUpperCase() && !NOTE_START.test(normalizeText(name))) {
+      // A row with NO price info at all (vl/nc/m/đơn giá all blank) but a positive Thành tiền is either a group/subtotal
+      // heading (its amount = the sum of the rows nested under it – checked below, `resolveLumps`) or a genuine lump-sum
+      // item ("Cổng xếp tự động … 60.000.000"). Having its own qty/ĐVT ("Nhà vệ sinh chung", 6 Phòng) doesn't change that –
+      // with no price to multiply, that qty is informational, not a KL×đơn giá leaf.
       row.type = 'item';
       row.quantity = 1;
       row.prices.unit = row.amount;
@@ -601,7 +612,7 @@ export function classifyRows(
     } else if (name && !hasQty && !unit) {
       const sttN = normalizeText(stt);
       const upper = name === name.toUpperCase() && /[A-ZÀ-Ỹ]/.test(name);
-      if (ROMAN_RE.test(sttN) || /^[a-e]\.?$/.test(sttN) || upper || /^(hang muc|phan|hm)\b/.test(normalizeText(name)) || /^[ivx]+[.\s]/i.test(name)) {
+      if (OUTLINE_RE.test(sttN) || upper || /^(hang muc|phan|hm)\b/.test(normalizeText(name)) || /^[ivx]+[.\s]/i.test(name)) {
         row.type = 'category';
         finishItem(lastItem);
         lastItem = null;
@@ -619,33 +630,67 @@ export function classifyRows(
     out.push(row);
   }
   finishItem(lastItem);
-  // A "lump-sum" row whose amount equals the sum of the items right below it is a group heading carrying its own subtotal
-  // (not an item – counting it would double the total).
-  for (const lump of lumps) {
-    let acc = 0;
-    let n = 0;
-    let match = false;
-    for (let k = out.indexOf(lump) + 1; k < out.length; k++) {
-      const x = out[k];
-      if (x.type === 'subtotal' || (x.type === 'category' && n > 0)) break;
-      if (x.type !== 'item' || lumps.includes(x)) continue;
-      acc += x.amount ?? 0;
-      n++;
-      if (Math.abs(acc - lump.amount!) <= 1) {
-        match = true;
-        break;
-      }
-      if (acc > lump.amount! + 1) break;
-    }
-    if (match) {
-      lump.type = 'category';
-      lump.category = lump.name;
-      lump.quantity = null;
-      lump.prices.unit = null;
-      lump.warnings = lump.warnings.filter((w) => !w.startsWith('Trọn gói'));
-    }
-  }
+  resolveLumps(out, lumps);
   return out;
+}
+
+/**
+ * A "lump" row (name + Thành tiền, no KL/ĐVT/đơn giá) is either a group/subtotal heading (its amount = the sum of the
+ * rows nested under it, possibly several outline levels deep: "A" ⊃ "I" ⊃ "I.1" ⊃ items 1-3, STT patterns like "I.1" are
+ * only a hint) or a genuine lump-sum work item ("Cổng xếp tự động … 60.000.000", nothing sums to it). Resolved with a
+ * single forward pass and a stack: every real item's amount is added to every still-open ancestor lump at once; an
+ * ancestor closes (category, matched) the moment its own running sum reaches its declared amount; a "Cộng/Tổng" row,
+ * a blank line, or the end of the sheet force-closes whatever is still open – unmatched ones stay lump-sum items, and
+ * their own amount is then credited once to whichever ancestor is still open (so "II" (380tr, no children) still
+ * counts toward its parent "A" even though it never resolves as a category itself).
+ */
+function resolveLumps(out: ClassifiedRow[], lumps: ClassifiedRow[]): void {
+  if (!lumps.length) return;
+  const stack: { row: ClassifiedRow; sum: number }[] = [];
+  const addLeaf = (amt: number) => {
+    for (const e of stack) e.sum += amt;
+  };
+  const closeTop = (forced: boolean) => {
+    const top = stack[stack.length - 1];
+    const target = top.row.amount ?? 0;
+    if (Math.abs(top.sum - target) <= 1) {
+      stack.pop();
+      top.row.type = 'category';
+      top.row.category = top.row.name;
+      top.row.quantity = null;
+      top.row.prices.unit = null;
+      top.row.warnings = top.row.warnings.filter((w) => !w.startsWith('Trọn gói'));
+      return true;
+    }
+    if (forced || top.sum > target + 1) {
+      stack.pop();
+      addLeaf(target); // an unresolved lump is a real item – its own amount now counts once toward its still-open parent
+      return true;
+    }
+    return false; // underfilled, not forced yet – keep waiting for more rows
+  };
+  const closeAll = (forced: boolean) => {
+    while (stack.length && closeTop(forced)) {
+      /* keep closing from the innermost out */
+    }
+  };
+  for (const x of out) {
+    // Only a "Cộng/Tổng" row is a real boundary. A blank line is just visual spacing WITHIN a block (sections can be
+    // separated by one without a group's own rows being finished yet) and must not force-close what's still open.
+    if (x.type === 'subtotal') {
+      closeAll(true);
+      continue;
+    }
+    if (x.type === 'empty') continue;
+    if (lumps.includes(x)) {
+      stack.push({ row: x, sum: 0 });
+      continue;
+    }
+    if (x.type !== 'item') continue; // a resolved/blank-amount category, a note, a detail line: transparent
+    addLeaf(x.amount ?? 0);
+    closeAll(false);
+  }
+  closeAll(true);
 }
 
 /** Classify a sheet by its name and detected columns. */

@@ -28,15 +28,31 @@ function printTable(headers: string[], rows: string[][], aligns: ('l' | 'r')[]) 
   for (const r of rows) console.log(line(r));
 }
 
-/** The rows of one block most responsible for Σ computed ≠ Σ file (by |diff|, descending). */
-function topDiffRows(db: ReturnType<typeof openDb>, repo: Repo, f: ParsedFile, b: BlockPlan, n = 3) {
+/**
+ * Proof for one mismatched block: the rows whose own KL×đơn giá disagrees with their own file Thành tiền (if any – these
+ * are already auto-corrected to the file value, shown here only for context), AND – the generic check that matters for
+ * "is this our bug or the file's own" – Σ of the file's OWN stated Thành tiền per row vs the file's OWN Cộng/Tổng cell.
+ * When those two disagree, the file is internally inconsistent and no importer fix can change that.
+ */
+function diagnoseDiff(db: ReturnType<typeof openDb>, repo: Repo, f: ParsedFile, b: BlockPlan, n = 3): string[] {
   const a = analyze(db, repo, f, { sheetIndex: b.sheetIndex, blockIndex: b.blockIndex, pricingOption: 'file', equipmentAsQuote: true });
   if (!a.reconciliation) return [];
-  return a.reconciliation.items
+  const lines: string[] = [];
+  const perRow = a.reconciliation.items
     .filter((i) => i.ok === false)
     .sort((x, y) => Math.abs(y.diff ?? 0) - Math.abs(x.diff ?? 0))
     .slice(0, n)
-    .map((i) => `dòng ${i.excelRow} "${(i.name ?? '').slice(0, 40)}": file ${money(i.fileAmount)} vs tính lại ${money(i.computed)} (lệch ${money(i.diff)})`);
+    .map((i) => `dòng ${i.excelRow} "${(i.name ?? '').slice(0, 40)}": file ghi ${money(i.fileAmount)} nhưng KL×đơn giá = ${money(i.computed)} (lệch ${money(i.diff)}) – đã tự áp dụng theo file`);
+  lines.push(...perRow);
+  const rawFileSum = a.rows.filter((r) => r.type === 'item').reduce((s, r) => s + (r.amount ?? 0), 0);
+  const fileTotal = a.reconciliation.grand.fileAmount;
+  if (fileTotal !== null && Math.abs(rawFileSum - fileTotal) > 1) {
+    lines.push(
+      `Σ Thành tiền từng dòng CHÍNH FILE ghi = ${money(rawFileSum)}, còn dòng Cộng/Tổng CHÍNH FILE ghi = ${money(fileTotal)} (lệch ${money(rawFileSum - fileTotal)}) ` +
+        `– đây là chênh lệch trong chính file (công thức Cộng không khớp các dòng công việc hiển thị), không phải do cách nhập.`,
+    );
+  }
+  return lines;
 }
 
 async function main() {
@@ -60,7 +76,8 @@ async function main() {
     const m = analyzeSheets(db, repo, f, {});
     for (const b of m.blocks) {
       const mark = b.ok === null ? '·' : b.ok ? '✔' : '⚠';
-      console.log(`${mark} [${b.sheetName.trim()}] khối ${b.blockIndex + 1}/${b.blockCount} «${b.prefix}» dòng ${b.first}–${b.last}: ${b.items} công việc, ${b.details} dòng diễn giải, ${b.unpriced} chưa giá, ${b.missingUnit} thiếu ĐV${b.tbvt ? `, ${b.tbvt} TB/VT` : ''} | Σ ${money(b.computedTotal)} vs file ${money(b.fileTotal)}${b.diff ? ` (lệch ${money(b.diff)})` : ''}`);
+      const vsFile = b.fileTotal === null ? 'không có dòng Cộng/Tổng trong file' : `vs file ${money(b.fileTotal)}${b.diff ? ` (lệch ${money(b.diff)})` : ''}`;
+      console.log(`${mark} [${b.sheetName.trim()}] khối ${b.blockIndex + 1}/${b.blockCount} «${b.prefix}» dòng ${b.first}–${b.last}: ${b.items} công việc, ${b.details} dòng diễn giải, ${b.unpriced} chưa giá, ${b.missingUnit} thiếu ĐV${b.tbvt ? `, ${b.tbvt} TB/VT` : ''} | Σ ${money(b.computedTotal)} ${vsFile}`);
       if (b.blocking) console.log(`    ⛔ ${b.blocking}`);
     }
     const noBlocks = m.sheets.filter((s) => !s.hidden && !s.importable && !s.summary).map((s) => s.name.trim());
@@ -78,9 +95,9 @@ async function main() {
         b.sheetName.trim(),
         b.blockCount > 1 ? `${b.blockIndex + 1}/${b.blockCount}` : '–',
         String(b.items),
-        money(b.fileTotal),
+        b.fileTotal === null ? 'không có dòng Cộng' : money(b.fileTotal),
         money(b.computedTotal),
-        b.diff ? money(b.diff) : b.ok === false ? '?' : '0',
+        b.fileTotal === null ? '–' : b.diff ? money(b.diff) : '0',
       ]),
       ['l', 'l', 'r', 'r', 'r', 'r'],
     );
@@ -90,7 +107,7 @@ async function main() {
       console.log(`\n${mismatched.length} bảng chưa khớp tổng – dòng gây lệch nhiều nhất:`);
       for (const b of mismatched) {
         console.log(`  [${b.sheetName.trim()}]${b.blockCount > 1 ? ` khối ${b.blockIndex + 1}/${b.blockCount}` : ''} «${b.prefix}» (lệch ${money(b.diff)}):`);
-        const reasons = topDiffRows(db, repo, f, m.blocks.find((x) => x.key === b.key)!);
+        const reasons = diagnoseDiff(db, repo, f, m.blocks.find((x) => x.key === b.key)!);
         if (reasons.length) for (const r of reasons) console.log(`    - ${r}`);
         else console.log(`    - (không tách được từng dòng – có thể do dòng cộng/trọn gói trong bảng không khớp Σ công việc)`);
       }
