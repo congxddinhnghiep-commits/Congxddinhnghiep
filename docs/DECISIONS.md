@@ -332,3 +332,30 @@ Nguồn: `docs/LEGAL-UPDATE-2026.md` (đã xác minh metadata ngày 2026-09-27).
     đã khác nhau thì in rõ "đây là chênh lệch trong chính file…, không phải do cách nhập" kèm hai con số – trên file thật của khách, sau khi sửa (107)+(108), 7/12 bảng còn lệch giảm xuống còn 5 (01-Điện trung thế và 08-CTN khớp
     tuyệt đối 0đ); 5 bảng còn lại đều có bằng chứng Σ dòng ≠ Cộng ngay trong file nguồn (công thức Cộng cũ không cập nhật theo các dòng đã thêm/sửa sau này), không phải lỗi của bộ nhập liệu. Bảng tóm tắt cũng phân biệt rõ "không có
     dòng Cộng trong file" (ô trống thật) với "dòng Cộng ghi 0" (có dòng, giá trị 0 – vẫn là một chênh lệch có thể chứng minh, không gộp chung làm một).
+
+## Update 5 (docs/UPDATE-5.md) — Bóc khối lượng theo cấu kiện
+110. **Công thức công tác là dữ liệu trong mã nguồn, không phải bảng CSDL** (`packages/core/src/takeoff.ts`, `ELEMENT_TEMPLATES`): mỗi loại cấu kiện (14 loại ở mục B) có một danh sách công tác cố định (khóa, tên, đơn vị, điều kiện,
+    hàm tính) thay vì bảng `takeoff_task_templates` có thể sửa từ giao diện như spec gốc mô tả. Lý do: các công thức (diện tích, thể tích, hố đào có mái dốc…) cần đúng tuyệt đối theo tiêu chuẩn và test chấp nhận mục I tính theo đúng
+    công thức này; cho phép sửa công thức tùy ý từ giao diện dễ làm sai kết quả mà không có kiểm chứng. Phần "tùy biến theo công trình" được giữ ở mức bật/tắt từng công tác tùy chọn (`takeoff_elements.enabled_json`, ví dụ Trát cột, Bả
+    sơn tường, Ốp chân tường) và override giá trị từng công tác của từng cấu kiện (`overrides_json`) – đúng yêu cầu "mọi khối lượng sinh ra đều sửa tay được và override tồn tại qua lần sinh lại" (mục E.3) mà không phải xây dựng một
+    trình soạn công thức an toàn thứ hai.
+111. **Mở rộng bộ phân tích biểu thức an toàn sẵn có thay vì viết bộ mới** (`packages/core/src/quantity.ts`): thêm nút cú pháp gọi hàm (`tron`, `sqrt`, `min`, `max`, `abs`, `chuvi_cn`, `dt_cn`, `dt_tron`, `tt_hop`, `tt_tru`,
+    `tt_chop_cut`) và hằng số `pi` vào AST hiện có (`QNode` thêm nhánh `call`), dùng lại nguyên các giới hạn an toàn (`QTY_LIMITS`: độ dài/độ sâu/số node) đã áp dụng cho "Diễn giải khối lượng" của Update phase 1. `tt_chop_cut` dùng
+    đúng công thức hình chóp cụt của hố đào móng có mái dốc (mục B), nên "Bảng tính tay" và bộ sinh khối lượng theo cấu kiện luôn cho cùng một kết quả cho cùng một hình dạng – không có hai cách tính khác nhau cho cùng một việc.
+112. **`computeElementTasks` là hàm thuần, không phụ thuộc CSDL**: nhận `(type, params, count, opts)` trả về danh sách công tác đã nhân số lượng và làm tròn 3 chữ số thập phân; việc gán mã định mức, lưu trữ, gộp theo hạng mục/tầng và
+    đẩy sang dự toán hoàn toàn nằm ở `packages/server/src/takeoff.ts` (`TakeoffService`). Tách bạch này cho phép 9 số liệu chấp nhận mục I.1–I.9 kiểm tra trực tiếp hàm core bằng vitest, không cần khởi tạo CSDL/HTTP.
+113. **Mã định mức không bao giờ tự gán cứng vào công tác sinh ra**: `TakeoffService.tasksFor` tra `NormIndex.suggest(tên công tác, đơn vị, 1)` của bộ định mức đang hoạt động của công trình; chỉ gán mã khi độ tin cậy ≥ 80% (`codeStatus:
+    'auto'`), còn lại để trống (`'chưa có mã'`) và không chặn hiển thị/đẩy khối lượng (đúng mục C: "không bao giờ chặn khối lượng"). Tham số còn thiếu để tra đúng mã (cấp đất, loại ván khuôn…) chưa có một panel "Thiết lập bóc khối
+    lượng" riêng như mục C mô tả đầy đủ – phạm vi bản này dừng ở việc không tự đoán khi thiếu, để lại cho người dùng chọn tay qua danh sách gợi ý có sẵn trên lưới dự toán sau khi đẩy sang.
+114. **"Đẩy sang dự toán" là một `estimate_revisions` riêng (`kind = 'takeoff_push'`), không dùng lại `RegionalUpdateService.undo`**: cấu trúc snapshot khác hẳn (danh sách công việc đã tạo cần xóa khi hoàn tác, danh sách công việc đã
+    sửa cần khôi phục khối lượng + dòng diễn giải), nên `TakeoffService` tự quản lý undo của riêng mình nhưng áp dụng đúng quy tắc "chỉ hoàn tác được phiên bản mới nhất" như các loại phiên bản khác (đọc toàn bộ `estimate_revisions` của
+    công trình, so `id`, không phân biệt loại) để không phá vỡ thứ tự hoàn tác khi người dùng xen kẽ cập nhật khu vực và đẩy khối lượng.
+115. **Gộp công tác theo (hạng mục, [tầng], khóa công tác)** (`estimate_items.takeoff_key`, `takeoff_pushed_quantity` – cột mới): cùng loại công tác của nhiều cấu kiện trong một hạng mục gộp thành một dòng dự toán duy nhất với nhiều
+    dòng diễn giải (bảng `quantity_lines` sẵn có, mỗi dòng ghi "<tên cấu kiện> × <số lượng>: <công thức> = <giá trị>"). Đẩy lại sau khi đổi tham số cập nhật đúng khối lượng và dòng diễn giải, **giữ nguyên đơn giá/phương thức tính giá
+    và mã đã xác nhận** (SQL chỉ UPDATE `quantity`/`quantity_lines`/`takeoff_key`/`takeoff_pushed_quantity`, không đụng các cột giá). Khi khối lượng của dòng dự toán đã bị người dùng sửa tay kể từ lần đẩy trước (so với
+    `takeoff_pushed_quantity` đã lưu) mà lần đẩy mới lại cho ra số khác, dòng đó được báo **xung đột** và mặc định GIỮ NGUYÊN số đã sửa tay – chỉ ghi đè khi người dùng chủ động chọn ghi đè (đúng mục F.2: "cho người dùng chọn").
+116. **ETABS**: chỉ định nghĩa `ElementSource`/`UnsupportedElementSource` (core) và tài liệu hai hướng triển khai sau ở `docs/ETABS.md` (mục H) – không có route, nút bấm hay mã kết nối COM/API thật nào trong bản này, đúng yêu cầu "không
+    triển khai kết nối ngay".
+117. **`TakeoffTab` phải tự báo cho `ProjectView` reload sau khi đẩy sang dự toán** (`onPushed` callback, cùng mẫu với `onImported`/`onApplied` của các tab khác): phát hiện khi viết e2e (`e2e/update5.mjs`) – nếu không có callback này,
+    lưới "Dự toán chi tiết" tiếp tục hiển thị dữ liệu cũ (từ lần `reload()` đầu tiên lúc mở công trình) cho tới khi có một hành động khác ở tab đó kích hoạt `reload`, dù API đã tạo/cập nhật công việc thành công – một lỗi thật, không
+    chỉ là vấn đề của kịch bản kiểm thử.

@@ -138,6 +138,48 @@ Nút **Cập nhật định mức & đơn giá theo khu vực** (thanh công c�
 - Bộ đơn giá lưu thêm địa giới lúc ban hành (tỉnh cũ trước 01/07/2025), trạng thái xác minh, SHA-256 của file nguồn và xem được **bản ghi
   dữ liệu** theo chuẩn `data-contract.md`.
 
+### 5. Bóc khối lượng theo cấu kiện
+Tab **Bóc khối lượng** của công trình (song song với Dự toán chi tiết, không thay thế): khai báo cấu kiện kết cấu/kiến trúc →
+phần mềm tự sinh công tác và khối lượng theo công thức → đẩy sang dự toán. **Tính bằng tay luôn làm được** (gõ công thức hoặc kích
+thước ra khối lượng ngay) – bóc theo cấu kiện là công cụ hỗ trợ thêm, không bắt buộc.
+
+- **Sub-tab Cấu kiện**: chọn loại cấu kiện (Móng đơn/băng, Đài cọc, Giằng móng, Tường móng, Cột, Dầm, Sàn, Vách BTCT, Cầu thang,
+  Tường xây, Lanh tô, Nền, Hoàn thiện tự do), đặt tên (vd. "M1"), số lượng, hạng mục và tầng, rồi nhập kích thước (mỗi tham số có
+  giá trị mặc định hợp lý). Bảng bên phải hiện ngay các công tác được sinh ra: công thức đã thay số, khối lượng (= công thức ×
+  số lượng), mã định mức gợi ý (tra theo bộ định mức TT38_2026 của công trình bằng bộ máy gợi ý mã sẵn có – không bao giờ tự
+  bịa mã; chưa đủ tin cậy thì để "chưa có mã", không chặn khối lượng). Một khối lượng sinh ra có thể **sửa tay** (giá trị tính
+  toán hiện gạch ngang bên cạnh); lần sinh lại sau (đổi kích thước khác) vẫn giữ đúng giá trị đã sửa.
+- Công thức mặc định theo loại cấu kiện (đơn vị m, tính cho 1 cấu kiện, nhân với số lượng):
+
+  | Loại | Công tác chính (công thức) |
+  |---|---|
+  | Móng đơn | BT móng `a·b·h` · BT lót `(a+2e_l)(b+2e_l)·t_l` · VK `2(a+b)·h` · Đào (m=0) `A·B·H_d`, (m>0) `H_d/6·[A·B+(A+A')(B+B')+A'·B']` với A=a+2e_l+2e_tc, A'=A+2mH_d (và B tương tự) · Đắp = Đào − (BT móng + BT lót) |
+  | Cột | BT `b·h·(H−h_dầm)` (hoặc tròn `π·D²/4·H`) · VK `2(b+h)·(H−h_dầm)` |
+  | Dầm | BT `b·h·L` · VK `(b+2(h−h_sàn))·L` |
+  | Sàn | BT `(S−S_lỗ)·t` · VK `S−S_lỗ` |
+  | Tường xây | Diện tích `L·H−S_cửa` · Xây (m³) `diện tích·dày` · Trát 2 mặt `2·diện tích` |
+  | Đài cọc | Ép cọc `n·L` · Đập đầu cọc (cái) `n`, (m³) `π·D²/4·đoạn đập·n` (vuông: `D²·đoạn đập·n`) |
+
+  Xem đầy đủ các loại còn lại (Móng băng, Giằng móng, Tường móng, Vách, Cầu thang, Lanh tô, Nền, Hoàn thiện) trong
+  `packages/core/src/takeoff.ts` (`ELEMENT_TEMPLATES`) – đây cũng là nơi duy nhất quyết định công thức, không lặp lại ở nơi khác.
+  Mọi phép trừ (lỗ mở, cột ăn vào dầm…) đều là **tham số hiển thị** (S_lỗ, h_dầm…), phần mềm không bao giờ tự trừ ngầm.
+- **Sub-tab Bảng tính tay**: ô công thức dùng lại đúng bộ phân tích biểu thức an toàn của "Diễn giải khối lượng" (số thập phân
+  `,` hoặc `.`, biến đặt tên `a=3,5; b=4,2`, ghi chú sau `//`), có thêm các hàm `tron(x,n)`, `sqrt`, `min`, `max`, `abs`,
+  `chuvi_cn(a,b)`, `dt_cn(a,b)`, `dt_tron(d)`, `tt_hop(a,b,h)`, `tt_tru(d,h)`, `tt_chop_cut(a,b,a2,b2,h)` và hằng số `pi`. Ví dụ:
+  `a=3,5; b=4,2; 2*(a+b)*0,2*3 // tường bao` → 9,24. **Bảng tính nhanh** (n, A, L, H) tính luôn Tổng diện tích = A·n, Tổng chiều
+  dài = L·n, Tổng thể tích = A·H·n, Diện tích xung quanh = L·H·n.
+- **Sub-tab Thống kê thép**: nhập Ø (mm), chiều dài 1 thanh (mm, gõ tay hoặc để trống nếu đã nhập L1..L6 theo dạng thanh), số
+  thanh/cấu kiện, số cấu kiện → Tổng chiều dài (m), Tổng khối lượng (kg) theo bảng trọng lượng Ø6→Ø32 (kg/m, công thức
+  `0,006165·d²` cho Ø khác), gộp theo 3 nhóm đường kính của TT38/2026 (Ø≤10, 10<Ø≤18, Ø>18). Chế độ nhanh (hàm lượng thép
+  kg/m³ bê tông) để trống mặc định – **không tự bịa hàm lượng**.
+- **Sub-tab Thiết lập**: khai báo các tầng (tên, cao độ, chiều cao) để nhóm cấu kiện theo tầng.
+- **Đẩy sang dự toán**: xem trước danh sách công tác (gộp theo hạng mục, cùng loại công tác của nhiều cấu kiện gộp thành 1 dòng
+  dự toán với nhiều dòng diễn giải – mỗi dòng ghi rõ cấu kiện × số lượng và công thức), rồi bấm áp dụng = **một phiên bản hoàn
+  tác được**. Đẩy lại (sau khi đổi kích thước/số lượng) cập nhật đúng khối lượng, giữ nguyên đơn giá và mã đã xác nhận; nếu khối
+  lượng của dòng dự toán đã bị sửa tay sau lần đẩy trước, phần mềm báo **xung đột** và chỉ ghi đè khi được xác nhận.
+- **ETABS**: chưa kết nối trực tiếp trong bản này (giao diện web không gọi được API ETABS). Xem [docs/ETABS.md](docs/ETABS.md)
+  cho hai hướng sẽ làm sau: nhập bảng xuất từ ETABS ra Excel, hoặc kết nối API trực tiếp trong bản desktop (Electron).
+
 ## Cấu trúc thư mục
 ```
 packages/core    Hàm tính toán thuần (đơn giá, tổng hợp chi phí, công thức, bộ hiểu lệnh tiếng Việt) + unit test
@@ -162,6 +204,7 @@ desktop/         Khung Electron (Phase 2)
 | `npm run import:tt38` | Nạp bộ định mức TT 38/2026 (9.012 mã, `data/norms/tt38_2026/`) vào DB – chạy lại an toàn |
 | `npm run import:tt38-pl7` | Nạp Phụ lục VII (cấp phối vật liệu) để bóc tách “Vữa…” thành xi măng/cát/đá/nước |
 | `npm run e2e` | Kiểm thử trình duyệt headless cho Update 3 (xem `e2e/README.md`) |
+| `npm run e2e:update5` | Kiểm thử trình duyệt headless cho Bóc khối lượng theo cấu kiện (Update 5) |
 
 Đăng nhập lần đầu: **admin / admin123** (chỉ ở môi trường phát triển) → hệ thống yêu cầu đổi mật khẩu ngay.
 Có thể đặt tài khoản khác bằng biến môi trường `ADMIN_USER`, `ADMIN_PASS` (xem `.env.example`) trước lần chạy đầu tiên.
