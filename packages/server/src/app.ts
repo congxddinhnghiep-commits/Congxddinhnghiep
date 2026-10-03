@@ -31,6 +31,7 @@ import { analyze, importEstimate, listTemplates } from './estimate-import.js';
 import { importInfoForCategory, reopenImport } from './import-sources.js';
 import { analyzeSheets, importSheets, sheetOverview } from './import-multi.js';
 import { RegionalUpdateService } from './regional-update.js';
+import { applyPriority, previewApplyPriority } from './price-source.js';
 import { PriceBookService, provinceMergers, regions, seedHcmJune2026PriceBook, seedPriceBookExample, seedTt38PriceBookAugust2026 } from './pricebooks.js';
 import { validateProject } from './validation.js';
 import { LegalService, legalDocuments } from './legal.js';
@@ -751,6 +752,71 @@ export function createApp(db: DB, opts: { serveWeb?: boolean; ai?: { cfg?: AiCon
       const mixCode = req.body?.mixCode;
       if (mixCode !== null && typeof mixCode !== 'string') throw new HttpError(400, 'Mã cấp phối không hợp lệ');
       return repo.setMixCode(p.id, id(req.params.itemId), mixCode ? mixCode.trim() : null);
+    }),
+  );
+
+  // Update 6 E — price sources ("Nguồn giá")
+  const PRICE_SOURCE_KINDS = ['dia_phuong', 'ho_so', 'chiet_tinh'] as const;
+  api.get('/projects/:id/price-source-priority', h((req) => repo.priceSourcePriority(proj(req).id)));
+  api.put(
+    '/projects/:id/price-source-priority',
+    h((req) => {
+      const order = req.body?.order;
+      if (!Array.isArray(order)) throw new HttpError(400, 'Thứ tự ưu tiên nguồn giá không hợp lệ');
+      return repo.setPriceSourcePriority(proj(req).id, order);
+    }),
+  );
+  api.put(
+    '/projects/:id/items/:itemId/price-source-override',
+    h((req) => {
+      const kind = req.body?.kind;
+      if (kind !== null && !PRICE_SOURCE_KINDS.includes(kind) && kind !== 'thu_cong') throw new HttpError(400, 'Nguồn giá không hợp lệ');
+      return repo.setPriceSourceOverride(proj(req).id, id(req.params.itemId), kind ?? null);
+    }),
+  );
+  api.put(
+    '/projects/:id/items/:itemId/price-source-apply',
+    h((req) => {
+      const kind = req.body?.kind;
+      if (!PRICE_SOURCE_KINDS.includes(kind)) throw new HttpError(400, 'Nguồn giá không hợp lệ');
+      return repo.applyPriceSourceKind(proj(req).id, id(req.params.itemId), kind);
+    }),
+  );
+  api.get('/projects/:id/price-source-apply/preview', h((req) => previewApplyPriority(repo, proj(req).id)));
+  api.post(
+    '/projects/:id/price-source-apply',
+    h((req) => {
+      const p = proj(req);
+      const r = applyPriority(db, repo, p.id, req.user!.username);
+      if (r.revisionId) assistant.record(p.id, req.user!.id, r.changed ? `Áp dụng lại thứ tự ưu tiên nguồn giá: ${r.changed} công việc đổi nguồn giá` : 'Áp dụng lại thứ tự ưu tiên nguồn giá', { tool: 'applyPriceSourcePriority' }, [{ op: 'undoRevision', revisionId: r.revisionId }]);
+      return r;
+    }),
+  );
+  api.get('/projects/:id/items/:itemId/chiet-tinh', h((req) => repo.chietTinhSheet(proj(req).id, id(req.params.itemId))));
+  api.put(
+    '/projects/:id/items/:itemId/chiet-tinh-spec',
+    h((req) => {
+      const spec = req.body?.spec;
+      if (spec !== null && typeof spec !== 'string') throw new HttpError(400, 'Nội dung không hợp lệ');
+      return repo.setChietTinhSpec(proj(req).id, id(req.params.itemId), spec ? spec.trim() : null);
+    }),
+  );
+
+  // Update 6 E.5 — work package mode switch preview ("Báo giá nhà thầu" ↔ "Dự toán TT36")
+  api.get(
+    '/projects/:id/work-packages/:wpId/mode-preview',
+    h((req) => {
+      const p = proj(req);
+      const wpId = id(req.params.wpId);
+      const mode = req.query.mode === 'bao_gia' ? 'bao_gia' : req.query.mode === 'du_toan_tt36' ? 'du_toan_tt36' : null;
+      if (!mode) throw new HttpError(400, 'Chế độ không hợp lệ');
+      const wp = repo.getWorkPackage(p.id, wpId);
+      const before = repo.calculate(p.id, { workPackageId: wpId });
+      const after = repo.calculate(p.id, { workPackageId: wpId, modeOverride: mode });
+      return {
+        before: { mode: wp.mode, total: before.costSummary.total ?? before.costSummary.Gxd },
+        after: { mode, total: after.costSummary.total ?? after.costSummary.Gxd },
+      };
     }),
   );
 

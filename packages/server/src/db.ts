@@ -570,6 +570,19 @@ export function migrate(db: DB): void {
       }
     })();
   }
+
+  // Update 6 E: price sources – an explicit per-item pin (the resolved kind itself is computed on the fly from
+  // current state, never cached, so it can never go stale) and the project's priority order.
+  if (!columns(db, 'estimate_items').includes('price_source_override')) {
+    db.exec(`ALTER TABLE estimate_items ADD COLUMN price_source_override TEXT CHECK (price_source_override IN ('dia_phuong', 'ho_so', 'chiet_tinh', 'thu_cong'))`);
+  }
+  if (!columns(db, 'projects').includes('price_source_priority')) {
+    db.exec(`ALTER TABLE projects ADD COLUMN price_source_priority TEXT`);
+  }
+  // Update 6 E.4: "Phiếu chiết tính đơn giá" – cấu tạo / công nghệ-biện pháp thi công / vật tư chính / ghi chú.
+  if (!columns(db, 'estimate_items').includes('chiet_tinh_spec')) {
+    db.exec(`ALTER TABLE estimate_items ADD COLUMN chiet_tinh_spec TEXT`);
+  }
 }
 
 export function openDb(file: string): DB {

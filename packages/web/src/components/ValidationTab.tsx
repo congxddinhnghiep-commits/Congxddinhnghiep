@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api, type ValidationReport } from '../api';
+import { money } from '../format';
 
 const STATUS = { pass: '✓ Đạt', warning: '⚠ Cảnh báo', fail: '✗ Lỗi' };
 const SEV = { error: 'Lỗi', warning: 'Cảnh báo', info: 'Thông tin' };
+const PRICE_SOURCE_LABELS: Record<string, string> = { dia_phuong: 'Địa phương', ho_so: 'Hồ sơ', chiet_tinh: 'Chiết tính', thu_cong: 'Thủ công' };
 
 /** Báo cáo kiểm tra dự toán – các kiểm tra bắt buộc của engine dự toán. */
 export function ValidationTab({ projectId, version }: { projectId: number; version: unknown }) {
@@ -30,6 +32,29 @@ export function ValidationTab({ projectId, version }: { projectId: number; versi
           Bộ pháp lý: {r.project.legalSet} · ngày lập giá {r.project.priceDate ?? 'chưa nhập'} · kiểm tra lúc {new Date(r.generatedAt).toLocaleString('vi-VN')}
         </span>
       </div>
+      {r.priceSourceSummary.length > 0 && (
+        <section className="vcheck" data-testid="price-source-summary">
+          <h4>Tổng hợp theo nguồn giá</h4>
+          <table className="table compact">
+            <thead>
+              <tr>
+                <th>Nguồn giá</th>
+                <th className="num">Số công việc</th>
+                <th className="num">Giá trị (đ)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.priceSourceSummary.map((s) => (
+                <tr key={s.kind}>
+                  <td>{PRICE_SOURCE_LABELS[s.kind] ?? s.kind}</td>
+                  <td className="num">{s.count}</td>
+                  <td className="num">{money(s.value)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
       {r.checks.map((c) => (
         <section key={c.id} className={`vcheck v-${c.status}`}>
           <h4 onClick={() => setOpen({ ...open, [c.id]: !open[c.id] })}>

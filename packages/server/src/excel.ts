@@ -5,6 +5,7 @@ import {
   contingencyInputs,
   defaultTt36Settings,
   evaluateFormula,
+  PRICE_SOURCE_LABELS,
   RESOURCE_TYPE_LABELS,
   type Tt36Settings,
 } from '@dutoan/core';
@@ -200,8 +201,28 @@ function buildPackageSheet(ws: ExcelJS.Worksheet, wp: WorkPackage, calc: Calcula
     ['', '', 'CỘNG TRƯỚC THUẾ', '', '', '', '', '', '', '', totalOf('K', calc.total.vl), totalOf('L', calc.total.nc), totalOf('M', calc.total.m), totalOf('N', calc.total.total), '', ''],
     { bold: true, numFmts: { 11: MONEY, 12: MONEY, 13: MONEY, 14: MONEY } },
   );
+  // The "Nguồn giá" summary (E.2) is NOT appended here: extra rows after CỘNG TRƯỚC THUẾ would be read back as
+  // data on round-trip re-import (no explicit range is set). It is aggregated project-wide on "TỔNG HỢP" instead.
   ws.views = [{ state: 'frozen', ySplit: 4 }];
   return totalRow;
+}
+
+/** Update 6 E.2: count + value per price_source kind, across every package – "never mixed silently". */
+function priceSourceSummaryRows(packages: WorkbookPackageData[]): { label: string; count: number; value: number }[] {
+  const byKind = new Map<string, { count: number; value: number }>();
+  for (const pkg of packages) {
+    for (const cat of pkg.calc.categories) {
+      for (const it of cat.items) {
+        const kind = pkg.calc.itemPriceSources?.[it.id]?.current ?? null;
+        const label = kind ? PRICE_SOURCE_LABELS[kind] ?? kind : 'Chưa xác định';
+        const cur = byKind.get(label) ?? { count: 0, value: 0 };
+        cur.count++;
+        cur.value += it.amount.total;
+        byKind.set(label, cur);
+      }
+    }
+  }
+  return [...byKind.entries()].map(([label, v]) => ({ label, ...v }));
 }
 
 /** "Tổng hợp dự án": per-package totals + project-level lines (chi phí quản lý, VAT…) + grand total, linked to each package sheet. */
@@ -210,6 +231,7 @@ function buildTongHopSheet(
   projectName: string,
   packages: { wp: WorkPackage; sheetName: string; totalRow: number; total: number }[],
   summaryLines: { label: string; kind: 'rate' | 'amount'; value: number; amount: number }[],
+  priceSourceSummary: { label: string; count: number; value: number }[],
 ) {
   setupSheet(ws, [6, 40, 12, 14, 20, 30], false);
   title(ws, 1, 'TỔNG HỢP DỰ ÁN', 6);
@@ -257,6 +279,14 @@ function buildTongHopSheet(
     ['', 'TỔNG CỘNG DỰ ÁN', '', { formula: [`D${packagesTotalRow}`, ...lineRows.map((x) => `D${x}`)].join('+'), result: grandTotal }, '', ''],
     { bold: true, numFmts: { 4: MONEY } },
   );
+  r += 2;
+  if (priceSourceSummary.length) {
+    info(ws, r++, 'Tổng hợp theo nguồn giá (price_source):', 6);
+    for (const s of priceSourceSummary) {
+      row(ws, r, ['', s.label, '', s.value, '', `${s.count} công việc`], { italic: true, numFmts: { 4: MONEY } });
+      r++;
+    }
+  }
 }
 
 export interface WorkbookPackageData {
@@ -294,7 +324,7 @@ export async function buildWorkbook(
     const totalRow = buildPackageSheet(ws, pkg.workPackage, pkg.calc, (itemId) => quantityLinesByItem.get(itemId) ?? []);
     return { wp: pkg.workPackage, sheetName: names[i], totalRow, total: pkg.calc.total.total };
   });
-  buildTongHopSheet(wsTongHop, p.name, pkgSheetInfo, summaryLines);
+  buildTongHopSheet(wsTongHop, p.name, pkgSheetInfo, summaryLines, priceSourceSummaryRows(packages));
 
   // Sheet creation order = tab order.
   const wsTH = wb.addWorksheet('TH');

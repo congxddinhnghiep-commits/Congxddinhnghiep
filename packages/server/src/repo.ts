@@ -1,15 +1,23 @@
 import {
   amountModeCustom,
+  availablePriceSources,
   computeEstimate,
   computeUnitCost,
+  computeBaoGiaCost,
   computeProjectCost,
+  currentPriceSourceKind,
   defaultLegalSetFor,
+  DEFAULT_PRICE_SOURCE_PRIORITY,
   legalSetDateWarning,
   computeQuantityLines,
   expandMixDesign,
   isMixResourceName,
   NormIndex,
   normalizeText,
+  pricingMethodFor,
+  resolvePriceSource,
+  type PriceSourceAvailability,
+  type PriceSourceKind,
   type QuantityLineInput,
   unitFactor,
   searchByCodeOrName,
@@ -212,6 +220,8 @@ interface ItemRow {
   source_cells: string | null;
   source_file_prices: string | null;
   amount_mode: EstimateItem['amountMode'] | null;
+  price_source_override: EstimateItem['priceSourceOverride'] | null;
+  chiet_tinh_spec: string | null;
 }
 const toItem = (r: ItemRow): EstimateItem & { sourceRawText: string | null; sourceFlags: string[] } => ({
   id: r.id,
@@ -255,6 +265,8 @@ const toItem = (r: ItemRow): EstimateItem & { sourceRawText: string | null; sour
   normCodeRaw: r.norm_code_raw,
   codeCheck: r.code_check,
   codeCheckNote: r.code_check_note,
+  priceSourceOverride: r.price_source_override ?? null,
+  chietTinhSpec: r.chiet_tinh_spec ?? null,
 });
 
 export interface PricingInput {
@@ -384,6 +396,28 @@ export class Repo {
   setAutoPriceUpdate(id: number, on: boolean): Project {
     this.db.prepare('UPDATE projects SET auto_price_update = ? WHERE id = ?').run(on ? 1 : 0, id);
     return this.getProject(id)!;
+  }
+
+  /** Update 6 E.2: "Thứ tự ưu tiên nguồn giá" – default dia_phuong → ho_so → chiet_tinh (thu_cong is never auto-picked). */
+  priceSourcePriority(projectId: number): PriceSourceKind[] {
+    const raw = (this.db.prepare('SELECT price_source_priority FROM projects WHERE id = ?').get(projectId) as { price_source_priority: string | null } | undefined)
+      ?.price_source_priority;
+    if (!raw) return DEFAULT_PRICE_SOURCE_PRIORITY;
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) && arr.length ? (arr as PriceSourceKind[]) : DEFAULT_PRICE_SOURCE_PRIORITY;
+    } catch {
+      return DEFAULT_PRICE_SOURCE_PRIORITY;
+    }
+  }
+
+  setPriceSourcePriority(projectId: number, order: PriceSourceKind[]): PriceSourceKind[] {
+    const valid: PriceSourceKind[] = ['dia_phuong', 'ho_so', 'chiet_tinh'];
+    const clean = order.filter((k): k is PriceSourceKind => valid.includes(k));
+    if (!clean.length) throw new HttpError(400, 'Thứ tự ưu tiên nguồn giá không hợp lệ');
+    this.db.prepare('UPDATE projects SET price_source_priority = ? WHERE id = ?').run(JSON.stringify(clean), projectId);
+    this.touchProject(projectId);
+    return clean;
   }
 
   touchProject(id: number): void {
@@ -776,6 +810,80 @@ export class Repo {
     this.db.prepare('UPDATE estimate_items SET custom_vl = ?, custom_nc = ?, custom_m = ?, amount_mode = ? WHERE id = ?').run(custom.vl, custom.nc, custom.m, mode, itemId);
     this.touchProject(projectId);
     return this.getItem(projectId, itemId);
+  }
+
+  /** Update 6 E.2: explicit per-item pin of price_source (null clears it, falling back to the resolver). */
+  setPriceSourceOverride(projectId: number, itemId: number, kind: PriceSourceKind | null): EstimateItem {
+    this.getItem(projectId, itemId);
+    this.db.prepare('UPDATE estimate_items SET price_source_override = ? WHERE id = ?').run(kind, itemId);
+    this.touchProject(projectId);
+    return this.getItem(projectId, itemId);
+  }
+
+  /** Switch an item's actual pricing to match a resolved kind (ho_so → file price, dia_phuong/chiet_tinh → norm-based). */
+  applyPriceSourceKind(projectId: number, itemId: number, kind: PriceSourceKind): EstimateItem {
+    const item = this.getItem(projectId, itemId);
+    const method = pricingMethodFor(kind);
+    if (method === 'CUSTOM_GTT') {
+      const fp = item.source?.filePrices;
+      if (!fp) throw new HttpError(400, 'Công việc này không có đơn giá trong hồ sơ (file) để áp dụng');
+      const custom = amountModeCustom(fp, item.quantity, item.amountMode === 'calc' ? 'calc' : 'file');
+      this.db
+        .prepare(`UPDATE estimate_items SET pricing_method = 'CUSTOM_GTT', custom_vl = ?, custom_nc = ?, custom_m = ?, price_source = ? WHERE id = ?`)
+        .run(custom.vl, custom.nc, custom.m, `File Excel ${item.source?.file ?? ''}`.trim(), itemId);
+    } else if (method === 'NORM_BASED') {
+      if (!item.normCode) throw new HttpError(400, 'Công việc chưa có mã định mức để chiết tính');
+      this.db
+        .prepare(`UPDATE estimate_items SET pricing_method = 'NORM_BASED', custom_vl = NULL, custom_nc = NULL, custom_m = NULL, price_source = ? WHERE id = ?`)
+        .run(kind === 'dia_phuong' ? 'Chiết tính theo định mức, đơn giá vật tư địa phương (đã xác minh)' : 'Chiết tính theo định mức', itemId);
+    }
+    this.touchProject(projectId);
+    return this.getItem(projectId, itemId);
+  }
+
+  setChietTinhSpec(projectId: number, itemId: number, spec: string | null): EstimateItem {
+    this.getItem(projectId, itemId);
+    this.db.prepare('UPDATE estimate_items SET chiet_tinh_spec = ? WHERE id = ?').run(spec, itemId);
+    this.touchProject(projectId);
+    return this.getItem(projectId, itemId);
+  }
+
+  /**
+   * Update 6 E.4: "Phiếu chiết tính đơn giá" – norm resources (VL/NC/M hao phí) × resource prices (resolved by the
+   * same dia_phuong → derived priority as everything else). A resource with no real price (resolves to ≤ 0) is
+   * listed and flagged "thiếu giá vật tư" instead of silently contributing 0.
+   */
+  chietTinhSheet(projectId: number, itemId: number) {
+    const item = this.getItem(projectId, itemId);
+    if (!item.normCode) throw new HttpError(400, 'Công việc chưa có mã định mức để chiết tính');
+    const dataset = this.datasetOf(projectId);
+    const norm = this.getNorm(item.normCode, dataset);
+    if (!norm) throw new HttpError(404, `Không tìm thấy định mức ${item.normCode} trong bộ ${dataset}`);
+    const nrs = this.db
+      .prepare('SELECT resource_code, consumption, pct_base FROM norm_resources WHERE dataset = ? AND norm_code = ?')
+      .all(dataset, item.normCode) as { resource_code: string; consumption: number; pct_base: 'VL' | 'M' | null }[];
+    const resolved = this.priceResolver?.(projectId) ?? {};
+    const byType: Record<ResourceType, number> = { VL: 0, NC: 0, M: 0 };
+    let missing = false;
+    const resources = nrs.map((nr) => {
+      const res = this.getResource(nr.resource_code);
+      const price = resolved[nr.resource_code]?.price ?? res?.basePrice ?? 0;
+      const source = resolved[nr.resource_code]?.source ?? { kind: 'base' as const, label: 'Giá gốc thư viện' };
+      const isMissing = price <= 0;
+      if (isMissing) missing = true;
+      const type = res?.type ?? 'VL';
+      const amount = nr.pct_base ? 0 : nr.consumption * price; // % lines (Vật liệu khác…) shown separately below
+      if (!nr.pct_base) byType[type] += amount;
+      return { resourceCode: nr.resource_code, name: res?.name ?? nr.resource_code, unit: res?.unit ?? '', type, consumption: nr.consumption, pctBase: nr.pct_base, price, source, amount, missing: isMissing };
+    });
+    return {
+      item: { id: item.id, name: item.name, normCode: item.normCode, unit: item.unit, quantity: item.quantity, note: item.note, chietTinhSpec: item.chietTinhSpec ?? null },
+      norm: { code: norm.code, name: norm.name, unit: norm.unit },
+      resources,
+      unitCost: { vl: byType.VL, nc: byType.NC, m: byType.M, total: byType.VL + byType.NC + byType.M },
+      missingResources: resources.filter((r) => r.missing).map((r) => r.name),
+      flagged: missing,
+    };
   }
 
   /** Selected TT 38/2026 Phụ lục VII mix design for this item's "Vữa..." resource (null clears it). */
@@ -1195,7 +1303,7 @@ export class Repo {
 
   // ---------------- calculation ----------------
   /** Full calculated estimate for a project. */
-  calculate(projectId: number, opts: { resolved?: Record<string, ResolvedPrice>; workPackageId?: number } = {}) {
+  calculate(projectId: number, opts: { resolved?: Record<string, ResolvedPrice>; workPackageId?: number; modeOverride?: 'bao_gia' | 'du_toan_tt36' } = {}) {
     const project = this.getProject(projectId)!;
     const categories = this.listCategories(projectId, opts.workPackageId);
     const catIds = new Set(categories.map((c) => c.id));
@@ -1249,14 +1357,32 @@ export class Repo {
     const priceSources = Object.fromEntries(
       estimate.resourceSummary.map((r) => [r.code, resolved?.[r.code]?.source ?? { kind: 'base', label: 'Giá gốc thư viện' }]),
     );
-    const cost = computeProjectCost(legalSet, estimate.total, project.costSettings, project.buildingType, project.vatRate, {
-      gxdttTmdt: project.gxdttTmdt,
-      categories: estimate.categories.map((c) => ({ id: c.id, name: c.name, direct: c.total, ttRate: c.ttRate })),
-    });
+    // Update 6 E.1/E.2: item-level price_source – computed fresh every time from current norm/price-book state,
+    // never cached, so it can never go stale. `thu_cong` is excluded from the project's auto-resolve priority.
+    const priority = this.priceSourcePriority(projectId);
+    const itemPriceSources: Record<number, { current: PriceSourceKind | null; preferred: PriceSourceKind | null; available: PriceSourceAvailability }> = {};
+    for (const it of items) {
+      const nrs = it.normCode ? byNormCode.get(it.normCode) ?? [] : [];
+      const kinds = it.normCode ? nrs.map((nr) => resolved?.[nr.resourceCode]?.source.kind ?? 'base') : null;
+      const available = availablePriceSources(it, kinds);
+      itemPriceSources[it.id] = { current: currentPriceSourceKind(it, kinds), preferred: resolvePriceSource(it, available, priority), available };
+    }
+    const workPackage = opts.workPackageId ? this.getWorkPackage(projectId, opts.workPackageId) : null;
+    // Update 6 E.5: a "bao_gia" (báo giá nhà thầu) work package never gets TT36/TT11 chi phí chung/TNCT/dự phòng
+    // on top of its already-trọn-gói đơn giá – its value is exactly Σ Thành tiền. `modeOverride` is a pure preview
+    // hook ("xem trước đổi chế độ") – it never reads/writes the package's own stored mode.
+    const effectiveMode = opts.modeOverride ?? workPackage?.mode;
+    const cost =
+      effectiveMode === 'bao_gia'
+        ? computeBaoGiaCost(legalSet.id, estimate.total)
+        : computeProjectCost(legalSet, estimate.total, project.costSettings, project.buildingType, project.vatRate, {
+            gxdttTmdt: project.gxdttTmdt,
+            categories: estimate.categories.map((c) => ({ id: c.id, name: c.name, direct: c.total, ttRate: c.ttRate })),
+          });
     const dateWarning = legalSetDateWarning(project.legalSet, project.priceDate);
     return {
       project,
-      workPackage: opts.workPackageId ? this.getWorkPackage(projectId, opts.workPackageId) : null,
+      workPackage,
       ...estimate,
       legalSet: { id: legalSet.id, label: legalSet.label, status: legalSet.status, normDataset: legalSet.normDataset, documents: legalSet.documents },
       provisionalRates: Object.values(legalSet.tables).some((t) => t.status !== 'verified'),
@@ -1267,6 +1393,8 @@ export class Repo {
       warnings: dateWarning ? [dateWarning, ...cost.warnings] : cost.warnings,
       notes: cost.notes ?? [],
       priceSources,
+      itemPriceSources,
+      priceSourcePriority: priority,
     };
   }
 }

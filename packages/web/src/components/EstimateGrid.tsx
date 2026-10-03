@@ -298,6 +298,17 @@ export function EstimateGrid({
                               mã gốc {it.normCodeRaw}{' '}
                             </span>
                           )}
+                          {(() => {
+                            const ps = data.itemPriceSources?.[it.id];
+                            if (!ps?.current) return null;
+                            const labels: Record<string, string> = { dia_phuong: 'Địa phương', ho_so: 'Hồ sơ', chiet_tinh: 'Chiết tính', thu_cong: 'Thủ công' };
+                            return (
+                              <button className="pm nguon-gia" title={`Nguồn giá: ${labels[ps.current] ?? ps.current}`} onClick={() => setDialogItem(it.id)} data-testid="price-source-badge">
+                                {labels[ps.current] ?? ps.current}
+                                {ps.preferred && ps.preferred !== ps.current && <span className="hint"> (ưu tiên: {labels[ps.preferred] ?? ps.preferred})</span>}
+                              </button>
+                            );
+                          })()}
                           {it.pricingMethod && it.pricingMethod !== 'NORM_BASED' ? (
                             <>
                               <button className="pm" title={it.priceSource ?? 'Chưa có nguồn giá'} onClick={() => setDialogItem(it.id)}>
@@ -455,7 +466,16 @@ export function EstimateGrid({
       </div>
       {dialogItem !== null && (() => {
         const item = data.categories.flatMap((c) => c.items).find((i) => i.id === dialogItem);
-        return item ? <ItemDialog projectId={pid} item={item} onClose={() => setDialogItem(null)} onSaved={reload} /> : null;
+        return item ? (
+          <ItemDialog
+            projectId={pid}
+            item={item}
+            priceSource={data.itemPriceSources?.[item.id]}
+            priceSourcePriority={data.priceSourcePriority}
+            onClose={() => setDialogItem(null)}
+            onSaved={reload}
+          />
+        ) : null;
       })()}
       {autoOpen && <AutoAssignDialog projectId={pid} onClose={() => setAutoOpen(false)} onDone={reload} />}
       {search && (

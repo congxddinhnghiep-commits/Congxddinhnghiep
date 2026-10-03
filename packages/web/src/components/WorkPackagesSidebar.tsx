@@ -95,6 +95,22 @@ export function WorkPackagesSidebar({
     }
   };
 
+  const money0 = (n: number) => Math.round(n).toLocaleString('vi-VN');
+  /** Update 6 E.5: "switching mode shows a before/after preview" – a plain confirm() is enough since the switch
+   * itself is a cheap, reversible toggle (not a revision), unlike legal-set change or price-source apply. */
+  const toggleMode = async (wp: WorkPackageDTO) => {
+    const next = wp.mode === 'bao_gia' ? 'du_toan_tt36' : 'bao_gia';
+    try {
+      const preview = await api.workPackageModePreview(projectId, wp.id, next);
+      const label = next === 'bao_gia' ? 'Báo giá nhà thầu (Σ thành tiền, không cộng chi phí chung/TNCT)' : 'Dự toán TT36 (đầy đủ chi phí chung/TNCT/dự phòng)';
+      if (!confirm(`Đổi "${wp.name}" sang chế độ "${label}"?\n\nGiá trị hiện tại: ${money0(preview.before.total)} đ\nGiá trị sau khi đổi: ${money0(preview.after.total)} đ`)) return;
+      await api.updateWorkPackage(projectId, wp.id, { mode: next });
+      onChanged();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   return (
     <aside className="wp-sidebar" data-testid="wp-sidebar">
       <div className="wp-sidebar-head">
@@ -157,6 +173,13 @@ export function WorkPackagesSidebar({
               </button>
             )}
             <span className="wp-actions">
+              <button
+                className="icon small"
+                title={wp.mode === 'bao_gia' ? 'Đang ở chế độ Báo giá nhà thầu – bấm để đổi sang Dự toán TT36' : 'Đang ở chế độ Dự toán TT36 – bấm để đổi sang Báo giá nhà thầu'}
+                onClick={() => toggleMode(wp)}
+              >
+                {wp.mode === 'bao_gia' ? '💰' : '📐'}
+              </button>
               <button
                 className="icon small"
                 title="Đổi tên"

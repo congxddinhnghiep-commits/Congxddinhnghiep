@@ -736,3 +736,26 @@ export function computeProjectCost(
     warnings,
   };
 }
+
+/**
+ * Update 6 E.5 — "Báo giá nhà thầu" (bao_gia) hạng mục công trình: đơn giá đã trọn gói (NORM_BASED hay CUSTOM_GTT
+ * đều vậy), nên giá trị hạng mục = Σ Thành tiền đúng như vậy – KHÔNG cộng thêm chi phí chung / thu nhập chịu thuế
+ * tính trước / dự phòng của TT36 hay TT11 (đó là việc của `du_toan_tt36`). Chỉ các dòng cấp dự án mà người dùng tự
+ * khai ở "Tổng hợp dự án" mới được cộng thêm, ở tầng project, không phải ở tầng này.
+ */
+export function computeBaoGiaCost(legalSetId: LegalSetId, direct: CostTriple): ProjectCost {
+  const total = direct.vl + direct.nc + direct.m;
+  const line: CostLine = { code: 'BG', name: 'Chi phí (báo giá nhà thầu, đơn giá trọn gói)', formula: 'Σ Thành tiền', value: total, level: 0, stt: '' };
+  const costSummary: CostSummary & { warnings?: string[] } = { lines: [line], T: total, GT: total, TL: 0, G: total, GTGT: 0, Gxd: total, total };
+  return {
+    legalSetId,
+    costSummary,
+    totalEstimate: { lines: [{ code: 'TDT', name: 'Tổng cộng hạng mục (báo giá)', formula: 'Σ Thành tiền', value: total }], total },
+    settings: {},
+    ratesSource: 'Chế độ báo giá nhà thầu (bao_gia) – không áp dụng chi phí chung/TNCT/dự phòng',
+    warnings: [],
+    notes: [
+      'Hạng mục công trình này đang ở chế độ "Báo giá nhà thầu": đơn giá là đơn giá trọn gói (đã gồm chi phí chung, lãi…) theo báo giá, nên không cộng thêm chi phí chung, thu nhập chịu thuế tính trước hay dự phòng của TT36/TT11 – đổi sang chế độ "Dự toán TT36" ở cài đặt hạng mục nếu muốn áp dụng đầy đủ.',
+    ],
+  };
+}

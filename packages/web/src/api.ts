@@ -12,6 +12,7 @@ import type {
   MixDesign,
   Norm,
   PendingField,
+  PriceSourceKind,
   ProjectCostSettings,
   RateTable,
   RebarGroup,
@@ -74,6 +75,9 @@ export interface EstimateResponse {
   warnings: string[];
   notes: string[];
   priceSources: Record<string, PriceSourceInfo>;
+  /** Update 6 E: item id → resolved price_source (current = actually applied, preferred = what priority order picks). */
+  itemPriceSources?: Record<number, { current: PriceSourceKind | null; preferred: PriceSourceKind | null; available: { dia_phuong: boolean; ho_so: boolean; chiet_tinh: boolean } }>;
+  priceSourcePriority?: PriceSourceKind[];
 }
 
 // ---------------------------------------------------------------------------
@@ -548,6 +552,8 @@ export interface ValidationReport {
     status: 'pass' | 'warning' | 'fail';
     findings: { severity: 'error' | 'warning' | 'info'; message: string; itemId?: number; line?: number; category?: string; code?: string }[];
   }[];
+  /** Update 6 E.2: count + value per price_source kind, never mixed silently. */
+  priceSourceSummary: { kind: string; count: number; value: number }[];
 }
 
 export interface PricingDTO {
@@ -756,6 +762,30 @@ export const api = {
     request<MixDesignSummary[]>('GET', `/mix-designs?${new URLSearchParams(params as Record<string, string>).toString()}`),
   mixDesign: (code: string) => request<MixDesign>('GET', `/mix-designs/${encodeURIComponent(code)}`),
   setMix: (pid: number, itemId: number, mixCode: string | null) => request('PUT', `/projects/${pid}/items/${itemId}/mix`, { mixCode }),
+
+  // Update 6 E — price sources ("Nguồn giá")
+  priceSourcePriority: (pid: number) => request<PriceSourceKind[]>('GET', `/projects/${pid}/price-source-priority`),
+  setPriceSourcePriority: (pid: number, order: PriceSourceKind[]) => request<PriceSourceKind[]>('PUT', `/projects/${pid}/price-source-priority`, { order }),
+  setPriceSourceOverride: (pid: number, itemId: number, kind: PriceSourceKind | null) => request('PUT', `/projects/${pid}/items/${itemId}/price-source-override`, { kind }),
+  applyPriceSourceKind: (pid: number, itemId: number, kind: PriceSourceKind) => request('PUT', `/projects/${pid}/items/${itemId}/price-source-apply`, { kind }),
+  previewApplyPriceSourcePriority: (pid: number) =>
+    request<{ changes: { itemId: number; name: string; from: { kind: PriceSourceKind | null; price: number }; to: { kind: PriceSourceKind; price: number } }[] }>(
+      'GET',
+      `/projects/${pid}/price-source-apply/preview`,
+    ),
+  applyPriceSourcePriority: (pid: number) => request<{ revisionId: number | null; changed: number }>('POST', `/projects/${pid}/price-source-apply`),
+  chietTinhSheet: (pid: number, itemId: number) =>
+    request<{
+      item: { id: number; name: string; normCode: string; unit: string; quantity: number; note: string | null; chietTinhSpec: string | null };
+      norm: { code: string; name: string; unit: string };
+      resources: { resourceCode: string; name: string; unit: string; type: string; consumption: number; pctBase: string | null; price: number; source: { kind: string; label: string }; amount: number; missing: boolean }[];
+      unitCost: UnitCost;
+      missingResources: string[];
+      flagged: boolean;
+    }>('GET', `/projects/${pid}/items/${itemId}/chiet-tinh`),
+  setChietTinhSpec: (pid: number, itemId: number, spec: string | null) => request('PUT', `/projects/${pid}/items/${itemId}/chiet-tinh-spec`, { spec }),
+  workPackageModePreview: (pid: number, wpId: number, mode: 'bao_gia' | 'du_toan_tt36') =>
+    request<{ before: { mode: string; total: number }; after: { mode: string; total: number } }>('GET', `/projects/${pid}/work-packages/${wpId}/mode-preview?mode=${mode}`),
   transport: (pid: number) => request<Record<string, TransportLegDTO[]>>('GET', `/projects/${pid}/transport`),
   saveTransport: (pid: number, code: string, legs: TransportLegDTO[]) => request<TransportLegDTO[]>('PUT', `/projects/${pid}/transport/${encodeURIComponent(code)}`, { legs }),
   validation: (pid: number) => request<ValidationReport>('GET', `/projects/${pid}/validation`),

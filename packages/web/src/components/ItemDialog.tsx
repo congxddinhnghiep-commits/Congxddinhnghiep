@@ -1,8 +1,158 @@
 import { useEffect, useState } from 'react';
-import { isMixResourceName, PRICING_METHOD_LABELS, type ItemResult, type MixDesign, type MixKind } from '@dutoan/core';
-import { api, type MixDesignSummary, type PricingDTO, type QuantityLineDTO } from '../api';
+import { isMixResourceName, PRICE_SOURCE_LABELS, PRICING_METHOD_LABELS, type ItemResult, type MixDesign, type MixKind, type PriceSourceKind } from '@dutoan/core';
+import { api, type EstimateResponse, type MixDesignSummary, type PricingDTO, type QuantityLineDTO } from '../api';
 import { money, parseInputNumber, qty } from '../format';
 import { Modal } from './Modal';
+
+const PRICE_SOURCE_KEYS: PriceSourceKind[] = ['dia_phuong', 'ho_so', 'chiet_tinh', 'thu_cong'];
+
+/** "Nguồn giá" tab: current/preferred kind, per-item override, and (when the item has a norm code) the chiết tính
+ * breakdown ("Phiếu chiết tính đơn giá", section E.4) with missing-resource flags. */
+function PriceSourcePanel({
+  projectId,
+  item,
+  priceSource,
+  onSaved,
+}: {
+  projectId: number;
+  item: Item;
+  priceSource?: EstimateResponse['itemPriceSources'] extends Record<number, infer V> | undefined ? V : never;
+  onSaved: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [sheet, setSheet] = useState<Awaited<ReturnType<typeof api.chietTinhSheet>> | null>(null);
+  const [spec, setSpec] = useState('');
+  useEffect(() => {
+    if (!item.normCode) return;
+    api
+      .chietTinhSheet(projectId, item.id)
+      .then((s) => {
+        setSheet(s);
+        setSpec(s.item.chietTinhSpec ?? '');
+      })
+      .catch(() => setSheet(null));
+  }, [projectId, item.id, item.normCode]);
+
+  const setOverride = async (kind: PriceSourceKind | null) => {
+    setBusy(true);
+    setError('');
+    try {
+      await api.setPriceSourceOverride(projectId, item.id, kind);
+      onSaved();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const applyKind = async (kind: PriceSourceKind) => {
+    setBusy(true);
+    setError('');
+    try {
+      await api.applyPriceSourceKind(projectId, item.id, kind);
+      onSaved();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const saveSpec = async () => {
+    try {
+      await api.setChietTinhSpec(projectId, item.id, spec.trim() || null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  return (
+    <div>
+      {error && <div className="error">{error}</div>}
+      <table className="table compact">
+        <tbody>
+          <tr>
+            <th>Đang áp dụng</th>
+            <td>{priceSource?.current ? PRICE_SOURCE_LABELS[priceSource.current] : '–'}</td>
+          </tr>
+          <tr>
+            <th>Theo thứ tự ưu tiên của công trình</th>
+            <td>{priceSource?.preferred ? PRICE_SOURCE_LABELS[priceSource.preferred] : 'Không có nguồn nào khả dụng'}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p className="hint">Chỉ định cố định (ghi đè thứ tự ưu tiên, không đổi khi bấm “Áp dụng lại thứ tự ưu tiên”):</p>
+      <div className="import-options">
+        {PRICE_SOURCE_KEYS.map((k) => (
+          <label className="check" key={k}>
+            <input type="radio" name="price-source-override" disabled={busy} checked={item.priceSourceOverride === k} onChange={() => setOverride(k)} /> {PRICE_SOURCE_LABELS[k]}
+          </label>
+        ))}
+        <label className="check">
+          <input type="radio" name="price-source-override" disabled={busy} checked={!item.priceSourceOverride} onChange={() => setOverride(null)} /> Tự động theo thứ tự ưu tiên
+        </label>
+      </div>
+      {priceSource && priceSource.current !== priceSource.preferred && priceSource.preferred && (
+        <div className="notice" onClick={() => applyKind(priceSource.preferred!)}>
+          ⚡ Áp dụng ngay nguồn ưu tiên hơn: {PRICE_SOURCE_LABELS[priceSource.preferred]}
+        </div>
+      )}
+      {item.normCode && (
+        <>
+          <h4>Phiếu chiết tính đơn giá</h4>
+          {!sheet ? (
+            <p className="hint">Đang tải…</p>
+          ) : (
+            <>
+              {sheet.flagged && (
+                <div className="warn-box">⚠ Thiếu giá vật tư: {sheet.missingResources.join(', ')} – đơn giá chưa đầy đủ, không tự đặt bằng 0 mà không báo.</div>
+              )}
+              <table className="table compact">
+                <thead>
+                  <tr>
+                    <th>Mã</th>
+                    <th>Tên vật tư/nhân công/máy</th>
+                    <th>Đơn vị</th>
+                    <th className="num">Hao phí</th>
+                    <th className="num">Đơn giá</th>
+                    <th className="num">Thành tiền</th>
+                    <th>Nguồn giá</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sheet.resources.map((r) => (
+                    <tr key={r.resourceCode} className={r.missing ? 'bad-cell' : ''}>
+                      <td>{r.resourceCode}</td>
+                      <td>{r.name}</td>
+                      <td>{r.unit}</td>
+                      <td className="num">{r.pctBase ? `${r.consumption}%` : qty(r.consumption)}</td>
+                      <td className="num">{r.missing ? <span className="hint">thiếu giá</span> : money(r.price)}</td>
+                      <td className="num">{money(r.amount)}</td>
+                      <td className="hint">{r.source.label}</td>
+                    </tr>
+                  ))}
+                  <tr className="rt-row-category">
+                    <td colSpan={5}>
+                      <b>Đơn giá / {item.unit}</b>
+                    </td>
+                    <td className="num">
+                      <b>{money(sheet.unitCost.total)}</b>
+                    </td>
+                    <td />
+                  </tr>
+                </tbody>
+              </table>
+              <label>
+                Cấu tạo, công nghệ – biện pháp thi công, vật tư chính (quy cách, mác, xuất xứ), ghi chú:
+                <textarea rows={3} value={spec} onChange={(e) => setSpec(e.target.value)} onBlur={saveSpec} />
+              </label>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 const varsText = (v?: Record<string, number>) =>
   v ? Object.entries(v).map(([k, x]) => `${k}=${String(x).replace('.', ',')}`).join('; ') : '';
@@ -354,8 +504,21 @@ function MixDesignBox({ projectId, item, onSaved }: { projectId: number; item: I
   );
 }
 
-export function ItemDialog({ projectId, item, onClose, onSaved }: { projectId: number; item: Item; onClose: () => void; onSaved: () => void }) {
-  const [tab, setTab] = useState<'qty' | 'price' | 'mix' | 'source'>('qty');
+export function ItemDialog({
+  projectId,
+  item,
+  priceSource,
+  onClose,
+  onSaved,
+}: {
+  projectId: number;
+  item: Item;
+  priceSource?: EstimateResponse['itemPriceSources'] extends Record<number, infer V> | undefined ? V : never;
+  priceSourcePriority?: PriceSourceKind[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [tab, setTab] = useState<'qty' | 'price' | 'priceSource' | 'mix' | 'source'>('qty');
   const hasMixResource = item.mixCode || item.analysis.some((a) => isMixResourceName(a.name));
   return (
     <Modal title={`${item.normCode || '(chưa có mã)'} – ${item.name}`} onClose={onClose} wide>
@@ -365,6 +528,9 @@ export function ItemDialog({ projectId, item, onClose, onSaved }: { projectId: n
         </button>
         <button className={tab === 'price' ? 'active' : ''} onClick={() => setTab('price')}>
           Cách tính giá
+        </button>
+        <button className={tab === 'priceSource' ? 'active' : ''} onClick={() => setTab('priceSource')}>
+          Nguồn giá
         </button>
         {hasMixResource && (
           <button className={tab === 'mix' ? 'active' : ''} onClick={() => setTab('mix')}>
@@ -377,6 +543,7 @@ export function ItemDialog({ projectId, item, onClose, onSaved }: { projectId: n
       </div>
       {tab === 'qty' && <QuantityLines projectId={projectId} item={item} onSaved={onSaved} />}
       {tab === 'price' && <Pricing projectId={projectId} item={item} onSaved={onSaved} />}
+      {tab === 'priceSource' && <PriceSourcePanel projectId={projectId} item={item} priceSource={priceSource} onSaved={onSaved} />}
       {tab === 'mix' && hasMixResource && <MixDesignBox projectId={projectId} item={item} onSaved={onSaved} />}
       {tab === 'source' && (
         <table className="table compact">

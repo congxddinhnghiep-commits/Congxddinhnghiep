@@ -29,7 +29,9 @@ Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/UPDATE
 - Danh sách công trình: tạo, sao chép, xóa, mở.
 - **Hạng mục công trình** (CT01 nhà xưởng, A1 văn phòng, bể PCCC…): một công trình có nhiều hạng mục công trình, mỗi hạng mục có Phần/công tác, lưới dự toán,
   bóc khối lượng, phân tích vật tư và tổng hợp chi phí **riêng** (STT khởi động lại); tab **Tổng hợp dự án** cộng tất cả hạng mục + các dòng cấp dự án
-  (chi phí quản lý, VAT…) thành tổng dự án. Xem mục 0 dưới đây.
+  (chi phí quản lý, VAT…) thành tổng dự án. Mỗi hạng mục có **chế độ Báo giá nhà thầu hoặc Dự toán TT36** (mục 4b). Xem mục 0 dưới đây.
+- **Nguồn giá & phiếu chiết tính đơn giá**: mỗi công việc biết đơn giá lấy từ đâu (địa phương/hồ sơ/chiết tính/thủ công), thứ tự ưu tiên tự đặt
+  được và áp dụng lại hàng loạt có xem trước; phiếu chiết tính liệt kê vật tư thiếu giá, không bao giờ âm thầm tính bằng 0. Xem mục 4b.
 - **Dự toán chi tiết** theo hạng mục, thao tác bàn phím như F1/G8: gõ mã hiệu → Enter tự điền tên, đơn vị; Enter xuống dòng;
   F3 tra định mức (có dấu/không dấu); diễn giải khối lượng dạng công thức `2*3,5*0,3`.
 - **Giá vật liệu/nhân công/máy** theo công trình, **Phân tích vật tư**, **Tổng hợp vật tư** (kèm chênh lệch giá).
@@ -158,6 +160,22 @@ Nút **Cập nhật định mức & đơn giá theo khu vực** (thanh công c�
 - Bộ đơn giá lưu thêm địa giới lúc ban hành (tỉnh cũ trước 01/07/2025), trạng thái xác minh, SHA-256 của file nguồn và xem được **bản ghi
   dữ liệu** theo chuẩn `data-contract.md`.
 
+### 4b. Nguồn đơn giá & phiếu chiết tính, chế độ báo giá / dự toán TT36 (Update 6)
+- Mỗi công việc có **nguồn giá**: *Địa phương* (mọi tài nguyên đã có giá từ bộ giá khu vực đã xác minh), *Hồ sơ* (giá trong file đã nhập),
+  *Chiết tính* (tính từ định mức), *Thủ công* (nhập tay). Huy hiệu nguồn giá ngay trên lưới dự toán (bấm mở tab **Nguồn giá** của công việc);
+  mỗi công việc có thể **chỉ định cố định** một nguồn (ghi đè thứ tự ưu tiên) hoặc để tự động.
+- Tab **Cài đặt hệ số** → mục "Nguồn đơn giá & thứ tự ưu tiên": sắp xếp lại thứ tự (mặc định Địa phương → Hồ sơ → Chiết tính; *Thủ công* không
+  nằm trong thứ tự – luôn giữ nguyên), rồi **Xem trước "Áp dụng lại thứ tự ưu tiên"** (bảng công việc đổi nguồn, đơn giá cũ → mới) trước khi
+  **Áp dụng** (một phiên bản hoàn tác được). Không bao giờ tự đặt giá khi không có nguồn phù hợp.
+- Tab **Nguồn giá** của công việc có mã định mức hiện **Phiếu chiết tính đơn giá**: từng tài nguyên (VL/NC/M) × hao phí × đơn giá (theo đúng
+  thứ tự ưu tiên ở trên), tài nguyên thiếu giá được liệt kê và đánh dấu "thiếu giá vật tư" (không bao giờ âm thầm tính bằng 0); có ô cấu tạo,
+  công nghệ – biện pháp thi công, vật tư chính (quy cách, mác, xuất xứ), ghi chú.
+- Mỗi **hạng mục công trình** có **chế độ**: *Báo giá nhà thầu* (huy hiệu "báo giá" – đơn giá đã trọn gói, giá trị hạng mục = Σ Thành tiền,
+  KHÔNG cộng chi phí chung/thu nhập chịu thuế tính trước/dự phòng của TT36 hay TT11) hoặc *Dự toán TT36* (đầy đủ như hiện nay). Nút 💰/📐 cạnh
+  mỗi hạng mục ở thanh bên đổi chế độ, có xem trước giá trị trước/sau. Mặc định: *Báo giá nhà thầu* cho hạng mục nhập từ file có đơn giá sẵn,
+  *Dự toán TT36* cho hạng mục mới tạo trống.
+- Tab **Kiểm tra** và sheet **TỔNG HỢP** khi xuất Excel đều có bảng tổng hợp theo nguồn giá (số công việc + giá trị mỗi nguồn).
+
 ### 5. Bóc khối lượng theo cấu kiện
 Tab **Bóc khối lượng** của công trình (song song với Dự toán chi tiết, không thay thế): khai báo cấu kiện kết cấu/kiến trúc →
 phần mềm tự sinh công tác và khối lượng theo công thức → đẩy sang dự toán. **Tính bằng tay luôn làm được** (gõ công thức hoặc kích
@@ -226,6 +244,7 @@ desktop/         Khung Electron (Phase 2)
 | `npm run e2e` | Kiểm thử trình duyệt headless cho Update 3 (xem `e2e/README.md`) |
 | `npm run e2e:update5` | Kiểm thử trình duyệt headless cho Bóc khối lượng theo cấu kiện (Update 5) |
 | `npm run e2e:update4-multi` | Kiểm thử nhập nhiều sheet → hạng mục công trình → xuất Excel (Update 6 B/D) |
+| `npm run e2e:update6-price-source` | Kiểm thử nguồn giá, phiếu chiết tính, chế độ báo giá/TT36 (Update 6 E) |
 | `npm run fixtures:sinomag` | Sinh lại `import_sinomag_like.xlsx` + `.expected.json` (fixture nhận diện dòng, Update 6 C) |
 
 Đăng nhập lần đầu: **admin / admin123** (chỉ ở môi trường phát triển) → hệ thống yêu cầu đổi mật khẩu ngay.

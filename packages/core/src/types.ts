@@ -1,5 +1,15 @@
 export type ResourceType = 'VL' | 'NC' | 'M';
 
+/** Update 6 E: provenance of an item's effective price. */
+export type PriceSourceKind = 'dia_phuong' | 'ho_so' | 'chiet_tinh' | 'thu_cong';
+
+export const PRICE_SOURCE_LABELS: Record<PriceSourceKind, string> = {
+  dia_phuong: 'Địa phương (giá/đơn giá công bố)',
+  ho_so: 'Hồ sơ (giá trong file)',
+  chiet_tinh: 'Chiết tính (theo định mức)',
+  thu_cong: 'Thủ công (nhập tay)',
+};
+
 export type BuildingType = 'dan_dung' | 'cong_nghiep' | 'giao_thong' | 'nn_ptnt' | 'ha_tang';
 
 export const BUILDING_TYPE_LABELS: Record<BuildingType, string> = {
@@ -110,6 +120,14 @@ export interface EstimateItem {
   normUnitCost?: { vl: number; nc: number; m: number; total: number } | null;
   /** Selected TT 38/2026 Phụ lục VII mix design code for this item's "Vữa..." resource, if any. */
   mixCode?: string | null;
+  /**
+   * Update 6 E: an explicit per-item pin of `price_source` – always wins over the resolver, never changed by
+   * "Áp dụng lại thứ tự ưu tiên". The resolved kind itself (dia_phuong/ho_so/chiet_tinh when not pinned) is never
+   * stored; it is computed from current state each time (see `resolvePriceSource` in core/pricesource.ts).
+   */
+  priceSourceOverride?: PriceSourceKind | null;
+  /** Update 6 E.4: free text "cấu tạo, công nghệ – biện pháp thi công, vật tư chính, ghi chú" of the chiết tính sheet. */
+  chietTinhSpec?: string | null;
   /**
    * Calculation-only, not persisted: when set, computeEstimate uses this instead of the norm's own
    * resource list (mix-design expansion of a "Vữa..." resource into cement/sand/stone/water).

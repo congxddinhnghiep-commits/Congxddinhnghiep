@@ -444,3 +444,45 @@ Nguồn: `docs/LEGAL-UPDATE-2026.md` (đã xác minh metadata ngày 2026-09-27).
 136. **e2e mới**: `e2e/update4-multi.mjs` thêm bước bấm "⤒ Xuất Excel", chờ sự kiện `download` của Playwright (hoạt động với blob URL vì `a.download` vẫn
     kích hoạt luồng tải của Chromium) và kiểm file > 10KB – xác nhận đường "nhập → hạng mục công trình → xuất Excel" hoạt động thật trên trình duyệt, không
     chỉ ở API.
+
+## Update 6 (docs/UPDATE-6.md) — Section 3: E nguồn giá + chế độ báo giá/dự toán TT36
+137. **`price_source` (dia_phuong/ho_so/chiet_tinh/thu_cong) KHÔNG lưu CSDL, tính lại mỗi lần** (`core/pricesource.ts`, `Repo.calculate()`): chỉ
+    `estimate_items.price_source_override` (ghi đè cố định của người dùng) là dữ liệu thật; "đang áp dụng" (`currentPriceSourceKind`, suy ra từ
+    `pricingMethod`/`source`/`normCode` hiện có) và "nguồn ưu tiên" (`resolvePriceSource`, theo `projects.price_source_priority`) đều là hàm thuần tính
+    từ trạng thái hiện tại, không bao giờ lệch (stale) với giá/bộ định mức/bộ giá đang dùng. "Áp dụng lại thứ tự ưu tiên" chỉ đổi khi `current !== preferred`.
+138. **`dia_phuong` chỉ xét THEO TÀI NGUYÊN của chiết tính, không có bảng "đơn giá công bố theo mã công tác" riêng**: kiểm tra schema `price_books` cho
+    thấy loại 'TH' là bộ giá TỔNG HỢP nhiều loại tài nguyên trong 1 file (vẫn khớp theo tài nguyên khi nhập, `importRows`), KHÔNG phải bảng tra theo mã
+    định mức như tên gọi "TH – tổng hợp" có thể gợi ý; không có hạ tầng "giá công bố trực tiếp theo mã công tác" trong Phase 1. Quyết định: `dia_phuong`
+    khả dụng khi công tác có mã định mức VÀ MỌI tài nguyên của nó resolve với `source.kind === 'book'` (bộ giá khu vực đã xác minh) – khớp đúng câu chữ
+    "covers the item … by resource for chiết tính"; nhánh "by code" (bảng giá trực tiếp theo mã công tác) để ngỏ cho bản sau, không phát minh thêm loại
+    bộ giá mới trong đợt này. Hệ quả thực tế: `dia_phuong` hiếm khi khả dụng trừ khi công trình đã chọn đủ bộ giá khu vực cho MỌI tài nguyên của một mã –
+    đúng tinh thần "Do not invent prices" (E.3), có test xác nhận trường hợp fall-through là phổ biến.
+139. **`current` khác `preferred`**: `current` = nguồn ĐANG thật sự áp dụng (suy từ `pricingMethod`/`custom`/`source` đã lưu), `preferred` = nguồn mà thứ tự
+    ưu tiên hiện tại CHỌN nếu tính lại từ đầu. Hai giá trị này lệch nhau chính là tập hợp "Áp dụng lại thứ tự ưu tiên" cần sửa (ví dụ: công việc nhập từ
+    file có mã định mức sau đó, ưu tiên đổi thành chiết tính trước hồ sơ → cần chuyển `pricingMethod` từ CUSTOM_GTT sang NORM_BASED). Xem trước
+    (`previewApplyPriority`) thực hiện thật rồi KHÔI PHỤC lại trong cùng 1 transaction thay vì tính nhẩm hai lần – tận dụng đúng
+    `Repo.applyPriceSourceKind`/`Repo.calculate()` sẵn có nên không có đường tính riêng dễ lệch kết quả với lúc áp dụng thật.
+140. **"Áp dụng lại thứ tự ưu tiên" dùng chung `estimate_revisions`** (`price-source.ts`, kind `price_source_apply`) thay vì tự tạo cơ chế hoàn tác riêng:
+    `RegionalUpdateService.undo()` vốn đã là bộ điều phối hoàn tác CHUNG của cả dự án (phân biệt theo `'kind' in raw`), thêm một nhánh `price_source_apply`
+    vào đó thay vì viết route `/undo` riêng – giữ đúng bất biến "chỉ hoàn tác được phiên bản mới nhất" dùng chung cho MỌI loại phiên bản.
+141. **`chiet_tinh_spec`** (cấu tạo/công nghệ – biện pháp thi công/vật tư chính/ghi chú) là cột text tự do mới trên `estimate_items`, hiển thị và sửa được
+    ở tab "Nguồn giá" của hộp thoại công việc; **chưa** nối vào bộ máy gợi ý mã (`NormIndex.suggest`) như E.4 mô tả ("the spec text is also an input to code
+    suggestion") – việc đó đụng tới mọi nơi gọi gợi ý (lưới, gắn mã tự động, trợ lý AI) và rủi ro hồi quy không tương xứng với phạm vi đợt này; để ngỏ cho
+    bản sau. Phiếu chiết tính (`Repo.chietTinhSheet`) đánh dấu tài nguyên "thiếu giá" khi giá resolve ≤ 0 (không phân biệt được "giá thật bằng 0" khỏi
+    "chưa có giá" trong dữ liệu hiện tại – coi mọi giá ≤ 0 là thiếu, đúng tinh thần "never 0 without a flag").
+142. **`bao_gia` bỏ qua TT36/TT11 bằng một hàm chi phí riêng (`computeBaoGiaCost`), không phải một nhánh trong `computeProjectCost`**: `Repo.calculate()`
+    chọn `computeBaoGiaCost` thay vì gọi `computeProjectCost` hoàn toàn khi `work_packages.mode === 'bao_gia'` (hoặc `modeOverride` khi xem trước) – giữ
+    `computeProjectCost`/`computeTt36`/TT11 nguyên vẹn, không thêm nhánh rẽ vào bộ máy tính pháp lý đã có test riêng. Giá trị hạng mục `bao_gia` = đúng
+    `estimate.total` (Σ thành tiền trực tiếp), không cộng chi phí chung/TNCT/dự phòng – sheet xuất Excel của hạng mục cũng đọc thẳng `calc.total.total`
+    (không qua `costSummary`) nên luôn khớp dù công trình đổi qua lại hai chế độ.
+143. **Xem trước đổi chế độ không ghi CSDL, kể cả tạm thời**: `Repo.calculate(projectId, { modeOverride })` tính "sau" bằng cách truyền thẳng chế độ giả
+    định vào bộ chọn `computeBaoGiaCost`/`computeProjectCost` – lần thử đầu tiên từng UPDATE tạm rồi phục hồi `work_packages.mode` hai lần liên tiếp bị bỏ vì
+    `touchProject` (đặt `status='draft'`) sẽ chạy ngay cả khi phục hồi ngay sau đó, và có rủi ro tranh chấp/crash giữa hai lần ghi; `modeOverride` không đụng
+    CSDL nên xem trước luôn an toàn tuyệt đối.
+144. **Tổng hợp "Nguồn giá" (đếm + giá trị theo nguồn) đặt ở sheet TỔNG HỢP, KHÔNG chèn cuối mỗi sheet hạng mục**: thử chèn trực tiếp sau dòng "CỘNG TRƯỚC
+    THUẾ" của từng sheet hạng mục trước, nhưng phát hiện (qua test round-trip có sẵn, mục 135) các dòng tổng hợp đó bị ĐỌC LẠI thành công việc khi nhập lại
+    sheet đã xuất (không có vùng dữ liệu giới hạn rõ `firstRow`/`lastRow` khi nhập cả sheet) – đổi sang gộp theo TOÀN DỰ ÁN ở sheet TỔNG HỢP (không bao giờ
+    được nhập lại như một sheet hạng mục) để vừa đúng yêu cầu "a summary … in the export" vừa không phá round-trip.
+145. **Phạm vi bỏ qua trong đợt này** (ghi lại thay vì giấu đi): không có bộ lọc "Nguồn giá" tương tác trên lưới dự toán (`EstimateGrid` đã có logic bàn
+    phím/điều hướng theo chỉ số dòng liên tục khá phức tạp – thêm ẩn/hiện dòng theo bộ lọc rủi ro vỡ điều hướng đó mà không kiểm chứng kỹ được); thay vào đó
+    mỗi công việc có huy hiệu nguồn giá ngay trên lưới (bấm mở tab "Nguồn giá"), và bộ lọc/tổng hợp đầy đủ nằm ở tab "Kiểm tra" + file xuất Excel.

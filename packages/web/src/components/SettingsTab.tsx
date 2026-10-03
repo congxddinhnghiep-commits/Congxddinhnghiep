@@ -381,6 +381,8 @@ export function SettingsTab({ data, config, onSaved }: { data: EstimateResponse;
         </div>
       </section>
 
+      <PriceSourcePrioritySettings projectId={p.id} onSaved={onSaved} />
+
       <div className="actions sticky">
         {msg && <span className="hint">{msg}</span>}
         <button className="primary" onClick={save}>
@@ -388,6 +390,150 @@ export function SettingsTab({ data, config, onSaved }: { data: EstimateResponse;
         </button>
       </div>
     </div>
+  );
+}
+
+const PRICE_SOURCE_PRIORITY_LABELS: Record<string, string> = {
+  dia_phuong: 'Địa phương (giá/đơn giá công bố)',
+  ho_so: 'Hồ sơ (giá trong file)',
+  chiet_tinh: 'Chiết tính (theo định mức)',
+};
+
+/** Update 6 E.2: "Thứ tự ưu tiên nguồn giá" + "Áp dụng lại thứ tự ưu tiên" (bulk, with preview, undoable). */
+function PriceSourcePrioritySettings({ projectId, onSaved }: { projectId: number; onSaved: () => void }) {
+  const [order, setOrder] = useState<('dia_phuong' | 'ho_so' | 'chiet_tinh')[]>(['dia_phuong', 'ho_so', 'chiet_tinh']);
+  const [preview, setPreview] = useState<{ changes: { itemId: number; name: string; from: { kind: string | null; price: number }; to: { kind: string; price: number } }[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.priceSourcePriority(projectId).then((o) => setOrder(o as ('dia_phuong' | 'ho_so' | 'chiet_tinh')[]));
+  }, [projectId]);
+
+  const move = (i: number, dir: -1 | 1) => {
+    const next = [...order];
+    const j = i + dir;
+    if (j < 0 || j >= next.length) return;
+    [next[i], next[j]] = [next[j], next[i]];
+    setOrder(next);
+  };
+
+  const saveOrder = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await api.setPriceSourcePriority(projectId, order);
+      setMsg('Đã lưu thứ tự ưu tiên.');
+      setPreview(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loadPreview = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      setPreview(await api.previewApplyPriceSourcePriority(projectId));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const apply = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const r = await api.applyPriceSourcePriority(projectId);
+      setMsg(`Đã áp dụng lại cho ${r.changed} công việc.`);
+      setPreview(null);
+      onSaved();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="card">
+      <h4>Nguồn đơn giá & thứ tự ưu tiên</h4>
+      <p className="hint">
+        Mặc định: Địa phương → Hồ sơ → Chiết tính. Mỗi công việc dùng nguồn khả dụng đầu tiên theo thứ tự này (trừ khi đã chỉ định cố định ở tab
+        “Nguồn giá” của công việc). "Thủ công" (nhập tay) không nằm trong thứ tự – luôn giữ nguyên.
+      </p>
+      {error && <div className="error">{error}</div>}
+      <ol className="wp-list" data-testid="price-source-priority">
+        {order.map((k, i) => (
+          <li key={k}>
+            <span className="wp-select">
+              <span className="wp-name">
+                {i + 1}. {PRICE_SOURCE_PRIORITY_LABELS[k]}
+              </span>
+            </span>
+            <span className="wp-actions" style={{ display: 'flex' }}>
+              <button className="icon small" disabled={busy || i === 0} onClick={() => move(i, -1)}>
+                ↑
+              </button>
+              <button className="icon small" disabled={busy || i === order.length - 1} onClick={() => move(i, 1)}>
+                ↓
+              </button>
+            </span>
+          </li>
+        ))}
+      </ol>
+      <div className="actions">
+        <button onClick={saveOrder} disabled={busy}>
+          Lưu thứ tự ưu tiên
+        </button>
+        <button onClick={loadPreview} disabled={busy}>
+          Xem trước "Áp dụng lại thứ tự ưu tiên"
+        </button>
+        {msg && <span className="hint">{msg}</span>}
+      </div>
+      {preview && (
+        <>
+          {preview.changes.length === 0 ? (
+            <p className="hint">Không có công việc nào cần đổi nguồn giá.</p>
+          ) : (
+            <>
+              <table className="table compact" data-testid="price-source-apply-preview">
+                <thead>
+                  <tr>
+                    <th>Công việc</th>
+                    <th>Nguồn cũ</th>
+                    <th className="num">Đơn giá cũ</th>
+                    <th>Nguồn mới</th>
+                    <th className="num">Đơn giá mới</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.changes.map((c) => (
+                    <tr key={c.itemId}>
+                      <td>{c.name}</td>
+                      <td>{c.from.kind ?? '–'}</td>
+                      <td className="num">{c.from.price.toLocaleString('vi-VN')}</td>
+                      <td>{c.to.kind}</td>
+                      <td className="num">{c.to.price.toLocaleString('vi-VN')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="actions">
+                <button className="primary" onClick={apply} disabled={busy}>
+                  Áp dụng lại ({preview.changes.length} công việc)
+                </button>
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 

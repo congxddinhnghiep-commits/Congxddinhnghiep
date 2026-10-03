@@ -3,6 +3,7 @@ import type { DB } from './db.js';
 import { resolveImportCode, type CodeResolution } from './import-codes.js';
 import { restoreReplaced, type ReimportSnapshot } from './import-sources.js';
 import type { PriceBookService } from './pricebooks.js';
+import { undoPriceSourceApply, type PriceSourceApplySnapshot } from './price-source.js';
 import { HttpError, type Repo } from './repo.js';
 
 export interface RegionalUpdateRequest {
@@ -251,7 +252,15 @@ export class RegionalUpdateService {
     if (!rev) throw new HttpError(404, 'Không tìm thấy phiên bản');
     if (rev.undone_at) throw new HttpError(409, 'Phiên bản này đã được hoàn tác');
     if (!latest || latest.id !== rev.id) throw new HttpError(409, 'Chỉ hoàn tác được phiên bản mới nhất – hãy hoàn tác các phiên bản sau nó trước');
-    const raw = JSON.parse(rev.snapshot_json) as Snapshot | ReimportSnapshot;
+    const raw = JSON.parse(rev.snapshot_json) as Snapshot | ReimportSnapshot | PriceSourceApplySnapshot;
+    if ('kind' in raw && raw.kind === 'price_source_apply') {
+      this.db.transaction(() => {
+        undoPriceSourceApply(this.db, raw);
+        this.db.prepare(`UPDATE estimate_revisions SET undone_at = datetime('now') WHERE id = ?`).run(rev.id);
+        this.repo.touchProject(projectId);
+      })();
+      return;
+    }
     if ('kind' in raw && raw.kind === 'reimport') {
       this.db.transaction(() => {
         restoreReplaced(this.db, raw);

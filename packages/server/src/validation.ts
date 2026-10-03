@@ -251,5 +251,19 @@ export function validateProject(repo: Repo, legal: LegalService, priceBooks: Pri
 
   const counts = { error: 0, warning: 0, info: 0 };
   for (const c of checks) for (const f of c.findings) counts[f.severity]++;
-  return { generatedAt: new Date().toISOString(), project: { id: p.id, name: p.name, legalSet: set.label, priceDate: p.priceDate }, counts, checks };
+
+  // Update 6 E.2: price_source summary (count + value per kind), never mixed silently.
+  const priceSourceSummary: { kind: string; count: number; value: number }[] = [];
+  {
+    const byKind = new Map<string, { count: number; value: number }>();
+    for (const x of all) {
+      const kind = calc.itemPriceSources[x.item.id]?.current ?? 'chưa xác định';
+      const cur = byKind.get(kind) ?? { count: 0, value: 0 };
+      cur.count++;
+      cur.value += x.item.amount.total;
+      byKind.set(kind, cur);
+    }
+    for (const [kind, v] of byKind) priceSourceSummary.push({ kind, ...v });
+  }
+  return { generatedAt: new Date().toISOString(), project: { id: p.id, name: p.name, legalSet: set.label, priceDate: p.priceDate }, counts, checks, priceSourceSummary };
 }
