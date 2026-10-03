@@ -10,7 +10,9 @@ export type UndoOp =
   | { op: 'setPrice'; resourceCode: string; price: number | null }
   | { op: 'restoreItem'; itemId: number; snapshot: ItemSnapshot }
   /** Undo an estimate revision (regional update); handled by the caller that owns the revision service. */
-  | { op: 'undoRevision'; revisionId: number };
+  | { op: 'undoRevision'; revisionId: number }
+  /** Update 6 B: delete a work package created by an import, so undoing it doesn't leave an empty one behind. */
+  | { op: 'deleteWorkPackage'; workPackageId: number };
 
 export interface ActionResult {
   text: string;
@@ -118,6 +120,13 @@ export function applyUndo(repo: Repo, projectId: number, ops: UndoOp[], hooks: {
           break;
         case 'undoRevision':
           hooks.undoRevision?.(u.revisionId);
+          break;
+        case 'deleteWorkPackage':
+          try {
+            repo.deleteWorkPackage(projectId, u.workPackageId);
+          } catch {
+            /* already removed, or still has categories undo hasn't removed yet */
+          }
           break;
       }
     }

@@ -378,6 +378,39 @@ CREATE TABLE IF NOT EXISTS rebar_schedule_rows (
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_rebar_rows_project ON rebar_schedule_rows(project_id);
+
+-- Update 6 A: "Hạng mục công trình" (work package) – one level above Phần (categories), one per sheet on import
+-- (e.g. CT01 nhà xưởng, A1 văn phòng, bể PCCC…). Every project has at least one ("Hạng mục chung" after migration).
+CREATE TABLE IF NOT EXISTS work_packages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  code TEXT,
+  name TEXT NOT NULL,
+  name_zh TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  building_type TEXT,
+  area_m2 REAL,
+  -- 'bao_gia' (báo giá nhà thầu – đơn giá trọn gói, không cộng chi phí chung/TNCT trước TT36) or 'du_toan_tt36' (section E.5).
+  mode TEXT NOT NULL DEFAULT 'du_toan_tt36' CHECK (mode IN ('bao_gia', 'du_toan_tt36')),
+  source_file TEXT,
+  source_sheet TEXT,
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_work_packages_project ON work_packages(project_id);
+
+-- Project-level lines of "Tổng hợp dự án" the user defines (e.g. "Chi phí quản lý 3%", "VAT 8%"), on top of the
+-- per-package totals.
+CREATE TABLE IF NOT EXISTS project_summary_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'rate' CHECK (kind IN ('rate', 'amount')),
+  value REAL NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_project_summary_lines_project ON project_summary_lines(project_id);
 `;
 
 const columns = (db: DB, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
@@ -514,6 +547,29 @@ export function migrate(db: DB): void {
   ];
   for (const [c, t] of takeoffItemCols) if (!icols2.includes(c)) db.exec(`ALTER TABLE estimate_items ADD COLUMN ${c} ${t}`);
   if (!columns(db, 'projects').includes('takeoff_settings')) db.exec(`ALTER TABLE projects ADD COLUMN takeoff_settings TEXT`);
+
+  // Update 6 A: work packages. Every project that has no work package yet gets exactly one ("Hạng mục chung")
+  // holding all its existing categories/takeoff elements/stories/manual sheets/rebar rows, so totals don't change.
+  const hadWpCol = columns(db, 'categories').includes('work_package_id');
+  if (!hadWpCol) db.exec(`ALTER TABLE categories ADD COLUMN work_package_id INTEGER REFERENCES work_packages(id)`);
+  if (!columns(db, 'takeoff_elements').includes('work_package_id')) db.exec(`ALTER TABLE takeoff_elements ADD COLUMN work_package_id INTEGER REFERENCES work_packages(id)`);
+  if (!columns(db, 'stories').includes('work_package_id')) db.exec(`ALTER TABLE stories ADD COLUMN work_package_id INTEGER REFERENCES work_packages(id)`);
+  if (!columns(db, 'manual_sheet_rows').includes('work_package_id')) db.exec(`ALTER TABLE manual_sheet_rows ADD COLUMN work_package_id INTEGER REFERENCES work_packages(id)`);
+  if (!columns(db, 'rebar_schedule_rows').includes('work_package_id')) db.exec(`ALTER TABLE rebar_schedule_rows ADD COLUMN work_package_id INTEGER REFERENCES work_packages(id)`);
+  if (!hadWpCol) {
+    db.transaction(() => {
+      const projects = db.prepare('SELECT id FROM projects').all() as { id: number }[];
+      for (const { id: projectId } of projects) {
+        const info = db
+          .prepare(`INSERT INTO work_packages (project_id, code, name, mode) VALUES (?, 'HM_CHUNG', 'Hạng mục chung', 'du_toan_tt36')`)
+          .run(projectId);
+        const wpId = Number(info.lastInsertRowid);
+        for (const table of ['categories', 'takeoff_elements', 'stories', 'manual_sheet_rows', 'rebar_schedule_rows']) {
+          db.prepare(`UPDATE ${table} SET work_package_id = ? WHERE project_id = ? AND work_package_id IS NULL`).run(wpId, projectId);
+        }
+      }
+    })();
+  }
 }
 
 export function openDb(file: string): DB {

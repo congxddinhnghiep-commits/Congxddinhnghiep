@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { api, type AnalyzeMultiResult, type BlockPlanDTO, type ImportPreview } from '../api';
+import { useEffect, useState } from 'react';
+import { api, type AnalyzeMultiResult, type BlockPlanDTO, type ImportPreview, type SheetTargetDTO, type WorkPackageDTO } from '../api';
 import { money, qty } from '../format';
 import { Modal } from './Modal';
 
@@ -15,6 +15,57 @@ function BlockBadges({ b }: { b: BlockPlanDTO }) {
       {b.missingUnit > 0 && <span className="rt rt-warn">{b.missingUnit} thiếu ĐVT</span>}
       {b.tbvt > 0 && <span className="rt rt-item">{b.tbvt} thiết bị/vật tư theo báo giá</span>}
     </span>
+  );
+}
+
+/** Update 6 B: where a checked sheet's blocks go – a new hạng mục công trình (editable name), or an existing one. */
+function SheetTargetPicker({
+  sheet,
+  target,
+  existingPackages,
+  onChange,
+}: {
+  sheet: AnalyzeMultiResult['sheets'][number];
+  target: SheetTargetDTO;
+  existingPackages: WorkPackageDTO[];
+  onChange: (patch: Partial<SheetTargetDTO>) => void;
+}) {
+  return (
+    <div className="sheet-target">
+      <select
+        data-testid={`target-mode-${sheet.index}`}
+        value={target.mode}
+        onChange={(e) => {
+          const mode = e.target.value as SheetTargetDTO['mode'];
+          onChange(mode === 'new' ? { mode, name: target.name ?? sheet.defaultPackageName } : { mode, workPackageId: existingPackages[0]?.id });
+        }}
+      >
+        <option value="new">Tạo hạng mục công trình mới</option>
+        {existingPackages.length > 0 && <option value="replace">Thay thế hạng mục…</option>}
+        {existingPackages.length > 0 && <option value="add">Thêm vào hạng mục…</option>}
+      </select>
+      {target.mode === 'new' ? (
+        <input
+          data-testid={`target-name-${sheet.index}`}
+          value={target.name ?? ''}
+          placeholder={sheet.defaultPackageName}
+          onChange={(e) => onChange({ name: e.target.value })}
+        />
+      ) : (
+        <select data-testid={`target-package-${sheet.index}`} value={target.workPackageId ?? ''} onChange={(e) => onChange({ workPackageId: Number(e.target.value) })}>
+          {existingPackages.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      )}
+      {sheet.blocks > 1 && target.mode !== 'replace' && (
+        <label className="check small">
+          <input type="checkbox" checked={!!target.splitBlocks} onChange={(e) => onChange({ splitBlocks: e.target.checked })} /> Tách mỗi bảng con thành hạng mục riêng
+        </label>
+      )}
+    </div>
   );
 }
 
@@ -93,6 +144,18 @@ export function MultiSheetImport({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [openPreview, setOpenPreview] = useState<Set<string>>(new Set());
+  const [existingPackages, setExistingPackages] = useState<WorkPackageDTO[]>([]);
+  // Update 6 B: per-sheet destination – a NEW hạng mục công trình (editable name) by default, or an existing one.
+  const [targets, setTargets] = useState<Record<number, SheetTargetDTO>>({});
+
+  useEffect(() => {
+    api.workPackages(projectId).then(setExistingPackages).catch(() => undefined);
+  }, [projectId]);
+
+  const targetFor = (s: AnalyzeMultiResult['sheets'][number]): SheetTargetDTO =>
+    targets[s.index] ?? { sheetIndex: s.index, mode: 'new', name: s.defaultPackageName, nameZh: s.defaultPackageNameZh };
+  const setTarget = (sheetIndex: number, patch: Partial<SheetTargetDTO>) =>
+    setTargets((prev) => ({ ...prev, [sheetIndex]: { ...(prev[sheetIndex] ?? targetFor(m!.sheets[sheetIndex])), ...patch } }));
 
   const analyze = async (sheetIndexes: number[], id = fileId, opts?: { pricingOption?: 'file' | 'norm'; equipmentAsQuote?: boolean; amountFidelity?: 'file' | 'calc' }) => {
     setBusy(true);
@@ -160,7 +223,8 @@ export function MultiSheetImport({
     setBusy(true);
     setError('');
     try {
-      const r = await api.importSheets(projectId, { fileId, sheetIndexes: [...selected], pricingOption, equipmentAsQuote, amountFidelity });
+      const sheetTargets = [...selected].map((i) => targetFor(m!.sheets[i]));
+      const r = await api.importSheets(projectId, { fileId, sheetIndexes: [...selected], pricingOption, equipmentAsQuote, amountFidelity, targets: sheetTargets });
       onImported(r.message);
     } catch (e) {
       setError((e as Error).message);
@@ -214,6 +278,7 @@ export function MultiSheetImport({
                 <th />
                 <th>Sheet</th>
                 <th className="num">Số bảng</th>
+                <th>Đích (hạng mục công trình)</th>
                 <th />
               </tr>
             </thead>
@@ -231,6 +296,11 @@ export function MultiSheetImport({
                   </td>
                   <td>{s.label}</td>
                   <td className="num">{s.blocks || '–'}</td>
+                  <td>
+                    {selected.has(s.index) && !s.summary && (
+                      <SheetTargetPicker sheet={s} target={targetFor(s)} existingPackages={existingPackages} onChange={(patch) => setTarget(s.index, patch)} />
+                    )}
+                  </td>
                   <td>
                     {s.summary ? <span className="rt">Sheet tổng hợp – chỉ đối chiếu</span> : !s.importable ? <span className="hint">Không nhận diện được bảng dự toán</span> : null}
                   </td>

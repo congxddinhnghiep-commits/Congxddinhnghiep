@@ -133,7 +133,20 @@ export function sheetOverview(f: ParsedFile) {
   return f.sheets.map((s, index) => {
     const blocks = detectBlocks(s.rows, s.merges);
     const summary = isSummarySheet(s);
-    return { index, name: s.name, label: sheetLabel(s.name), hidden: !!s.hidden, rowCount: s.rows.length, blocks: summary ? 0 : blocks.length, summary, importable: !summary && blocks.length > 0 };
+    const { zh } = splitChinese(s.name);
+    const defaultPackageName = blocks[0]?.title || sheetLabel(s.name);
+    return {
+      index,
+      name: s.name,
+      label: sheetLabel(s.name),
+      hidden: !!s.hidden,
+      rowCount: s.rows.length,
+      blocks: summary ? 0 : blocks.length,
+      summary,
+      importable: !summary && blocks.length > 0,
+      defaultPackageName,
+      defaultPackageNameZh: zh || null,
+    };
   });
 }
 
@@ -232,32 +245,101 @@ export function analyzeSheets(db: DB, repo: Repo, f: ParsedFile, o: MultiOptions
   };
 }
 
+/** Update 6 B: where a sheet's blocks go. 'new' creates one hạng mục công trình (editable name); 'replace'/'add' target
+ * an existing one. `splitBlocks` makes every block of the sheet its own package instead of one package per sheet. */
+export interface SheetTarget {
+  sheetIndex: number;
+  mode: 'new' | 'replace' | 'add';
+  name?: string;
+  nameZh?: string | null;
+  workPackageId?: number;
+  splitBlocks?: boolean;
+}
+
 export interface ImportSheetsOptions extends MultiOptions {
   /** Keep the summary sheet's lines with the project (reconciliation only, no items are created from it). */
   saveSummary?: boolean;
+  /** Per-sheet destination (Update 6 B); sheets without an explicit entry default to {mode:'new'} with the sheet's own name. */
+  targets?: SheetTarget[];
 }
 
-/** Import every block of the selected sheets; one hạng mục per block, atomically (one undo step). */
+/**
+ * Import every block of the selected sheets, atomically (one undo step). Update 6 B: a sheet → exactly one hạng mục
+ * công trình (work package) by default – its blocks become Phần (categories) inside that package – unless the sheet's
+ * target asks to split every block into its own package, or to replace/add to an existing package.
+ */
 export function importSheets(db: DB, repo: Repo, f: ParsedFile, projectId: number, o: ImportSheetsOptions, user: string) {
   const plan = analyzeSheets(db, repo, f, { ...o, projectId });
   if (!plan.blocks.length) throw new HttpError(400, 'Không có sheet nào có bảng dự toán để nhập (cần cột Tên công việc và Khối lượng).');
   const blocking = plan.blocks.find((b) => b.blocking);
   if (blocking) throw new HttpError(400, `Sheet «${blocking.sheetName}» (khối ${blocking.blockIndex + 1}): ${blocking.blocking}. Hãy chỉnh cột cho sheet này trước khi nhập.`);
   let undo: UndoOp[] = [];
-  const results: { sheetName: string; title: string; prefix: string; created: number; categories: number; importId: number }[] = [];
+  const results: { sheetName: string; title: string; prefix: string; created: number; categories: number; importId: number; workPackageId: number }[] = [];
   const itemIds: number[] = [];
   let created = 0;
   let categories = 0;
   let withCode = 0;
+  const bySheet = new Map<number, BlockPlan[]>();
+  for (const p of plan.blocks) bySheet.set(p.sheetIndex, [...(bySheet.get(p.sheetIndex) ?? []), p]);
+  const overview = sheetOverview(f);
+  const pricingOption = o.pricingOption ?? 'file';
   db.transaction(() => {
-    for (const p of plan.blocks) {
-      const r = importEstimate(db, repo, f, projectId, { sheetIndex: p.sheetIndex, blockIndex: p.blockIndex, pricingOption: o.pricingOption ?? 'file', equipmentAsQuote: o.equipmentAsQuote, categoryPrefix: p.prefix, amountFidelity: o.amountFidelity, amountModeOverrides: o.amountModeOverrides }, user);
-      undo = [...r.undo, ...undo];
-      results.push({ sheetName: p.sheetName, title: p.title, prefix: p.prefix, created: r.created, categories: r.categories, importId: r.importId });
-      itemIds.push(...r.itemIds);
-      created += r.created;
-      categories += r.categories;
-      withCode += r.withCode;
+    for (const [sheetIndex, blocks] of bySheet) {
+      const sheet = overview[sheetIndex];
+      const target: SheetTarget = o.targets?.find((t) => t.sheetIndex === sheetIndex) ?? { sheetIndex, mode: 'new' };
+      if ((target.mode === 'replace' || target.mode === 'add') && target.workPackageId) repo.getWorkPackage(projectId, target.workPackageId);
+      const makeNewPackage = (name: string, nameZh: string | null) => {
+        const wp = repo.createWorkPackage(projectId, {
+          name,
+          nameZh,
+          mode: pricingOption === 'file' ? 'bao_gia' : 'du_toan_tt36',
+          sourceFile: f.fileName,
+          sourceSheet: sheet.name,
+        });
+        undo.push({ op: 'deleteWorkPackage', workPackageId: wp.id });
+        return wp.id;
+      };
+      if (target.splitBlocks && target.mode !== 'replace') {
+        // every block of this sheet becomes its own package
+        for (const p of blocks) {
+          const wpId = target.mode === 'add' && target.workPackageId ? target.workPackageId : makeNewPackage(p.prefix || sheet.defaultPackageName, sheet.defaultPackageNameZh);
+          const r = importEstimate(db, repo, f, projectId, { sheetIndex: p.sheetIndex, blockIndex: p.blockIndex, pricingOption, equipmentAsQuote: o.equipmentAsQuote, categoryPrefix: '', amountFidelity: o.amountFidelity, amountModeOverrides: o.amountModeOverrides, workPackageId: wpId }, user);
+          undo = [...r.undo, ...undo];
+          results.push({ sheetName: p.sheetName, title: p.title, prefix: p.prefix, created: r.created, categories: r.categories, importId: r.importId, workPackageId: wpId });
+          itemIds.push(...r.itemIds);
+          created += r.created;
+          categories += r.categories;
+          withCode += r.withCode;
+        }
+        continue;
+      }
+      let workPackageId: number;
+      if (target.mode === 'replace' && target.workPackageId) {
+        workPackageId = target.workPackageId;
+      } else if (target.mode === 'add' && target.workPackageId) {
+        workPackageId = target.workPackageId;
+      } else {
+        workPackageId = makeNewPackage(target.name?.trim() || sheet.defaultPackageName, target.nameZh !== undefined ? target.nameZh : sheet.defaultPackageNameZh);
+      }
+      let first = target.mode === 'replace';
+      for (const p of blocks) {
+        const replaceCategoryIds = first ? repo.listCategories(projectId, workPackageId).map((c) => c.id) : undefined;
+        first = false;
+        const r = importEstimate(
+          db,
+          repo,
+          f,
+          projectId,
+          { sheetIndex: p.sheetIndex, blockIndex: p.blockIndex, pricingOption, equipmentAsQuote: o.equipmentAsQuote, categoryPrefix: p.prefix, amountFidelity: o.amountFidelity, amountModeOverrides: o.amountModeOverrides, workPackageId, replaceCategoryIds },
+          user,
+        );
+        undo = [...r.undo, ...undo];
+        results.push({ sheetName: p.sheetName, title: p.title, prefix: p.prefix, created: r.created, categories: r.categories, importId: r.importId, workPackageId });
+        itemIds.push(...r.itemIds);
+        created += r.created;
+        categories += r.categories;
+        withCode += r.withCode;
+      }
     }
     if (o.saveSummary !== false && plan.summary) {
       db.prepare('INSERT INTO import_summaries (project_id, file_name, sheet_name, lines_json, check_json, created_by) VALUES (?, ?, ?, ?, ?, ?)').run(
@@ -279,9 +361,10 @@ export function importSheets(db: DB, repo: Repo, f: ParsedFile, projectId: numbe
     withoutCode: created - withCode - tbvt,
     tbvt,
     itemIds,
+    workPackageIds: [...new Set(results.map((r) => r.workPackageId))],
     summarySaved: !!plan.summary && o.saveSummary !== false,
     allOk: plan.allOk,
     undo,
-    message: `Đã nhập ${created} công việc vào ${categories} hạng mục từ ${plan.blocks.length} bảng của ${new Set(plan.blocks.map((b) => b.sheetIndex)).size} sheet (${withCode} có mã, ${tbvt} thiết bị/vật tư theo báo giá, ${created - withCode - tbvt} chưa có mã).${plan.allOk ? '' : ' ⚠ Có bảng chưa khớp tổng trong file – xem đối chiếu.'}`,
+    message: `Đã nhập ${created} công việc vào ${categories} hạng mục của ${new Set(results.map((r) => r.workPackageId)).size} hạng mục công trình, từ ${plan.blocks.length} bảng của ${new Set(plan.blocks.map((b) => b.sheetIndex)).size} sheet (${withCode} có mã, ${tbvt} thiết bị/vật tư theo báo giá, ${created - withCode - tbvt} chưa có mã).${plan.allOk ? '' : ' ⚠ Có bảng chưa khớp tổng trong file – xem đối chiếu.'}`,
   };
 }

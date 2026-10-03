@@ -34,6 +34,7 @@ export function ImportPanel({
   data,
   editCategoryId,
   reimportCategoryId,
+  workPackageId,
   onClose,
   onImported,
 }: {
@@ -44,6 +45,8 @@ export function ImportPanel({
   editCategoryId?: number;
   /** "Nhập lại từ file Excel (thay thế hạng mục đã nhập)": skip reopening stored data, go straight to a fresh upload. */
   reimportCategoryId?: number;
+  /** Update 6 B: hạng mục công trình currently selected in the sidebar – a FRESH import (no edit/reimport) goes there. */
+  workPackageId?: number;
   onClose: () => void;
   onImported: () => void;
 }) {
@@ -253,6 +256,7 @@ export function ImportPanel({
           projectId={data.project.id}
           initial={analysis}
           replace={replace}
+          workPackageId={replace ? undefined : workPackageId}
           onImported={(m) => {
             setMsg(m);
             setAnalysis(null);

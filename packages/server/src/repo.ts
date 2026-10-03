@@ -113,6 +113,64 @@ export const toProject = (r: ProjectRow): Project => ({
   updatedAt: r.updated_at,
 });
 
+export interface WorkPackageRow {
+  id: number;
+  project_id: number;
+  code: string | null;
+  name: string;
+  name_zh: string | null;
+  sort_order: number;
+  building_type: BuildingType | null;
+  area_m2: number | null;
+  mode: 'bao_gia' | 'du_toan_tt36';
+  source_file: string | null;
+  source_sheet: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface WorkPackage {
+  id: number;
+  projectId: number;
+  code: string | null;
+  name: string;
+  nameZh: string | null;
+  order: number;
+  buildingType: BuildingType | null;
+  areaM2: number | null;
+  mode: 'bao_gia' | 'du_toan_tt36';
+  sourceFile: string | null;
+  sourceSheet: string | null;
+  note: string | null;
+  createdAt: string;
+}
+
+export const toWorkPackage = (r: WorkPackageRow): WorkPackage => ({
+  id: r.id,
+  projectId: r.project_id,
+  code: r.code,
+  name: r.name,
+  nameZh: r.name_zh,
+  order: r.sort_order,
+  buildingType: r.building_type,
+  areaM2: r.area_m2,
+  mode: r.mode,
+  sourceFile: r.source_file,
+  sourceSheet: r.source_sheet,
+  note: r.note,
+  createdAt: r.created_at,
+});
+
+export interface ProjectSummaryLine {
+  id: number;
+  projectId: number;
+  label: string;
+  kind: 'rate' | 'amount';
+  value: number;
+  order: number;
+  note: string | null;
+}
+
 interface ItemRow {
   id: number;
   category_id: number;
@@ -355,14 +413,17 @@ export class Repo {
       const src = this.getProject(id)!;
       const copy = this.createProject(ownerId, { ...src, name: `${src.name} (bản sao)` });
       this.updateProject(copy.id, { costSettings: src.costSettings });
-      for (const cat of this.listCategories(id)) {
-        const newCat = this.createCategory(copy.id, cat.name, cat.order);
-        this.db
-          .prepare(
-            `INSERT INTO estimate_items (category_id, sort_order, norm_code, name, unit, quantity, quantity_formula, note)
-             SELECT ?, sort_order, norm_code, name, unit, quantity, quantity_formula, note FROM estimate_items WHERE category_id = ?`,
-          )
-          .run(newCat.id, cat.id);
+      for (const wp of this.listWorkPackages(id)) {
+        const newWp = this.createWorkPackage(copy.id, { ...wp, code: wp.code });
+        for (const cat of this.listCategories(id, wp.id)) {
+          const newCat = this.createCategory(copy.id, cat.name, cat.order, newWp.id);
+          this.db
+            .prepare(
+              `INSERT INTO estimate_items (category_id, sort_order, norm_code, name, unit, quantity, quantity_formula, note)
+               SELECT ?, sort_order, norm_code, name, unit, quantity, quantity_formula, note FROM estimate_items WHERE category_id = ?`,
+            )
+            .run(newCat.id, cat.id);
+        }
       }
       this.db
         .prepare(`INSERT INTO project_prices (project_id, resource_code, price) SELECT ?, resource_code, price FROM project_prices WHERE project_id = ?`)
@@ -377,16 +438,183 @@ export class Repo {
     })();
   }
 
-  // ---------------- categories ----------------
-  listCategories(projectId: number): Category[] {
+  // ---------------- work packages (Update 6 A) ----------------
+  listWorkPackages(projectId: number): WorkPackage[] {
+    return (this.db.prepare('SELECT * FROM work_packages WHERE project_id = ? ORDER BY sort_order, id').all(projectId) as WorkPackageRow[]).map(toWorkPackage);
+  }
+
+  getWorkPackage(projectId: number, id: number): WorkPackage {
+    const wp = this.listWorkPackages(projectId).find((x) => x.id === id);
+    if (!wp) throw new HttpError(404, 'Không tìm thấy hạng mục công trình');
+    return wp;
+  }
+
+  /** Every project always has at least one work package; used as the implicit target when none is given. */
+  defaultWorkPackageId(projectId: number): number {
+    const row = this.db.prepare('SELECT id FROM work_packages WHERE project_id = ? ORDER BY sort_order, id LIMIT 1').get(projectId) as { id: number } | undefined;
+    if (row) return row.id;
+    return this.createWorkPackage(projectId, { name: 'Hạng mục chung', code: 'HM_CHUNG' }).id;
+  }
+
+  createWorkPackage(
+    projectId: number,
+    data: { code?: string | null; name: string; nameZh?: string | null; order?: number; buildingType?: BuildingType | null; areaM2?: number | null; mode?: 'bao_gia' | 'du_toan_tt36'; sourceFile?: string | null; sourceSheet?: string | null; note?: string | null },
+  ): WorkPackage {
+    const max = (this.db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM work_packages WHERE project_id = ?').get(projectId) as { m: number }).m;
+    const order = data.order ?? max + 1;
+    const info = this.db
+      .prepare(
+        `INSERT INTO work_packages (project_id, code, name, name_zh, sort_order, building_type, area_m2, mode, source_file, source_sheet, note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        projectId,
+        data.code ?? null,
+        data.name.trim() || 'Hạng mục mới',
+        data.nameZh ?? null,
+        order,
+        data.buildingType ?? null,
+        data.areaM2 ?? null,
+        data.mode ?? 'du_toan_tt36',
+        data.sourceFile ?? null,
+        data.sourceSheet ?? null,
+        data.note ?? null,
+      );
+    this.touchProject(projectId);
+    return this.getWorkPackage(projectId, Number(info.lastInsertRowid));
+  }
+
+  updateWorkPackage(
+    projectId: number,
+    id: number,
+    data: { name?: string; nameZh?: string | null; order?: number; buildingType?: BuildingType | null; areaM2?: number | null; mode?: 'bao_gia' | 'du_toan_tt36'; note?: string | null },
+  ): WorkPackage {
+    const wp = this.getWorkPackage(projectId, id);
+    this.db
+      .prepare('UPDATE work_packages SET name = ?, name_zh = ?, sort_order = ?, building_type = ?, area_m2 = ?, mode = ?, note = ? WHERE id = ?')
+      .run(
+        data.name ?? wp.name,
+        data.nameZh !== undefined ? data.nameZh : wp.nameZh,
+        data.order ?? wp.order,
+        data.buildingType !== undefined ? data.buildingType : wp.buildingType,
+        data.areaM2 !== undefined ? data.areaM2 : wp.areaM2,
+        data.mode ?? wp.mode,
+        data.note !== undefined ? data.note : wp.note,
+        id,
+      );
+    this.touchProject(projectId);
+    return this.getWorkPackage(projectId, id);
+  }
+
+  /** Snapshot of a work package (and everything in it) for an undoable delete/replace. */
+  snapshotWorkPackage(projectId: number, id: number) {
+    this.getWorkPackage(projectId, id);
+    const wp = this.db.prepare('SELECT * FROM work_packages WHERE id = ?').get(id);
+    const categories = this.db.prepare('SELECT * FROM categories WHERE work_package_id = ?').all(id) as { id: number }[];
+    const catIds = categories.map((c) => c.id);
+    const marks = catIds.map(() => '?').join(',');
+    const items = catIds.length ? (this.db.prepare(`SELECT * FROM estimate_items WHERE category_id IN (${marks})`).all(...catIds) as { id: number }[]) : [];
+    const itemIds = items.map((i) => i.id);
+    const imarks = itemIds.map(() => '?').join(',');
+    const quantityLines = itemIds.length ? this.db.prepare(`SELECT * FROM quantity_lines WHERE item_id IN (${imarks})`).all(...itemIds) : [];
+    return { workPackage: wp, categories, items, quantityLines };
+  }
+
+  restoreWorkPackage(snap: ReturnType<Repo['snapshotWorkPackage']>): void {
+    const insertRow = (table: string, row: Record<string, unknown>) => {
+      const cols = Object.keys(row);
+      this.db.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(...cols.map((c) => row[c] as never));
+    };
+    if (snap.workPackage) insertRow('work_packages', snap.workPackage as Record<string, unknown>);
+    for (const c of snap.categories) insertRow('categories', c as Record<string, unknown>);
+    for (const i of snap.items) insertRow('estimate_items', i as Record<string, unknown>);
+    for (const q of snap.quantityLines as Record<string, unknown>[]) insertRow('quantity_lines', q);
+  }
+
+  /** Delete a work package and everything in it (categories cascade to items/quantity lines). Caller must snapshot
+   * first for undo. Take-off elements, stories, manual sheets and rebar rows are kept but unlinked from it. */
+  deleteWorkPackage(projectId: number, id: number): void {
+    this.getWorkPackage(projectId, id);
+    this.db.prepare('DELETE FROM categories WHERE work_package_id = ?').run(id);
+    for (const table of ['takeoff_elements', 'stories', 'manual_sheet_rows', 'rebar_schedule_rows']) {
+      this.db.prepare(`UPDATE ${table} SET work_package_id = NULL WHERE work_package_id = ?`).run(id);
+    }
+    this.db.prepare('DELETE FROM work_packages WHERE id = ?').run(id);
+    this.touchProject(projectId);
+  }
+
+  duplicateWorkPackage(projectId: number, id: number, newName?: string): WorkPackage {
+    const src = this.getWorkPackage(projectId, id);
+    return this.db.transaction(() => {
+      const copy = this.createWorkPackage(projectId, { ...src, code: null, name: newName ?? `${src.name} (bản sao)` });
+      for (const cat of this.listCategories(projectId, id)) {
+        const newCat = this.createCategory(projectId, cat.name, undefined, copy.id);
+        this.db
+          .prepare(
+            `INSERT INTO estimate_items (category_id, sort_order, norm_code, name, unit, quantity, quantity_formula, note)
+             SELECT ?, sort_order, norm_code, name, unit, quantity, quantity_formula, note FROM estimate_items WHERE category_id = ?`,
+          )
+          .run(newCat.id, cat.id);
+      }
+      return copy;
+    })();
+  }
+
+  /** "Chuyển sang hạng mục…": move a Phần (and its items) to another work package, explicitly. */
+  moveCategoryToPackage(projectId: number, categoryId: number, workPackageId: number): void {
+    this.getCategory(projectId, categoryId);
+    this.getWorkPackage(projectId, workPackageId);
+    this.db.prepare('UPDATE categories SET work_package_id = ? WHERE id = ?').run(workPackageId, categoryId);
+    this.touchProject(projectId);
+  }
+
+  // ---------------- project summary lines ("Tổng hợp dự án") ----------------
+  listSummaryLines(projectId: number): ProjectSummaryLine[] {
     return (
-      this.db.prepare('SELECT id, name, sort_order, tt_rate FROM categories WHERE project_id = ? ORDER BY sort_order, id').all(projectId) as {
-        id: number;
-        name: string;
-        sort_order: number;
-        tt_rate: number | null;
+      this.db.prepare('SELECT * FROM project_summary_lines WHERE project_id = ? ORDER BY sort_order, id').all(projectId) as {
+        id: number; project_id: number; label: string; kind: 'rate' | 'amount'; value: number; sort_order: number; note: string | null;
       }[]
-    ).map((r) => ({ id: r.id, name: r.name, order: r.sort_order, ttRate: r.tt_rate }));
+    ).map((r) => ({ id: r.id, projectId: r.project_id, label: r.label, kind: r.kind, value: r.value, order: r.sort_order, note: r.note }));
+  }
+
+  createSummaryLine(projectId: number, data: { label: string; kind?: 'rate' | 'amount'; value?: number; note?: string | null }): ProjectSummaryLine {
+    const max = (this.db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM project_summary_lines WHERE project_id = ?').get(projectId) as { m: number }).m;
+    const info = this.db
+      .prepare('INSERT INTO project_summary_lines (project_id, label, kind, value, sort_order, note) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(projectId, data.label.trim() || 'Dòng mới', data.kind ?? 'rate', data.value ?? 0, max + 1, data.note ?? null);
+    this.touchProject(projectId);
+    return this.listSummaryLines(projectId).find((l) => l.id === Number(info.lastInsertRowid))!;
+  }
+
+  updateSummaryLine(projectId: number, id: number, data: { label?: string; kind?: 'rate' | 'amount'; value?: number; order?: number; note?: string | null }): void {
+    const l = this.listSummaryLines(projectId).find((x) => x.id === id);
+    if (!l) throw new HttpError(404, 'Không tìm thấy dòng tổng hợp');
+    this.db
+      .prepare('UPDATE project_summary_lines SET label = ?, kind = ?, value = ?, sort_order = ?, note = ? WHERE id = ?')
+      .run(data.label ?? l.label, data.kind ?? l.kind, data.value !== undefined ? data.value : l.value, data.order ?? l.order, data.note !== undefined ? data.note : l.note, id);
+    this.touchProject(projectId);
+  }
+
+  deleteSummaryLine(projectId: number, id: number): void {
+    if (!this.listSummaryLines(projectId).some((x) => x.id === id)) throw new HttpError(404, 'Không tìm thấy dòng tổng hợp');
+    this.db.prepare('DELETE FROM project_summary_lines WHERE id = ?').run(id);
+    this.touchProject(projectId);
+  }
+
+  // ---------------- categories ----------------
+  listCategories(projectId: number, workPackageId?: number): Category[] {
+    const rows = workPackageId
+      ? this.db
+          .prepare('SELECT id, name, sort_order, tt_rate, work_package_id FROM categories WHERE project_id = ? AND work_package_id = ? ORDER BY sort_order, id')
+          .all(projectId, workPackageId)
+      : this.db.prepare('SELECT id, name, sort_order, tt_rate, work_package_id FROM categories WHERE project_id = ? ORDER BY sort_order, id').all(projectId);
+    return (rows as { id: number; name: string; sort_order: number; tt_rate: number | null; work_package_id: number | null }[]).map((r) => ({
+      id: r.id,
+      name: r.name,
+      order: r.sort_order,
+      ttRate: r.tt_rate,
+      workPackageId: r.work_package_id ?? undefined,
+    }));
   }
 
   getCategory(projectId: number, id: number): Category {
@@ -395,13 +623,14 @@ export class Repo {
     return c;
   }
 
-  createCategory(projectId: number, name: string, order?: number): Category {
+  createCategory(projectId: number, name: string, order?: number, workPackageId?: number): Category {
+    const wpId = workPackageId ?? this.defaultWorkPackageId(projectId);
     const max = (this.db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM categories WHERE project_id = ?').get(projectId) as { m: number }).m;
     const info = this.db
-      .prepare('INSERT INTO categories (project_id, name, sort_order) VALUES (?, ?, ?)')
-      .run(projectId, name.trim() || 'Hạng mục mới', order ?? max + 1);
+      .prepare('INSERT INTO categories (project_id, name, sort_order, work_package_id) VALUES (?, ?, ?, ?)')
+      .run(projectId, name.trim() || 'Hạng mục mới', order ?? max + 1, wpId);
     this.touchProject(projectId);
-    return { id: Number(info.lastInsertRowid), name, order: order ?? max + 1 };
+    return { id: Number(info.lastInsertRowid), name, order: order ?? max + 1, workPackageId: wpId };
   }
 
   updateCategory(projectId: number, id: number, data: { name?: string; order?: number; ttRate?: number | null }): void {
@@ -966,10 +1195,11 @@ export class Repo {
 
   // ---------------- calculation ----------------
   /** Full calculated estimate for a project. */
-  calculate(projectId: number, opts: { resolved?: Record<string, ResolvedPrice> } = {}) {
+  calculate(projectId: number, opts: { resolved?: Record<string, ResolvedPrice>; workPackageId?: number } = {}) {
     const project = this.getProject(projectId)!;
-    const categories = this.listCategories(projectId);
-    const items = this.listItems(projectId);
+    const categories = this.listCategories(projectId, opts.workPackageId);
+    const catIds = new Set(categories.map((c) => c.id));
+    const items = opts.workPackageId ? this.listItems(projectId).filter((i) => catIds.has(i.categoryId)) : this.listItems(projectId);
     const codes = [...new Set(items.map((i) => i.normCode).filter(Boolean))];
     const normResources: NormResource[] = [];
     const resourceCodes = new Set<string>();
@@ -1026,6 +1256,7 @@ export class Repo {
     const dateWarning = legalSetDateWarning(project.legalSet, project.priceDate);
     return {
       project,
+      workPackage: opts.workPackageId ? this.getWorkPackage(projectId, opts.workPackageId) : null,
       ...estimate,
       legalSet: { id: legalSet.id, label: legalSet.label, status: legalSet.status, normDataset: legalSet.normDataset, documents: legalSet.documents },
       provisionalRates: Object.values(legalSet.tables).some((t) => t.status !== 'verified'),

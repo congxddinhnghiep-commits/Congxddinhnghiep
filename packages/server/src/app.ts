@@ -249,7 +249,8 @@ export function createApp(db: DB, opts: { serveWeb?: boolean; ai?: { cfg?: AiCon
       if (b.gxdttTmdt !== undefined) b.gxdttTmdt = tmdt(b.gxdttTmdt);
       if (b.region !== undefined) b.region = region(b.region);
       const p = repo.createProject(req.user!.id, b);
-      repo.createCategory(p.id, 'Hạng mục chung');
+      const wp = repo.createWorkPackage(p.id, { name: 'Hạng mục chung', code: 'HM_CHUNG' });
+      repo.createCategory(p.id, 'Hạng mục chung', undefined, wp.id);
       return p;
     }),
   );
@@ -351,8 +352,107 @@ export function createApp(db: DB, opts: { serveWeb?: boolean; ai?: { cfg?: AiCon
   api.get('/projects/:id/estimate', h((req) => repo.calculate(proj(req).id)));
   api.get('/projects/:id/validation', h((req) => validateProject(repo, legal, priceBooks, proj(req).id)));
 
+  // work packages ("Hạng mục công trình" – Update 6 A)
+  const buildingTypeOrNull = (v: unknown): BuildingType | null => {
+    if (v === undefined || v === null || v === '') return null;
+    if (!BUILDING_TYPES.includes(v as BuildingType)) throw new HttpError(400, 'Loại công trình không hợp lệ');
+    return v as BuildingType;
+  };
+  api.get('/projects/:id/work-packages', h((req) => repo.listWorkPackages(proj(req).id)));
+  api.get('/projects/:id/work-packages/:wpId/estimate', h((req) => repo.calculate(proj(req).id, { workPackageId: id(req.params.wpId) })));
+  api.post(
+    '/projects/:id/work-packages',
+    h((req) => {
+      const b = req.body ?? {};
+      if (!String(b.name ?? '').trim()) throw new HttpError(400, 'Cần nhập tên hạng mục công trình');
+      return repo.createWorkPackage(proj(req).id, {
+        name: String(b.name),
+        nameZh: b.nameZh ?? null,
+        buildingType: buildingTypeOrNull(b.buildingType),
+        areaM2: b.areaM2 !== undefined && b.areaM2 !== null && b.areaM2 !== '' ? Number(b.areaM2) : null,
+        mode: b.mode === 'bao_gia' ? 'bao_gia' : 'du_toan_tt36',
+        note: b.note ?? null,
+      });
+    }),
+  );
+  api.put(
+    '/projects/:id/work-packages/:wpId',
+    h((req) => {
+      const b = req.body ?? {};
+      return repo.updateWorkPackage(proj(req).id, id(req.params.wpId), {
+        name: b.name,
+        nameZh: b.nameZh,
+        order: b.order,
+        buildingType: b.buildingType !== undefined ? buildingTypeOrNull(b.buildingType) : undefined,
+        areaM2: b.areaM2 !== undefined ? (b.areaM2 === null || b.areaM2 === '' ? null : Number(b.areaM2)) : undefined,
+        mode: b.mode === 'bao_gia' || b.mode === 'du_toan_tt36' ? b.mode : undefined,
+        note: b.note,
+      });
+    }),
+  );
+  api.post(
+    '/projects/:id/work-packages/:wpId/duplicate',
+    h((req) => repo.duplicateWorkPackage(proj(req).id, id(req.params.wpId), req.body?.name)),
+  );
+  api.delete(
+    '/projects/:id/work-packages/:wpId',
+    h((req) => {
+      const p = proj(req);
+      const wpId = id(req.params.wpId);
+      if (req.query.confirm !== '1' && req.body?.confirm !== true) {
+        const items = repo.calculate(p.id, { workPackageId: wpId }).categories.reduce((a, c) => a + c.items.length, 0);
+        throw new HttpError(409, `Hạng mục công trình này có ${items} công việc – cần xác nhận xóa (?confirm=1).`);
+      }
+      const snap = repo.snapshotWorkPackage(p.id, wpId);
+      repo.deleteWorkPackage(p.id, wpId);
+      return { deleted: true, undo: snap };
+    }),
+  );
+  api.post(
+    '/projects/:id/work-packages/restore',
+    h((req) => {
+      repo.restoreWorkPackage(req.body ?? {});
+      proj(req);
+    }),
+  );
+  api.post(
+    '/projects/:id/categories/:catId/move',
+    h((req) => {
+      repo.moveCategoryToPackage(proj(req).id, id(req.params.catId), id(req.body?.workPackageId));
+    }),
+  );
+
+  // "Tổng hợp dự án": per-package totals + project-level lines (chi phí quản lý, VAT…) + grand total.
+  api.get(
+    '/projects/:id/summary',
+    h((req) => {
+      const p = proj(req);
+      const packages = repo.listWorkPackages(p.id).map((wp) => {
+        const calc = repo.calculate(p.id, { workPackageId: wp.id });
+        const value = calc.costSummary.total ?? calc.costSummary.Gxd ?? 0;
+        const itemCount = calc.categories.reduce((a, c) => a + c.items.length, 0);
+        return { workPackage: wp, itemCount, value, unitValue: wp.areaM2 ? value / wp.areaM2 : null };
+      });
+      const lines = repo.listSummaryLines(p.id);
+      const packagesTotal = packages.reduce((a, x) => a + x.value, 0);
+      let running = packagesTotal;
+      const computedLines = lines.map((l) => {
+        const amount = l.kind === 'rate' ? packagesTotal * (l.value / 100) : l.value;
+        running += amount;
+        return { ...l, amount };
+      });
+      return { packages, lines: computedLines, packagesTotal, grandTotal: running };
+    }),
+  );
+  api.post('/projects/:id/summary-lines', h((req) => repo.createSummaryLine(proj(req).id, req.body ?? {})));
+  api.put('/projects/:id/summary-lines/:lineId', h((req) => repo.updateSummaryLine(proj(req).id, id(req.params.lineId), req.body ?? {})));
+  api.delete('/projects/:id/summary-lines/:lineId', h((req) => repo.deleteSummaryLine(proj(req).id, id(req.params.lineId))));
+
   // categories
-  api.post('/projects/:id/categories', h((req) => repo.createCategory(proj(req).id, String(req.body?.name ?? ''))));
+  api.post(
+    '/projects/:id/categories',
+    h((req) => repo.createCategory(proj(req).id, String(req.body?.name ?? ''), undefined, req.body?.workPackageId ? id(String(req.body.workPackageId)) : undefined)),
+  );
   api.put(
     '/projects/:id/categories/:catId',
     h((req) => {
@@ -876,7 +976,17 @@ export function createApp(db: DB, opts: { serveWeb?: boolean; ai?: { cfg?: AiCon
       const p = proj(req);
       const b = req.body ?? {};
       const f = getParsed(String(b.fileId), req.user!.id);
-      const r = importSheets(db, repo, f, p.id, { sheetIndexes: sheetIndexesOf(b.sheetIndexes), pricingOption: b.pricingOption === 'norm' ? 'norm' : 'file', equipmentAsQuote: b.equipmentAsQuote !== false, saveSummary: b.saveSummary !== false, amountFidelity: headerOpts(b).amountFidelity, amountModeOverrides: headerOpts(b).amountModeOverrides }, req.user!.username);
+      const targets = Array.isArray(b.targets)
+        ? b.targets.map((t: Record<string, unknown>) => ({
+            sheetIndex: Number(t.sheetIndex),
+            mode: t.mode === 'replace' || t.mode === 'add' ? t.mode : 'new',
+            name: typeof t.name === 'string' ? t.name : undefined,
+            nameZh: t.nameZh === null ? null : typeof t.nameZh === 'string' ? t.nameZh : undefined,
+            workPackageId: t.workPackageId ? id(String(t.workPackageId)) : undefined,
+            splitBlocks: !!t.splitBlocks,
+          }))
+        : undefined;
+      const r = importSheets(db, repo, f, p.id, { sheetIndexes: sheetIndexesOf(b.sheetIndexes), pricingOption: b.pricingOption === 'norm' ? 'norm' : 'file', equipmentAsQuote: b.equipmentAsQuote !== false, saveSummary: b.saveSummary !== false, amountFidelity: headerOpts(b).amountFidelity, amountModeOverrides: headerOpts(b).amountModeOverrides, targets }, req.user!.username);
       if (r.created) assistant.record(p.id, req.user!.id, `Nhập ${r.created} công việc từ ${f.fileName} (${r.blocks.length} bảng)`, { tool: 'importEstimate', file: f.fileName }, r.undo);
       let autoText = '';
       const t = b.autoAssignThreshold;
@@ -904,7 +1014,15 @@ export function createApp(db: DB, opts: { serveWeb?: boolean; ai?: { cfg?: AiCon
       const p = proj(req);
       const b = req.body ?? {};
       const f = getParsed(String(b.fileId), req.user!.id);
-      const r = importEstimate(db, repo, f, p.id, { ...headerOpts(b), saveTemplate: b.saveTemplate ?? null, codeChoices: b.codeChoices && typeof b.codeChoices === 'object' ? (b.codeChoices as Record<string, string | null>) : undefined, replaceImportId: b.replaceImportId ? Number(b.replaceImportId) : undefined, replaceCategoryIds: Array.isArray(b.replaceCategoryIds) ? b.replaceCategoryIds.map(Number).filter(Number.isFinite) : undefined }, req.user!.username);
+      const replaceCategoryIds = Array.isArray(b.replaceCategoryIds) ? b.replaceCategoryIds.map(Number).filter(Number.isFinite) : undefined;
+      // Replacing an existing hạng mục keeps it in its own work package, whatever the client sent; a fresh import
+      // (no replace target) goes into the package the user has selected in the sidebar, if any.
+      const workPackageId = replaceCategoryIds?.length
+        ? repo.getCategory(p.id, replaceCategoryIds[0]).workPackageId
+        : b.workPackageId
+          ? id(String(b.workPackageId))
+          : undefined;
+      const r = importEstimate(db, repo, f, p.id, { ...headerOpts(b), saveTemplate: b.saveTemplate ?? null, codeChoices: b.codeChoices && typeof b.codeChoices === 'object' ? (b.codeChoices as Record<string, string | null>) : undefined, replaceImportId: b.replaceImportId ? Number(b.replaceImportId) : undefined, replaceCategoryIds, workPackageId }, req.user!.username);
       if (r.created && !r.revisionId) assistant.record(p.id, req.user!.id, `Nhập ${r.created} công việc từ ${f.fileName}`, { tool: 'importEstimate', file: f.fileName }, r.undo);
       let autoText = '';
       const t = b.autoAssignThreshold;

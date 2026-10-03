@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, downloadExcel, type AppConfig, type EstimateResponse, type User } from '../api';
+import { api, downloadExcel, type AppConfig, type EstimateResponse, type User, type WorkPackageDTO } from '../api';
 import { AnalysisTab } from '../components/AnalysisTab';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { RegionalUpdateDialog } from '../components/RegionalUpdateDialog';
@@ -8,13 +8,16 @@ import { EstimateGrid } from '../components/EstimateGrid';
 import { ImportPanel } from '../components/ImportPanel';
 import { MultiSheetImport } from '../components/MultiSheetImport';
 import { PricesTab } from '../components/PricesTab';
+import { ProjectSummaryTab } from '../components/ProjectSummaryTab';
 import { ResourceSummaryTab } from '../components/ResourceSummaryTab';
 import { SettingsTab } from '../components/SettingsTab';
 import { TakeoffTab } from '../components/TakeoffTab';
 import { ValidationTab } from '../components/ValidationTab';
+import { WorkPackagesSidebar } from '../components/WorkPackagesSidebar';
 import { money } from '../format';
 
 const TABS = [
+  ['project-summary', 'Tổng hợp dự án'],
   ['estimate', 'Dự toán chi tiết'],
   ['takeoff', 'Bóc khối lượng'],
   ['prices', 'Giá vật liệu/NC/Máy'],
@@ -28,6 +31,9 @@ type Tab = (typeof TABS)[number][0];
 
 export function ProjectView({ projectId, user, config, onBack }: { projectId: number; user: User; config: AppConfig; onBack: () => void }) {
   const [data, setData] = useState<EstimateResponse | null>(null);
+  const [workPackages, setWorkPackages] = useState<WorkPackageDTO[]>([]);
+  const [packageTotals, setPackageTotals] = useState<Record<number, number>>({});
+  const [selectedPackageId, setSelectedPackageId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<Tab>('estimate');
   const [showAssistant, setShowAssistant] = useState(true);
@@ -42,11 +48,33 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
 
   const reload = useCallback(async () => {
     try {
-      setData(await api.estimate(projectId));
+      const wps = await api.workPackages(projectId);
+      setWorkPackages(wps);
+      const activeId = selectedPackageId && wps.some((w) => w.id === selectedPackageId) ? selectedPackageId : wps[0]?.id ?? null;
+      setSelectedPackageId(activeId);
+      setData(await api.estimate(projectId, activeId ?? undefined));
+      api
+        .projectSummary(projectId)
+        .then((s) => setPackageTotals(Object.fromEntries(s.packages.map((p) => [p.workPackage.id, p.value]))))
+        .catch(() => undefined);
     } catch (e) {
       setError((e as Error).message);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  const selectPackage = useCallback(
+    async (id: number) => {
+      setSelectedPackageId(id);
+      setTab((t) => (t === 'project-summary' ? 'estimate' : t));
+      try {
+        setData(await api.estimate(projectId, id));
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [projectId],
+  );
 
   const refreshBadge = useCallback(() => {
     api
@@ -92,12 +120,16 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
 
   return (
     <div className={`project ${showAssistant ? 'with-assistant' : ''}`}>
+      <WorkPackagesSidebar projectId={projectId} packages={workPackages} totals={packageTotals} selectedId={selectedPackageId} onSelect={selectPackage} onChanged={reload} />
       <main className="project-main">
         <div className="page-head">
           <button className="link" onClick={onBack}>
             ← Công trình
           </button>
-          <h2 title={data.project.name}>{data.project.name}</h2>
+          <h2 title={data.project.name}>
+            {data.project.name}
+            {data.workPackage && <span className="wp-current"> · {data.workPackage.name}</span>}
+          </h2>
           <a className={`legal-badge ${data.legalSet.status}`} href="#/legal" title="Bộ căn cứ pháp lý của công trình">
             {data.legalSet.label}
           </a>
@@ -119,9 +151,11 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
               Duyệt dự toán
             </button>
           )}
-          <button onClick={() => setShowImport(true)}>⤓ Nhập dữ liệu</button>
-          <button data-testid="open-multi-import" onClick={() => setShowMultiImport(true)} title="File Excel nhiều sheet, mỗi sheet một hạng mục (có thể nhiều bảng trong một sheet)">
-            ⤓ Nhập nhiều sheet
+          <button data-testid="open-multi-import" onClick={() => setShowMultiImport(true)} title="Mỗi sheet thành một hạng mục công trình riêng (có thể nhiều bảng/khối trong một sheet)">
+            ⤓ Nhập từ Excel
+          </button>
+          <button onClick={() => setShowImport(true)} title="Nhập 1 sheet, tự chọn cột (dùng khi tự nhận diện chưa đúng)">
+            ⤓ Nhập dữ liệu (chọn cột tay)
           </button>
           <button data-testid="open-regional" onClick={() => setShowRegional(true)} title="Chọn tỉnh/thành, kỳ giá, xem trước rồi áp dụng">
             Cập nhật định mức &amp; đơn giá theo khu vực
@@ -171,6 +205,7 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
           ))}
         </nav>
         <div className="tab-body">
+          {tab === 'project-summary' && <ProjectSummaryTab projectId={projectId} onSelectPackage={selectPackage} />}
           {tab === 'estimate' && (
             <EstimateGrid
               data={data}
@@ -225,6 +260,7 @@ export function ProjectView({ projectId, user, config, onBack }: { projectId: nu
           data={data}
           editCategoryId={editImportCat}
           reimportCategoryId={reimportCat}
+          workPackageId={selectedPackageId ?? undefined}
           onClose={() => { setShowImport(false); setEditImportCat(undefined); setReimportCat(undefined); }}
           onImported={reload}
         />

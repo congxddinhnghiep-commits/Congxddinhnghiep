@@ -131,6 +131,24 @@ code { background: var(--line-soft); padding: 1px 4px; border-radius: 4px; }
 .tab-body { background: #fff; border: 1px solid var(--line); border-top: none; padding: 12px; flex: 1; min-height: 0; overflow: auto; }
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .check { display: inline-flex; gap: 6px; align-items: center; }
+.check.small { font-size: 12px; }
+
+/* ---------- work packages sidebar (Update 6 A) ---------- */
+.wp-sidebar { width: 230px; flex-shrink: 0; border-right: 1px solid var(--line); background: #fff; display: flex; flex-direction: column; padding: 10px; gap: 8px; overflow-y: auto; }
+.wp-sidebar-head { display: flex; justify-content: space-between; align-items: center; }
+.wp-add { display: flex; gap: 4px; }
+.wp-add input { flex: 1; min-width: 0; }
+.wp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.wp-list li { display: flex; align-items: center; gap: 2px; border-radius: 6px; }
+.wp-list li.active { background: var(--line-soft, #eef2ff); }
+.wp-select { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; border: none; background: none; padding: 6px 8px; text-align: left; }
+.wp-name { font-weight: 600; font-size: 13px; }
+.wp-value { font-size: 11px; color: var(--muted); }
+.wp-actions { display: none; gap: 2px; }
+.wp-list li:hover .wp-actions { display: flex; }
+.wp-current { font-size: 13px; color: var(--muted); font-weight: 400; }
+.sheet-target { display: flex; flex-direction: column; gap: 4px; min-width: 220px; }
+.sheet-target select, .sheet-target input { width: 100%; }
 
 /* ---------- estimate grid ---------- */
 .grid-help { font-size: 12px; color: var(--muted); margin-bottom: 6px; }

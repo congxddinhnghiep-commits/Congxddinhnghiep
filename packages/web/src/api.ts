@@ -55,6 +55,7 @@ export interface Project {
 
 export interface EstimateResponse {
   project: Project;
+  workPackage?: WorkPackageDTO | null;
   categories: CategoryResult[];
   total: UnitCost;
   resourceSummary: ResourceSummaryRow[];
@@ -73,6 +74,43 @@ export interface EstimateResponse {
   warnings: string[];
   notes: string[];
   priceSources: Record<string, PriceSourceInfo>;
+}
+
+// ---------------------------------------------------------------------------
+// Update 6 A — Hạng mục công trình (work packages)
+// ---------------------------------------------------------------------------
+
+export interface WorkPackageDTO {
+  id: number;
+  projectId: number;
+  code: string | null;
+  name: string;
+  nameZh: string | null;
+  order: number;
+  buildingType: BuildingType | null;
+  areaM2: number | null;
+  mode: 'bao_gia' | 'du_toan_tt36';
+  sourceFile: string | null;
+  sourceSheet: string | null;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface ProjectSummaryLineDTO {
+  id: number;
+  projectId: number;
+  label: string;
+  kind: 'rate' | 'amount';
+  value: number;
+  order: number;
+  note: string | null;
+}
+
+export interface ProjectSummaryDTO {
+  packages: { workPackage: WorkPackageDTO; itemCount: number; value: number; unitValue: number | null }[];
+  lines: (ProjectSummaryLineDTO & { amount: number })[];
+  packagesTotal: number;
+  grandTotal: number;
 }
 
 export type MixDesignSummary = Pick<MixDesign, 'code' | 'section' | 'spec' | 'kind' | 'grade' | 'page' | 'status'>;
@@ -371,6 +409,18 @@ export interface SheetOverviewDTO {
   blocks: number;
   summary: boolean;
   importable: boolean;
+  defaultPackageName: string;
+  defaultPackageNameZh: string | null;
+}
+
+/** Update 6 B: where a sheet's blocks go – a new hạng mục công trình (editable name), or an existing one. */
+export interface SheetTargetDTO {
+  sheetIndex: number;
+  mode: 'new' | 'replace' | 'add';
+  name?: string;
+  nameZh?: string | null;
+  workPackageId?: number;
+  splitBlocks?: boolean;
 }
 export interface BlockPreviewRowDTO {
   excelRow: number;
@@ -446,11 +496,12 @@ export interface AnalyzeMultiResult {
 export interface ImportSheetsResult {
   created: number;
   categories: number;
-  blocks: { sheetName: string; title: string; prefix: string; created: number; categories: number; importId: number }[];
+  blocks: { sheetName: string; title: string; prefix: string; created: number; categories: number; importId: number; workPackageId: number }[];
   withCode: number;
   withoutCode: number;
   tbvt: number;
   itemIds: number[];
+  workPackageIds: number[];
   summarySaved: boolean;
   allOk: boolean;
   message: string;
@@ -633,11 +684,27 @@ export const api = {
   copyProject: (id: number) => request<Project>('POST', `/projects/${id}/copy`),
   saveSettings: (id: number, costSettings: ProjectCostSettings, vatRate: number) =>
     request<Project>('PUT', `/projects/${id}/settings`, { costSettings, vatRate }),
-  estimate: (id: number) => request<EstimateResponse>('GET', `/projects/${id}/estimate`),
+  estimate: (id: number, workPackageId?: number) =>
+    request<EstimateResponse>('GET', workPackageId ? `/projects/${id}/work-packages/${workPackageId}/estimate` : `/projects/${id}/estimate`),
 
-  createCategory: (pid: number, name: string) => request<{ id: number }>('POST', `/projects/${pid}/categories`, { name }),
+  createCategory: (pid: number, name: string, workPackageId?: number) => request<{ id: number }>('POST', `/projects/${pid}/categories`, { name, workPackageId }),
   updateCategory: (pid: number, cid: number, data: { name?: string; order?: number; ttRate?: number | null }) => request('PUT', `/projects/${pid}/categories/${cid}`, data),
   deleteCategory: (pid: number, cid: number) => request('DELETE', `/projects/${pid}/categories/${cid}`),
+  moveCategory: (pid: number, cid: number, workPackageId: number) => request('POST', `/projects/${pid}/categories/${cid}/move`, { workPackageId }),
+
+  // Update 6 A — work packages ("Hạng mục công trình")
+  workPackages: (pid: number) => request<WorkPackageDTO[]>('GET', `/projects/${pid}/work-packages`),
+  createWorkPackage: (pid: number, data: Partial<WorkPackageDTO>) => request<WorkPackageDTO>('POST', `/projects/${pid}/work-packages`, data),
+  updateWorkPackage: (pid: number, wpId: number, data: Partial<WorkPackageDTO>) => request<WorkPackageDTO>('PUT', `/projects/${pid}/work-packages/${wpId}`, data),
+  duplicateWorkPackage: (pid: number, wpId: number, name?: string) => request<WorkPackageDTO>('POST', `/projects/${pid}/work-packages/${wpId}/duplicate`, { name }),
+  deleteWorkPackage: (pid: number, wpId: number, confirm = false) =>
+    request<{ deleted: boolean; undo: unknown }>('DELETE', `/projects/${pid}/work-packages/${wpId}${confirm ? '?confirm=1' : ''}`),
+  restoreWorkPackage: (pid: number, snapshot: unknown) => request('POST', `/projects/${pid}/work-packages/restore`, snapshot as Record<string, unknown>),
+  projectSummary: (pid: number) => request<ProjectSummaryDTO>('GET', `/projects/${pid}/summary`),
+  createSummaryLine: (pid: number, data: { label: string; kind?: 'rate' | 'amount'; value?: number; note?: string | null }) =>
+    request<ProjectSummaryLineDTO>('POST', `/projects/${pid}/summary-lines`, data),
+  updateSummaryLine: (pid: number, lineId: number, data: Partial<ProjectSummaryLineDTO>) => request('PUT', `/projects/${pid}/summary-lines/${lineId}`, data),
+  deleteSummaryLine: (pid: number, lineId: number) => request('DELETE', `/projects/${pid}/summary-lines/${lineId}`),
 
   createItem: (pid: number, data: Record<string, unknown>) => request('POST', `/projects/${pid}/items`, data),
   updateItem: (pid: number, itemId: number, data: Record<string, unknown>) => request('PUT', `/projects/${pid}/items/${itemId}`, data),
@@ -736,8 +803,10 @@ export const api = {
   importApply: (body: Record<string, unknown>) => request<{ message: string; count: number }>('POST', '/import/apply', body),
   importAnalyzeMulti: (body: { fileId: string; projectId: number; sheetIndexes?: number[]; pricingOption?: 'file' | 'norm'; equipmentAsQuote?: boolean; amountFidelity?: 'file' | 'calc' }) =>
     request<AnalyzeMultiResult>('POST', '/import/analyze-multi', body),
-  importSheets: (pid: number, body: { fileId: string; sheetIndexes?: number[]; pricingOption?: 'file' | 'norm'; equipmentAsQuote?: boolean; amountFidelity?: 'file' | 'calc'; autoAssignThreshold?: number }) =>
-    request<ImportSheetsResult>('POST', `/projects/${pid}/import-sheets`, body),
+  importSheets: (
+    pid: number,
+    body: { fileId: string; sheetIndexes?: number[]; pricingOption?: 'file' | 'norm'; equipmentAsQuote?: boolean; amountFidelity?: 'file' | 'calc'; autoAssignThreshold?: number; targets?: SheetTargetDTO[] },
+  ) => request<ImportSheetsResult>('POST', `/projects/${pid}/import-sheets`, body),
 
   // Update 5 — Bóc khối lượng theo cấu kiện
   elementTypes: () => request<{ labels: Record<ElementType, string>; defaults: Record<ElementType, ElementParams> }>('GET', '/takeoff/element-types'),

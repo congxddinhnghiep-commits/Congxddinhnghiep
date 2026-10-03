@@ -359,3 +359,36 @@ Nguồn: `docs/LEGAL-UPDATE-2026.md` (đã xác minh metadata ngày 2026-09-27).
 117. **`TakeoffTab` phải tự báo cho `ProjectView` reload sau khi đẩy sang dự toán** (`onPushed` callback, cùng mẫu với `onImported`/`onApplied` của các tab khác): phát hiện khi viết e2e (`e2e/update5.mjs`) – nếu không có callback này,
     lưới "Dự toán chi tiết" tiếp tục hiển thị dữ liệu cũ (từ lần `reload()` đầu tiên lúc mở công trình) cho tới khi có một hành động khác ở tab đó kích hoạt `reload`, dù API đã tạo/cập nhật công việc thành công – một lỗi thật, không
     chỉ là vấn đề của kịch bản kiểm thử.
+
+## Update 6 (docs/UPDATE-6.md) — Section 1: hạng mục công trình (work packages) + một luồng nhập Excel
+118. **`work_packages` thêm bằng `ALTER TABLE ... ADD COLUMN` (nullable), không rebuild bảng `categories`**: spec nói "NOT NULL sau khi migrate" nhưng SQLite không thêm được cột NOT NULL có giá trị khác nhau theo từng dòng bằng ALTER
+    đơn giản; rebuild bảng (như `norms`/`norm_resources` ở mục 34) an toàn nhưng rủi ro hơn cho một cột không đổi ngữ nghĩa bất kỳ phép tính nào. Chọn: cột nullable ở CSDL, bất biến "mọi `categories` luôn có `work_package_id`" do tầng
+    ứng dụng giữ (`Repo.defaultWorkPackageId`, xem mục 119) – khớp cách `categories.tt_rate` và các cột nullable khác trong Phase 1 đã làm. Migrate chạy 1 lần (bọc trong `if (!hadWpCol)`), tạo đúng 1 `work_packages` "Hạng mục chung" cho
+    MỖI công trình đã có rồi gán `work_package_id` cho toàn bộ `categories`/`takeoff_elements`/`stories`/`manual_sheet_rows`/`rebar_schedule_rows` của công trình đó – không đổi số dòng, không đổi giá trị cột nào khác (đã kiểm bằng hash
+    MD5 toàn bảng `categories`+`estimate_items` trước/sau trên bản sao của CSDL thật, xem phần kiểm tra trước khi chạy migrate lên CSDL thật).
+119. **`Repo.createCategory(projectId, name, order?, workPackageId?)` – `workPackageId` mặc định = `defaultWorkPackageId(projectId)`** (gói đầu tiên theo `sort_order, id`, tự tạo "Hạng mục chung" nếu công trình chưa có gói nào – không
+    nên xảy ra sau migrate nhưng vẫn an toàn). Nhờ mặc định này, toàn bộ lời gọi `createCategory` có sẵn trong mã nguồn (trợ lý AI ở `actions.ts`, `copyProject`, luồng nhập 1 sheet khi KHÔNG truyền `workPackageId`) không cần sửa và
+    309 test cũ không đổi hành vi – chỉ nơi cần gán đúng gói (luồng nhập nhiều sheet, mục 122) mới truyền tham số.
+120. **`Repo.calculate(projectId, { workPackageId })` lọc `categories`/`items` ĐẦU VÀO rồi dùng lại nguyên `computeEstimate`/`computeProjectCost`** – không viết hàm tính riêng cho "ước tính theo gói". Hệ quả: bảng tổng hợp chi phí theo
+    TT 36/2026 (Bảng 3.3–3.8, Knc/Km, hai khoản dự phòng) tự động đúng cho TỪNG hạng mục công trình mà không cần sửa `core/calc.ts`, và endpoint `/projects/:id/work-packages/:wpId/estimate` trả đúng kiểu `EstimateResponse` như
+    `/projects/:id/estimate` – giao diện dùng lại được mọi tab/component hiện có (EstimateGrid, AnalysisTab, CostSummaryTab…) chỉ bằng cách đổi endpoint gọi, không phải viết component riêng cho "chế độ xem theo gói".
+121. **Xóa `work_packages` phải xóa `categories` của nó TRƯỚC** (không có `ON DELETE CASCADE` trên cột `work_package_id` vì cột thêm bằng ALTER rời, không sửa lại định nghĩa bảng): `Repo.deleteWorkPackage` tự xóa `categories` (kéo theo
+    `estimate_items`/`quantity_lines` qua CASCADE sẵn có của chúng), rồi gỡ `work_package_id` (SET NULL) khỏi `takeoff_elements`/`stories`/`manual_sheet_rows`/`rebar_schedule_rows` thuộc gói đó – GIỮ LẠI các bảng này (không xóa) vì chúng
+    có thể còn giá trị tham khảo ngoài phạm vi dự toán. Hoàn tác dùng snapshot đầy đủ (`snapshotWorkPackage`/`restoreWorkPackage`, chụp cả gói + categories + items + quantity_lines trước khi xóa) thay vì chuỗi `UndoOp` nhẹ, vì chuỗi đó
+    không có thao tác "phục hồi hạng mục đã xóa kèm toàn bộ công việc".
+122. **Nhập nhiều sheet (Update 6 B): nhóm theo SHEET, không theo khối** – `importSheets` (`import-multi.ts`) gom các khối theo `sheetIndex` trước, mỗi sheet có một "đích" (`SheetTarget`): `new` (tạo 1 `work_package` mới, tên mặc định
+    = tiêu đề khối đầu/`sheetLabel`, có thể sửa tay), `replace` (dùng lại gói có sẵn, XÓA sạch categories cũ của nó bằng ĐÚNG cơ chế `removeForReplace`/`estimate_revisions` đã có cho "nhập lại thay thế hạng mục" ở mục 104, chỉ mở rộng
+    `categoryIds` ra TẤT CẢ categories hiện có của gói thay vì một hạng mục), hoặc `add` (gói có sẵn, không xóa gì). Mỗi khối trong sheet vẫn thành một `categoryPrefix` riêng (một Phần) như cũ – chỉ khác là tất cả Phần của một sheet giờ
+    cùng một `work_package_id` thay vì nằm phẳng ở gốc công trình (sửa đúng lỗi #1 của UPDATE-6: công việc của sheet này không còn trộn vào sheet khác). Tuỳ chọn `splitBlocks` (mỗi khối một gói riêng) dùng khi người dùng muốn tách tiếp.
+123. **`UndoOp` thêm `deleteWorkPackage`**: nếu không có, hoàn tác một lần nhập nhiều sheet (xóa categories/items vừa tạo) sẽ để lại một `work_package` RỖNG mồ côi. Thao tác tạo gói mới (`makeNewPackage`) đẩy op này vào ĐẦU danh sách chờ
+    (trước khi các khối của sheet được xử lý) để tận dụng cách `undo` được dựng ngược trong `importSheets` (`undo = [...r.undo, ...undo]` mỗi khối) – kết quả op xóa gói luôn nằm ở CUỐI mảng `undo` cuối cùng, nên `applyUndo` chạy nó
+    SAU KHI mọi categories của gói đã bị xóa (tránh lỗi FOREIGN KEY khi xóa `work_packages` còn categories tham chiếu tới).
+124. **Giữ CẢ HAI nút nhập (không xóa "⤓ Nhập dữ liệu" như chữ spec nói đúng nghĩa đen)**: màn hình 1 sheet (`ImportPanel`/`EstimateImportReview`) có giao diện chọn/sửa cột tay, đổi loại dòng, chọn mã đề xuất từng dòng… mà màn hình nhiều
+    sheet không có (và không nên có – tự động hoá đa sheet với panel sửa cột đầy đủ cho MỖI sheet vượt phạm vi đợt này). `e2e/update3.mjs` và `e2e/update4.mjs` kiểm đúng các điều khiển sửa cột tay đó; xóa nút sẽ xóa một tính năng thật
+    đang hoạt động mà không có gì thay thế. Quyết định: đổi tên nút "Nhập nhiều sheet" → **"⤓ Nhập từ Excel"** (đường chính, có chọn đích hạng mục công trình theo mục 122) và đổi nhãn nút cũ → "⤓ Nhập dữ liệu (chọn cột tay)" (đường phụ,
+    dùng khi tự nhận diện chưa đúng) – giữ đúng chữ "Nhập dữ liệu" trong nhãn (khớp regex `/Nhập dữ liệu/` của 2 kịch bản e2e trên, không phải sửa chúng). Nhập 1 sheet MỚI (không phải sửa/nhập lại hạng mục có sẵn) đi vào gói đang chọn ở
+    thanh bên; sửa/nhập lại một hạng mục ĐÃ CÓ luôn giữ đúng gói hiện tại của nó (máy chủ tự tra `work_package_id` của hạng mục đang thay thế, bỏ qua gói client gửi lên) – không bao giờ âm thầm chuyển hạng mục sang gói khác khi sửa.
+125. **`e2e/update4-multi.mjs` phải viết lại đoạn kiểm tra sau khi nhập**: trước Update 6, cả 3 khối (2 của sheet nhà xưởng + 1 của sheet điện) đổ vào CÙNG một danh sách categories phẳng nên lưới "Dự toán chi tiết" hiện đủ cả 3 tên cùng
+    lúc; sau Update 6 mỗi sheet có gói riêng nên lưới chỉ hiện Phần của gói ĐANG CHỌN (đúng yêu cầu "mỗi gói có lưới riêng, STT khởi động lại"). Kịch bản nay bấm từng gói ở thanh bên để kiểm riêng, và thêm bước kiểm tab "Tổng hợp dự án".
+    Khi điều tra đoạn này, phát hiện `e2e/update4.mjs` bước "Sửa lại cột đã nhập" (bỏ chọn cột Máy) không cập nhật `grand-computed` hiển thị – tái hiện được trên bản CHƯA sửa gì của Update 6 (dùng `git stash`) nên là lỗi có từ trước,
+    không thuộc phạm vi Update 6; không sửa trong đợt này.

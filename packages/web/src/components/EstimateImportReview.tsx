@@ -11,12 +11,15 @@ export function EstimateImportReview({
   projectId,
   initial,
   replace,
+  workPackageId,
   onImported,
 }: {
   projectId: number;
   initial: Analysis;
   /** "Sửa lại cột đã nhập": replace the items of a stored import / of these categories. */
   replace?: { importId?: number; categoryIds?: number[] };
+  /** Update 6 B: hạng mục công trình a FRESH import goes into (ignored when `replace` is set – it keeps its own). */
+  workPackageId?: number;
   onImported: (message: string) => void;
 }) {
   const [a, setA] = useState<Analysis>(initial);
@@ -120,6 +123,7 @@ export function EstimateImportReview({
         allowNumericName,
         replaceImportId: replace?.importId,
         replaceCategoryIds: replace?.categoryIds,
+        workPackageId,
         saveTemplate: templateName.trim() || null,
         autoAssignThreshold: auto ? Number(threshold.replace(',', '.')) / 100 : null,
       });

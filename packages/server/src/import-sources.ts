@@ -26,6 +26,7 @@ export interface StoredImportOptions {
   blockIndex?: number;
   categoryPrefix?: string;
   equipmentAsQuote?: boolean;
+  workPackageId?: number;
 }
 
 /** Keep the parsed sheet (values after formula evaluation / encoding conversion, raw text, merges) of an import. */

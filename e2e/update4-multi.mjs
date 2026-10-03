@@ -78,15 +78,39 @@ try {
   const summaryTxt = await page.getByTestId('summary-check').innerText();
   for (const v of ['Nhà xưởng A', 'Cầu nối', 'Điện trung thế', '1.810.954.000']) assert.ok(summaryTxt.includes(v));
 
-  step('import all 3 blocks in one go (undoable)');
+  step('import all 3 blocks in one go (undoable) – each sheet becomes its own hạng mục công trình (Update 6 B)');
   await page.getByTestId('import-sheets').click();
   await page.getByTestId('notice').waitFor();
   assert.match(await page.getByTestId('notice').innerText(), /Đã nhập 16 công việc vào 3 hạng mục/);
-  const catNames = await page.locator('.tab-body .cat-name').allInnerTexts();
-  assert.deepEqual(catNames.sort(), ['CẦU NỐI', 'ĐIỆN TRUNG THẾ', 'NHÀ XƯỞNG A'].sort());
+  // the building sheet (2 blocks: "Nhà xưởng A" + "Cầu nối") and the MEP sheet ("Điện trung thế") each got their
+  // OWN hạng mục công trình – items of one never mix into another (UPDATE-6 problem #1)
+  await page.getByTestId('wp-sidebar').waitFor();
+  const sidebarText = await page.getByTestId('wp-sidebar').innerText();
+  for (const v of ['Nhà xưởng A', 'Điện trung thế']) assert.ok(sidebarText.includes(v), `sidebar lists package "${v}"`);
   await shot('3-imported');
 
+  step('switching to the "Nhà xưởng A" package shows ONLY its own 2 Phần, restarting STT');
+  await page.getByText('Nhà xưởng A', { exact: false }).first().click();
+  await page.waitForFunction(() => document.querySelectorAll('.tab-body .cat-name').length === 2);
+  let catNames = await page.locator('.tab-body .cat-name').allInnerTexts();
+  assert.deepEqual(catNames.sort(), ['CẦU NỐI', 'NHÀ XƯỞNG A'].sort());
+
+  step('switching to "Điện trung thế" shows only its own Phần – the building items never leak in');
+  await page.getByText('Điện trung thế', { exact: false }).first().click();
+  await page.waitForFunction(() => document.querySelectorAll('.tab-body .cat-name').length === 1);
+  catNames = await page.locator('.tab-body .cat-name').allInnerTexts();
+  assert.deepEqual(catNames, ['ĐIỆN TRUNG THẾ']);
+
+  step('"Tổng hợp dự án" lists every package with its own value and a grand total');
+  await page.getByRole('button', { name: 'Tổng hợp dự án' }).click();
+  await page.getByTestId('project-summary').waitFor();
+  const summaryTabText = await page.getByTestId('project-summary').innerText();
+  for (const v of ['Nhà xưởng A', 'Điện trung thế', 'Hạng mục chung', 'TỔNG CỘNG DỰ ÁN']) assert.ok(summaryTabText.includes(v));
+
   step('"↻ Nhập lại từ file Excel" button opens on an imported category');
+  await page.getByText('Nhà xưởng A', { exact: false }).first().click();
+  await page.getByRole('button', { name: 'Dự toán chi tiết' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.tab-body .cat-name').length === 2);
   await page.getByTestId(/reimport-/).first().click({ force: true });
   await page.getByText('Nhập lại từ file Excel (thay thế hạng mục đã nhập)').waitFor();
   await page.keyboard.press('Escape');

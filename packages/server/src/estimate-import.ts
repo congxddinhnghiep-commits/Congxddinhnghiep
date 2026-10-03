@@ -508,6 +508,8 @@ export interface ImportEstimateOptions extends AnalyzeOptions {
   replaceCategoryIds?: number[];
   /** Multi-sheet import: hạng mục names are "<prefix> – <category row>" (or just the prefix when the block has no category rows). */
   categoryPrefix?: string;
+  /** Update 6 A/B: hạng mục công trình (work package) the created/matched categories belong to; defaults to the project's default package. */
+  workPackageId?: number;
 }
 
 /**
@@ -534,13 +536,14 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
   let revisionId: number | null = null;
   db.transaction(() => {
     if (o.replaceImportId || o.replaceCategoryIds?.length) replaced = removeForReplace(db, projectId, { importId: o.replaceImportId, categoryIds: o.replaceCategoryIds });
-    // A brand-new project has one empty default category; the file's own categories replace it.
-    const cats0 = repo.listCategories(projectId);
+    const workPackageId = o.workPackageId ?? repo.defaultWorkPackageId(projectId);
+    // A brand-new project has one empty default category (in the default package); the file's own categories replace it.
+    const cats0 = repo.listCategories(projectId, workPackageId);
     if (cats0.length === 1 && normalizeText(cats0[0].name) === 'hang muc chung' && repo.listItems(projectId).length === 0) {
       repo.deleteCategory(projectId, cats0[0].id);
       undo.push({ op: 'createCategory', name: cats0[0].name });
     }
-    const existing = new Map(repo.listCategories(projectId).map((c) => [normalizeText(c.name), c.id]));
+    const existing = new Map(repo.listCategories(projectId, workPackageId).map((c) => [normalizeText(c.name), c.id]));
     let currentCat: number | null = null;
     let subHeading = '';
     const prefix = (o.categoryPrefix ?? '').trim();
@@ -551,7 +554,7 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
       const key = normalizeText(name);
       let id = existing.get(key);
       if (!id) {
-        id = repo.createCategory(projectId, name).id;
+        id = repo.createCategory(projectId, name, undefined, workPackageId).id;
         existing.set(key, id);
         undo.push({ op: 'deleteCategory', categoryId: id });
         createdCategoryIds.push(id);
@@ -573,7 +576,7 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
         const key = normalizeText(name);
         let id = existing.get(key);
         if (!id) {
-          id = repo.createCategory(projectId, name).id;
+          id = repo.createCategory(projectId, name, undefined, workPackageId).id;
           existing.set(key, id);
           undo.push({ op: 'deleteCategory', categoryId: id });
           createdCategoryIds.push(id);
@@ -683,7 +686,7 @@ export function importEstimate(db: DB, repo: Repo, f: ParsedFile, projectId: num
       sheetIndex: a.sheetIndex,
       header: { headerRow: a.header!.headerRow, headerRows: a.header!.headerRows },
       mapping: a.header!.mapping as Record<string, number>,
-      options: { firstRow: o.firstRow ?? a.range?.first, lastRow: o.lastRow ?? a.range?.last, blockIndex: a.blockIndex, categoryPrefix: o.categoryPrefix, equipmentAsQuote: o.equipmentAsQuote, rowTypes: o.rowTypes as Record<string, string> | undefined, pricingOption: o.pricingOption, allowNumericName: o.allowNumericName },
+      options: { firstRow: o.firstRow ?? a.range?.first, lastRow: o.lastRow ?? a.range?.last, blockIndex: a.blockIndex, categoryPrefix: o.categoryPrefix, equipmentAsQuote: o.equipmentAsQuote, rowTypes: o.rowTypes as Record<string, string> | undefined, pricingOption: o.pricingOption, allowNumericName: o.allowNumericName, workPackageId },
       user,
     });
     for (const id of created) db.prepare('UPDATE estimate_items SET import_id = ? WHERE id = ?').run(importId, id);

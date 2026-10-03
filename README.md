@@ -27,6 +27,9 @@ Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/UPDATE
 ## Tính năng (Phase 1)
 - Đăng nhập, phân quyền quản trị/người dùng, bắt buộc đổi mật khẩu lần đầu.
 - Danh sách công trình: tạo, sao chép, xóa, mở.
+- **Hạng mục công trình** (CT01 nhà xưởng, A1 văn phòng, bể PCCC…): một công trình có nhiều hạng mục công trình, mỗi hạng mục có Phần/công tác, lưới dự toán,
+  bóc khối lượng, phân tích vật tư và tổng hợp chi phí **riêng** (STT khởi động lại); tab **Tổng hợp dự án** cộng tất cả hạng mục + các dòng cấp dự án
+  (chi phí quản lý, VAT…) thành tổng dự án. Xem mục 0 dưới đây.
 - **Dự toán chi tiết** theo hạng mục, thao tác bàn phím như F1/G8: gõ mã hiệu → Enter tự điền tên, đơn vị; Enter xuống dòng;
   F3 tra định mức (có dấu/không dấu); diễn giải khối lượng dạng công thức `2*3,5*0,3`.
 - **Giá vật liệu/nhân công/máy** theo công trình, **Phân tích vật tư**, **Tổng hợp vật tư** (kèm chênh lệch giá).
@@ -37,8 +40,9 @@ Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/UPDATE
   quản trị viên đánh dấu từng bảng “đã xác minh” và bật/tắt nội suy.
 - **Xuất Excel** một file gồm các sheet TH, DTCT, PTVT, THVT, CLVT, TDT – dùng **công thức Excel thật**, khổ A4, Times New Roman, #,##0.
   Sheet TH ghi rõ căn cứ pháp lý, nguồn từng dòng và cảnh báo khi bảng tỷ lệ còn TẠM.
-- **Nhập dữ liệu** từ máy tính (.xlsx/.csv, hoặc đường dẫn tuyệt đối khi chạy cục bộ) và từ **Google Drive**, có hộp thoại ánh xạ cột:
-  nạp định mức, bảng giá, danh sách công tác.
+- **⤓ Nhập từ Excel** (một luồng duy nhất): mỗi sheet của file thành một hạng mục công trình (hoặc thay thế/thêm vào hạng mục có sẵn), từ máy tính
+  (.xlsx/.xlsm/.xls/.csv, hoặc đường dẫn tuyệt đối khi chạy cục bộ) hoặc **Google Drive**. Nút phụ "⤓ Nhập dữ liệu (chọn cột tay)" dùng khi cần tự chọn
+  lại cột cho một sheet khó (tự nhận diện chưa đúng); cũng dùng để nạp định mức, bảng giá, danh sách công tác (không phải dự toán).
 - **Trợ lý AI** (không cần mạng): hiểu lệnh như
   - `thêm 50 m3 bê tông cột mác 300 vào hạng mục phần thân`
   - `tìm mã định mức đào đất móng`
@@ -50,8 +54,17 @@ Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/UPDATE
 
 ## Hướng dẫn nhanh các tính năng mới
 
+### 0. Hạng mục công trình (Update 6)
+Thanh bên trái của trang công trình liệt kê các **hạng mục công trình** (CT01 nhà xưởng, CT02, A1 văn phòng, bể PCCC, nhà bảo vệ,
+đường nội bộ, 01-Điện trung thế…) – mỗi hạng mục là một "công trình con" độc lập trong TMĐT, có Phần/công tác, lưới dự toán (STT
+khởi động lại), bóc khối lượng, phân tích vật tư và tổng hợp chi phí **riêng**; không bao giờ tự trộn công việc của hạng mục này
+vào hạng mục khác. Thao tác: **+** thêm, **✎** đổi tên, **⧉** sao chép, **🗑** xóa (xác nhận khi còn công việc, có **↶ Hoàn tác**).
+Chuyển một Phần sang hạng mục khác chỉ qua hành động "Chuyển sang hạng mục…" rõ ràng (không tự động). Tab **Tổng hợp dự án**: một
+dòng mỗi hạng mục (diện tích, giá trị, đơn giá/m²) + các dòng cấp dự án tự đặt (vd. "Chi phí quản lý dự án 3%", "VAT 8%") + tổng
+dự án. Khi nâng cấp từ bản cũ, mỗi công trình đã có được gán vào đúng 1 hạng mục "Hạng mục chung" nên số liệu không đổi.
+
 ### 1. Nhập file dự toán / BOQ có sẵn (bạn chọn từng cột)
-1. Mở công trình → **⤓ Nhập dữ liệu** → loại dữ liệu “Dự toán / BOQ có sẵn” → chọn file `.xlsx`, `.xlsm`, `.xls` hoặc `.csv`
+1. Mở công trình → **⤓ Nhập dữ liệu (chọn cột tay)** → loại dữ liệu “Dự toán / BOQ có sẵn” → chọn file `.xlsx`, `.xlsm`, `.xls` hoặc `.csv`
    (hoặc chọn từ Google Drive) → **Đọc file**. Phần mềm liệt kê các sheet kèm loại tự nhận diện và chọn sẵn sheet dự toán.
 2. **Vùng dữ liệu**: dòng tiêu đề, số dòng tiêu đề (1 hoặc 2 – nhận diện cả khi KHÔNG gộp ô: ô nhóm “Đơn giá” bên trên các nhãn
    “Vật liệu”, “Nhân công” bên dưới), dòng dữ liệu đầu/cuối.
@@ -72,20 +85,25 @@ Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/UPDATE
    phí và “giá theo định mức” để so sánh (không cộng vào tổng); mỗi công việc giữ file/sheet/dòng/ô gốc.
 9. Tùy chọn: đặt tên **mẫu nhập** để lần sau file cùng mẫu tự nhận ánh xạ. Nhập nhầm thì bấm **↶ Hoàn tác** ở khung trợ lý.
 
-### 1c. Nhập nhiều sheet (file thật nhiều sheet/nhiều bảng)
+### 1c. Nhập từ Excel (file thật nhiều sheet/nhiều bảng) – luồng chính
 Dùng cho hồ sơ nhiều sheet (ví dụ .xls cũ dạng BIFF, 40+ sheet, mỗi sheet một nhà xưởng/hạng mục, có sheet ẩn và sheet tổng hợp
-kiểu TONGHOP). Nút **⤓ Nhập nhiều sheet**:
+kiểu TONGHOP) **hoặc chỉ 1 sheet** – đây là nút nhập chính của phần mềm. Nút **⤓ Nhập từ Excel**:
 1. Tải file → tích chọn sheet cần nhập (sheet ẩn gập lại, mặc định không chọn; sheet tổng hợp chỉ để đối chiếu, không tạo công việc).
-2. Một sheet có thể lặp lại dòng tiêu đề cho từng hạng mục con – mỗi bảng như vậy (**khối**) được nhận ra riêng và sẽ thành **một
-   hạng mục** của nó; bấm **Xem trước** để xem 15 dòng đầu như sẽ lên lưới (tên đã chuyển Unicode, phần tiếng Trung tách riêng).
+2. **Đích** cho mỗi sheet đã chọn: *Tạo hạng mục công trình mới* (tên mặc định lấy từ dòng “Hạng mục: …” hoặc tên sheet, sửa được),
+   *Thay thế hạng mục: …* (xóa sạch Phần/công tác cũ của hạng mục đó rồi nhập lại – hoàn tác được) hoặc *Thêm vào hạng mục: …* (giữ
+   nguyên nội dung cũ). Mặc định: **một sheet = một hạng mục công trình**; tích “Tách mỗi bảng con thành hạng mục riêng” nếu muốn
+   mỗi bảng trong sheet thành một hạng mục của riêng nó.
+3. Một sheet có thể lặp lại dòng tiêu đề cho từng hạng mục con – mỗi bảng như vậy (**khối**) được nhận ra riêng và thành **một
+   Phần** của hạng mục công trình đó; bấm **Xem trước** để xem 15 dòng đầu như sẽ lên lưới (tên đã chuyển Unicode, phần tiếng Trung tách riêng).
    Dòng “diễn giải khối lượng” (Dài×Rộng×Cao×Số cấu kiện) dưới một công việc gắn vào công việc đó mà không đổi khối lượng của file.
-3. Mỗi khối có dấu ✔/⚠ đối chiếu Σ Thành tiền với dòng “Cộng trước thuế” của khối, và nếu có sheet tổng hợp thì đối chiếu thêm
+4. Mỗi khối có dấu ✔/⚠ đối chiếu Σ Thành tiền với dòng “Cộng trước thuế” của khối, và nếu có sheet tổng hợp thì đối chiếu thêm
    với dòng của nó. Sheet điện nước/MEP: dòng không có mã định mức đánh dấu “thiết bị/vật tư theo báo giá”, không bắt buộc mã.
-4. **Trung thực với file**: khi Thành tiền của một dòng khác KL×đơn giá (ví dụ file ghi 0 dù vẫn có đơn giá vật liệu/nhân công),
+5. **Trung thực với file**: khi Thành tiền của một dòng khác KL×đơn giá (ví dụ file ghi 0 dù vẫn có đơn giá vật liệu/nhân công),
    mặc định phần mềm **giữ đúng Thành tiền trong file** (ghi rõ trong ghi chú công việc) để tổng từng khối/sheet luôn khớp
    “Cộng trước thuế”/TONGHOP – chọn **Tính lại theo KL×đơn giá** nếu muốn bỏ qua số của file (áp dụng cho cả lần nhập, hoặc bấm
    🔒/🧮 cạnh “Giá file” trên từng công việc sau khi đã nhập để đổi riêng dòng đó, không cần tải lại file).
-5. **Nhập dữ liệu** tạo tất cả hạng mục đã chọn trong một thao tác, hoàn tác được bằng **↶ Hoàn tác** ở khung trợ lý.
+6. Áp dụng tạo tất cả hạng mục công trình/Phần đã chọn trong một thao tác, hoàn tác được bằng **↶ Hoàn tác** ở khung trợ lý. Nhập
+   lại cùng file sau đó: chọn *Thay thế hạng mục* cho sheet trùng nguồn để cập nhật mà không tạo hạng mục trùng.
 
 Nút **↻ Nhập lại từ file Excel (thay thế hạng mục đã nhập)** cạnh ⚙ trên mỗi hạng mục đã nhập: luôn tải file mới và thay thế
 đúng hạng mục đó thành phiên bản hoàn tác được (khác với ⚙ “Sửa lại cột đã nhập” – mở lại dữ liệu đã lưu, không cần tải lại file).
