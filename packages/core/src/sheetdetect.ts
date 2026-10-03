@@ -470,6 +470,30 @@ const str = (v: Cell | undefined): string => (v === null || v === undefined ? ''
 /** Work names keep their inner spacing ("Φ400  L=20m") – only line breaks / tabs become spaces. */
 const strKeep = (v: Cell | undefined): string => (v === null || v === undefined ? '' : String(v).replace(/[\r\n\t]+/g, ' ').trim());
 
+/**
+ * Update 6 C: does the next non-empty row look like a quantity-breakdown ("diễn giải") line – no STT/mã/đơn vị/giá,
+ * just a name and a khối lượng or a Dài/Rộng/Cao/Số cấu kiện? Used to tell a genuine Phần heading ("PHẦN MÓNG", then
+ * real priced items) apart from a bare sub-label ("DK1", "TRỤC 1,9(8.4+11.6)", "NHÀ MÁY BƠM") that only introduces
+ * breakdown lines of the item above it and must never become an (empty) hạng mục of its own.
+ */
+function nextRowLooksLikeDetail(rows: Cell[][], from: number, m: Partial<Record<ImportField, number>>): boolean {
+  const get = (r: Cell[], f: ImportField) => (m[f] === undefined || m[f]! < 0 ? undefined : r[m[f]!]);
+  for (let i = from; i < rows.length; i++) {
+    const r = rows[i] ?? [];
+    if (r.every((c) => !str(c))) continue;
+    const name = strKeep(get(r, 'name'));
+    if (!name) return false;
+    const stt = str(get(r, 'stt'));
+    const code = str(get(r, 'code'));
+    const unit = str(get(r, 'unit'));
+    const hasPrice = (['priceVL', 'priceNC', 'priceM', 'unitPrice', 'amount'] as ImportField[]).some((f) => parseFlexibleNumber(get(r, f) ?? null) !== null);
+    const hasQty = parseFlexibleNumber(get(r, 'quantity') ?? null) !== null;
+    const hasDims = (['dimL', 'dimW', 'dimH', 'dimN'] as ImportField[]).some((f) => parseFlexibleNumber(get(r, f) ?? null) !== null);
+    return !stt && !code && !unit && !hasPrice && (hasQty || hasDims);
+  }
+  return false;
+}
+
 /** Classify data rows below the header. */
 export function classifyRows(
   rows: Cell[][],
@@ -484,6 +508,8 @@ export function classifyRows(
   const out: ClassifiedRow[] = [];
   let category: string | null = null;
   let lastItem: ClassifiedRow | null = null;
+  /** Update 6 C: a bare sub-label ("DK1", "TRỤC 1,9(8.4+11.6)") just read – prefixes the next diễn giải line(s). */
+  let pendingSubLabel = '';
   const lumps: ClassifiedRow[] = [];
   const seen = new Map<string, number>();
   const finishItem = (it: ClassifiedRow | null) => {
@@ -558,6 +584,7 @@ export function classifyRows(
       row.type = 'subtotal';
       finishItem(lastItem);
       lastItem = null;
+      pendingSubLabel = '';
       out.push(row);
       continue;
     }
@@ -573,7 +600,8 @@ export function classifyRows(
       const product = factors.length ? factors.reduce((a, x) => a * x, 1) : null;
       const q = quantity ?? (product !== null ? Math.round(product * 1e9) / 1e9 : null);
       row.type = 'detail';
-      const line: DetailLine = { index: i, text: name, dims, quantity: q, expression: expression && (quantity === null || product === null || Math.abs(product - quantity) < 1e-9) ? expression : q !== null ? String(q) : expression };
+      const text = pendingSubLabel ? `${pendingSubLabel}: ${name}` : name;
+      const line: DetailLine = { index: i, text, dims, quantity: q, expression: expression && (quantity === null || product === null || Math.abs(product - quantity) < 1e-9) ? expression : q !== null ? String(q) : expression };
       lastItem.details.push(line);
       out.push(row);
       continue;
@@ -590,6 +618,7 @@ export function classifyRows(
       lumps.push(row);
       finishItem(lastItem);
       lastItem = row;
+      pendingSubLabel = '';
     } else if (priceMode && (name || code) && hasQty) {
       row.type = 'item';
       if (!unit) row.warnings.push('Thiếu đơn vị');
@@ -599,6 +628,7 @@ export function classifyRows(
       row.type = 'item';
       finishItem(lastItem);
       lastItem = row;
+      pendingSubLabel = '';
       if (!unit) row.warnings.push('Thiếu đơn vị');
       else if (!isKnownUnit(unit)) row.warnings.push(`Đơn vị lạ "${unit}"`);
       if (quantity === 0) row.warnings.push('Khối lượng bằng 0');
@@ -611,20 +641,23 @@ export function classifyRows(
       row.warnings.push(`Khối lượng không đọc được "${str(qRaw)}"`);
     } else if (name && !hasQty && !unit) {
       const sttN = normalizeText(stt);
+      const outline = OUTLINE_RE.test(sttN);
       const upper = name === name.toUpperCase() && /[A-ZÀ-Ỹ]/.test(name);
-      if (OUTLINE_RE.test(sttN) || upper || /^(hang muc|phan|hm)\b/.test(normalizeText(name)) || /^[ivx]+[.\s]/i.test(name)) {
+      // only a capitalised phrase and no quantity / unit / price / code anywhere in the row
+      const headingLike = upper || /^(hang muc|phan|hm)\b/.test(normalizeText(name)) || /^[ivx]+[.\s]/i.test(name) || isBareHeading(cells, name, m);
+      // Update 6 C: a bare heading with NO outline STT, immediately followed only by diễn giải lines of the item
+      // above it, is a sub-label ("DK1", "TRỤC 1,9(8.4+11.6)", "NHÀ MÁY BƠM") – never an (empty) hạng mục of its own.
+      const subLabel = !outline && headingLike && !!lastItem && nextRowLooksLikeDetail(rows, i + 1, m);
+      if (outline || (headingLike && !subLabel)) {
         row.type = 'category';
         finishItem(lastItem);
         lastItem = null;
+        pendingSubLabel = '';
         category = name.replace(/^[IVX]+[.\s]+/, '').trim();
         row.category = category;
-      } else if (isBareHeading(cells, name, m)) {
-        // only a capitalised phrase and no quantity / unit / price / code anywhere in the row
-        row.type = 'category';
-        finishItem(lastItem);
-        lastItem = null;
-        category = name.replace(/^[IVX]+[.\s]+/, '').trim();
-        row.category = category;
+      } else if (subLabel) {
+        row.type = 'note';
+        pendingSubLabel = name;
       } else row.type = 'note';
     } else row.type = 'note';
     out.push(row);

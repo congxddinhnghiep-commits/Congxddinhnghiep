@@ -22,6 +22,7 @@
     "typecheck": "tsc -p packages/core && tsc -p packages/server --noEmit && tsc -p packages/web --noEmit",
     "e2e": "node e2e/update3.mjs",
     "fixtures:import": "node scripts/make-import-fixtures.mjs",
+    "fixtures:sinomag": "node scripts/make-fixture-sinomag.mjs",
     "e2e:update4": "node e2e/update4.mjs",
     "e2e:update4-ai": "node e2e/update4-ai.mjs",
     "check:private-import": "tsx packages/server/src/scripts/check-private-import.ts",

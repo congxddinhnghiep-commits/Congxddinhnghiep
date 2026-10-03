@@ -140,7 +140,8 @@ describe('excel export and import', () => {
     expect(r.status).toBe(200);
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(r.body);
-    expect(wb.worksheets.map((w) => w.name)).toEqual(['TH', 'DTCT', 'PTVT', 'THVT', 'CLVT', 'TDT']);
+    // Update 6 D: "TỔNG HỢP" + one sheet per hạng mục công trình now come before the whole-project sheets.
+    expect(wb.worksheets.map((w) => w.name)).toEqual(['TỔNG HỢP', 'Hạng mục chung', 'TH', 'DTCT', 'PTVT', 'THVT', 'CLVT', 'TDT']);
     const dt = wb.getWorksheet('DTCT')!;
     const item = dt.getRow(7);
     expect(item.getCell(2).value).toBe('AF.11111');

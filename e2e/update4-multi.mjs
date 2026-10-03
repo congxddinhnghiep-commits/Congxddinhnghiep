@@ -107,6 +107,13 @@ try {
   const summaryTabText = await page.getByTestId('project-summary').innerText();
   for (const v of ['Nhà xưởng A', 'Điện trung thế', 'Hạng mục chung', 'TỔNG CỘNG DỰ ÁN']) assert.ok(summaryTabText.includes(v));
 
+  step('⤒ Xuất Excel downloads a non-empty workbook with one sheet per hạng mục công trình (Update 6 D)');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: /Xuất Excel/ }).click()]);
+  const exportPath = await download.path();
+  assert.ok(exportPath, 'export download must produce a file');
+  assert.ok(fs.statSync(exportPath).size > 10000, 'exported .xlsx must not be empty');
+  await fs.promises.copyFile(exportPath, path.join(SHOTS, 'u4multi-export.xlsx'));
+
   step('"↻ Nhập lại từ file Excel" button opens on an imported category');
   await page.getByText('Nhà xưởng A', { exact: false }).first().click();
   await page.getByRole('button', { name: 'Dự toán chi tiết' }).click();

@@ -392,3 +392,55 @@ Nguồn: `docs/LEGAL-UPDATE-2026.md` (đã xác minh metadata ngày 2026-09-27).
     lúc; sau Update 6 mỗi sheet có gói riêng nên lưới chỉ hiện Phần của gói ĐANG CHỌN (đúng yêu cầu "mỗi gói có lưới riêng, STT khởi động lại"). Kịch bản nay bấm từng gói ở thanh bên để kiểm riêng, và thêm bước kiểm tab "Tổng hợp dự án".
     Khi điều tra đoạn này, phát hiện `e2e/update4.mjs` bước "Sửa lại cột đã nhập" (bỏ chọn cột Máy) không cập nhật `grand-computed` hiển thị – tái hiện được trên bản CHƯA sửa gì của Update 6 (dùng `git stash`) nên là lỗi có từ trước,
     không thuộc phạm vi Update 6; không sửa trong đợt này.
+
+## Update 6 (docs/UPDATE-6.md) — Section 2: C row recognition + D Excel export
+126. **Hạ tầng cho dims/nameZh đã có sẵn, chỉ thiếu một việc**: `dimL/dimW/dimH/dimN` (Dài/Rộng/Cao/Số cấu kiện) và một cột `nameZh` thuần ký tự Trung
+    (`内容`) đã là `ImportField` có từ đồng nghĩa riêng trong `sheetdetect.ts` – không hề bị đọc nhầm thành đơn giá khi có tiêu đề rõ ràng (kiểm bằng fixture
+    có `Dài=4, Rộng=22` – đúng hai số "nonsense prices" trong báo cáo lỗi – không bao giờ lọt vào `prices.vl/nc`). Lỗ hổng thật của UPDATE-6 không nằm ở việc
+    đọc nhầm cột, mà ở `classifyRows`: xem tiếp mục 127.
+127. **Sub-label ("DK1", "TRỤC 1,9(8.4+11.6)", "NHÀ MÁY BƠM") không còn tự thành hạng mục rỗng** (`classifyRows`, `nextRowLooksLikeDetail`): một dòng chỉ có
+    tên, không STT/mã/ĐVT/giá, trước đây luôn thành `category` nếu viết HOA hoặc là cụm từ trần (`isBareHeading` – thêm từ Update 4A mục 90 cho đúng các
+    hạng mục không có STT La Mã). Fix: nhìn trước dòng tiếp theo (bỏ qua dòng trống) – nếu dòng đó có hình dạng diễn giải khối lượng (không STT/mã/ĐVT/giá,
+    có khối lượng hoặc Dài/Rộng/Cao/Số cấu kiện) VÀ đang có một công việc mở (`lastItem`), dòng hiện tại là **sub-label**: không mở hạng mục, không đóng
+    công việc đang mở, chỉ lưu lại để ghép vào mô tả của (các) dòng diễn giải theo sau ("DK1: Nhịp 1"). STT La Mã/chữ cái thật (`OUTLINE_RE`) vẫn LUÔN thành
+    hạng mục bất kể nhìn trước thấy gì – mục C.2 chỉ giới hạn ĐƯỜNG DỰ PHÒNG không-có-STT, không đụng đường có STT. 320→327 test (không có test nào vỡ – xác
+    nhận gần như toàn bộ hạ tầng đã sẵn sàng từ các Update trước, chỉ thiếu đúng việc phân biệt này).
+128. **Giá tổng hợp (price_composite) đã được `amountModeCustom` xử lý đúng từ Update 4, chỉ cần fixture để xác nhận**: khi file chỉ có "Tổng cộng" (không
+    tách VL/NC/M), hàm này gán toàn bộ giá đó vào `custom.vl` để Thành tiền tính đúng một lần (không cộng hai lần); khi có cả VL/NC lẫn Tổng cộng, Tổng cộng
+    chỉ dùng `unitPrice`/`prices.unit` cho đối chiếu, KHÔNG được cộng vào `rawUnit`. Việc MỚI thực sự cần làm chỉ ở xuất Excel (mục 130).
+129. **Fixture tổng hợp `import_sinomag_like.xlsx`** (`scripts/make-fixture-sinomag.mjs`, `npm run fixtures:sinomag`): 4 sheet hạng mục (CT01 2 Phần + lỗi ô
+    nguồn, CT02, A1.VP, 01-Điện trung thế), 1 sheet TONGHOP, 1 sheet phụ "thong ke thep" (cột thống kê thép – không có "tên công việc"/"khối lượng" nên tự
+    động `importable=false`, không cần thêm khái niệm "loại sheet" mới), 1 sheet ẩn. `.expected.json` sinh cùng lúc với file, từ chính mô hình JS dựng nên
+    sheet (không tính tay) – item "Ép cọc…" cố ý ghi VNI (bộ mã hoá suy ngược như `make-import-fixtures.mjs`) để vẫn đi qua đường chuyển mã cũ.
+130. **Lỗi #4 của UPDATE-6 ("xuất Excel ghi 0 mọi đơn giá") nằm ở DTCT cũ**: `ref(col, result) = it.analysis.length ? {formula...} : 0` – một công việc
+    KHÔNG có phân tích hao phí PTVT (CUSTOM_GTT/MARKET_QUOTE theo giá file, hoặc NORM_BASED chưa gắn mã) luôn rơi vào nhánh `: 0`, dù `it.unitCost`/`result`
+    truyền vào ĐÃ đúng – đơn giá đúng bị vứt bỏ, không phải tính sai. Sửa 1 dòng: `: result` thay `: 0`. Áp dụng luôn cho sheet DTCT cũ (vẫn giữ, xem mục
+    131) và các sheet hạng mục công trình mới.
+131. **Xuất Excel: THÊM sheet mới, KHÔNG xoá sheet cũ**: "TỔNG HỢP" (đầu tiên) + một sheet mỗi hạng mục công trình (tên ≤31 ký tự, duy nhất – `sheetNames()`)
+    được thêm TRƯỚC các sheet TH/DTCT/PTVT/THVT/CLVT/TDT nguyên trạng (vẫn theo toàn dự án – Bảng tổng hợp chi phí TT36 chưa theo từng hạng mục công trình,
+    đó là việc của Section 3). Lý do không thay DTCT cũ bằng sheet theo hạng mục: PTVT/THVT/CLVT/TDT/TH đang tham chiếu công thức CHÉO sang đúng số dòng của
+    DTCT (`PTVT!J{hdr}`, `TH!E{row}`…) – viết lại toàn bộ dây công thức đó để khớp N sheet mới nằm ngoài phạm vi khả thi của đợt này mà không kiểm chứng kỹ
+    được; giữ nguyên để không có rủi ro hồi quy cho phần đã hoạt động đúng. Hệ quả: `api.test.ts` đổi danh sách sheet kỳ vọng (`TỔNG HỢP`, `Hạng mục chung`
+    chèn trước `TH`); không có assertion nào khác bị ảnh hưởng (công việc duy nhất của test đó chưa có `quantity_lines` nên không có dòng diễn giải chèn
+    thêm, số dòng DTCT không đổi).
+132. **Sheet theo hạng mục công trình: cột "Đơn giá tổng hợp" tách khỏi VL/NC/M khi giá chỉ có một cột gộp** – `amountModeCustom` gán giá gộp vào
+    `custom.vl` để TÍNH đúng (mục 128), nhưng XUẤT thẳng số đó vào cột "Đơn giá Vật liệu" sẽ hiện SAI ý (trông như có đơn giá vật liệu thật). Khi
+    `source.filePrices` cho biết VL/NC/M gốc đều trống và chỉ có `unit` (Tổng cộng): VL/NC/M để trống, "Đơn giá tổng hợp" hiện giá đó, Thành tiền dùng công
+    thức `KL × "Đơn giá tổng hợp"` thay vì `SUM(VL:M)` – đúng yêu cầu "VL/NC để trống, amount check dùng giá đó một lần".
+133. **Dòng diễn giải (quantity_lines) xuất thành dòng riêng không STT, in nghiêng, thụt lề** ngay dưới dòng công việc (trước khi đến công việc kế tiếp),
+    cột "Diễn giải khối lượng" = `expression`, cột "Khối lượng" = `result` (đổi dấu khi `sign = -1`, dòng Trừ) – mô tả được nối tiền tố sub-label nếu có
+    (mục 127), vd. "DK1: Nhịp 1". STT công việc chỉ liên tục khi chúng thật sự cùng một Phần trong CSDL; sheet CT01 của fixture chỉ có ĐÚNG MỘT Phần ở CSDL
+    (hai tiêu đề La Mã trong file chỉ là "Nhóm:" ghi chú theo quyết định 103, không tách hạng mục) nên STT chạy liên tục 1..5 – không phải lỗi, phản ánh
+    đúng cấu trúc đã lưu.
+134. **ExcelJS bỏ `result` khi đúng bằng 0** (xác nhận bằng thực nghiệm trực tiếp trên bản dựng: `{formula,result:0}` → đọc lại chỉ còn `{formula}`) – hành
+    vi có sẵn của thư viện, ảnh hưởng cả sheet DTCT cũ, không phải lỗi mới. Vì `fullCalcOnLoad = true` đã đặt toàn workbook, Excel luôn tính lại đúng 0 khi mở
+    file thật; chỉ công cụ đọc giá trị cache thô (không tính lại) mới thấy trống thay vì 0 – không cần vá vì không ảnh hưởng người dùng mở bằng Excel, và vá
+    (ví dụ ghi số 0 trần thay công thức) sẽ làm mất tính "công thức Excel thật" khi giá trị khác 0 sau khi người dùng sửa số liệu trong file.
+135. **Round-trip thật** (`export-packages.test.ts`): tải sheet hạng mục công trình vừa xuất, ghép vào một workbook 1-sheet mới (đọc giá trị cache, không
+    công thức) rồi nhập lại qua đúng API nhập 1 sheet – khớp đúng số công việc và tổng tiền. Thành công vì tiêu đề cột xuất ra dùng đúng từ khoá
+    `sheetdetect.ts` đã nhận ("Đơn giá Vật liệu/Nhân công/Máy", "Thành tiền", "Diễn giải khối lượng"…) và dòng diễn giải xuất ra (không STT/mã/ĐVT/giá, có
+    khối lượng ở đúng cột) tự nhiên khớp lại điều kiện nhận diện "dòng diễn giải" ở mục 127 khi đọc lại – không cần viết đường nhập riêng cho file do chính
+    phần mềm xuất ra.
+136. **e2e mới**: `e2e/update4-multi.mjs` thêm bước bấm "⤒ Xuất Excel", chờ sự kiện `download` của Playwright (hoạt động với blob URL vì `a.download` vẫn
+    kích hoạt luồng tải của Chromium) và kiểm file > 10KB – xác nhận đường "nhập → hạng mục công trình → xuất Excel" hoạt động thật trên trình duyệt, không
+    chỉ ở API.

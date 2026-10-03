@@ -38,7 +38,9 @@ Chi tiết: [docs/LEGAL-UPDATE-2026.md](docs/LEGAL-UPDATE-2026.md), [docs/UPDATE
   khoảng tra, trạng thái xác minh), đọc số thành chữ.
 - **Căn cứ pháp lý**: sổ văn bản (số hiệu, ngày ban hành/hiệu lực, tình trạng, nguồn chính thức), các bộ pháp lý và bảng tỷ lệ;
   quản trị viên đánh dấu từng bảng “đã xác minh” và bật/tắt nội suy.
-- **Xuất Excel** một file gồm các sheet TH, DTCT, PTVT, THVT, CLVT, TDT – dùng **công thức Excel thật**, khổ A4, Times New Roman, #,##0.
+- **Xuất Excel** một file gồm sheet **TỔNG HỢP** (từng hạng mục công trình + các dòng cấp dự án + tổng dự án) và **một sheet cho mỗi hạng mục
+  công trình** (đúng lưới đang áp dụng: dòng diễn giải khối lượng thụt lề không STT, cột Đơn giá tổng hợp khi file chỉ có một giá gộp, Nguồn giá,
+  Ghi chú), cùng các sheet toàn dự án TH, DTCT, PTVT, THVT, CLVT, TDT – dùng **công thức Excel thật**, khổ A4, Times New Roman, #,##0.
   Sheet TH ghi rõ căn cứ pháp lý, nguồn từng dòng và cảnh báo khi bảng tỷ lệ còn TẠM.
 - **⤓ Nhập từ Excel** (một luồng duy nhất): mỗi sheet của file thành một hạng mục công trình (hoặc thay thế/thêm vào hạng mục có sẵn), từ máy tính
   (.xlsx/.xlsm/.xls/.csv, hoặc đường dẫn tuyệt đối khi chạy cục bộ) hoặc **Google Drive**. Nút phụ "⤓ Nhập dữ liệu (chọn cột tay)" dùng khi cần tự chọn
@@ -223,6 +225,8 @@ desktop/         Khung Electron (Phase 2)
 | `npm run import:tt38-pl7` | Nạp Phụ lục VII (cấp phối vật liệu) để bóc tách “Vữa…” thành xi măng/cát/đá/nước |
 | `npm run e2e` | Kiểm thử trình duyệt headless cho Update 3 (xem `e2e/README.md`) |
 | `npm run e2e:update5` | Kiểm thử trình duyệt headless cho Bóc khối lượng theo cấu kiện (Update 5) |
+| `npm run e2e:update4-multi` | Kiểm thử nhập nhiều sheet → hạng mục công trình → xuất Excel (Update 6 B/D) |
+| `npm run fixtures:sinomag` | Sinh lại `import_sinomag_like.xlsx` + `.expected.json` (fixture nhận diện dòng, Update 6 C) |
 
 Đăng nhập lần đầu: **admin / admin123** (chỉ ở môi trường phát triển) → hệ thống yêu cầu đổi mật khẩu ngay.
 Có thể đặt tài khoản khác bằng biến môi trường `ADMIN_USER`, `ADMIN_PASS` (xem `.env.example`) trước lần chạy đầu tiên.

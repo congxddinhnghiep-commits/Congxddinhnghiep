@@ -758,8 +758,14 @@ export function createApp(db: DB, opts: { serveWeb?: boolean; ai?: { cfg?: AiCon
   api.get(
     '/projects/:id/export.xlsx',
     h(async (req, res) => {
-      const calc = repo.calculate(proj(req).id);
-      const wb = await buildWorkbook(calc, req.user!.fullName || req.user!.username, legalDocuments().documents);
+      const p = proj(req);
+      const calc = repo.calculate(p.id);
+      const workPackages = repo.listWorkPackages(p.id);
+      const packages = workPackages.map((workPackage) => ({ workPackage, calc: repo.calculate(p.id, { workPackageId: workPackage.id }) }));
+      const quantityLinesByItem = new Map(calc.categories.flatMap((c) => c.items).map((it) => [it.id, repo.quantityLines(it.id)]));
+      const packagesTotal = packages.reduce((a, x) => a + x.calc.total.total, 0);
+      const summaryLines = repo.listSummaryLines(p.id).map((l) => ({ label: l.label, kind: l.kind, value: l.value, amount: l.kind === 'rate' ? packagesTotal * (l.value / 100) : l.value }));
+      const wb = await buildWorkbook(calc, req.user!.fullName || req.user!.username, legalDocuments().documents, packages, quantityLinesByItem, summaryLines);
       const safe = calc.project.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^\w-]+/g, '_');
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename="DuToan_${safe || 'CongTrinh'}.xlsx"`);

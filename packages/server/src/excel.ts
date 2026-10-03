@@ -9,7 +9,7 @@ import {
   type Tt36Settings,
 } from '@dutoan/core';
 import type { LegalDocument } from '@dutoan/core';
-import type { Calculation } from './repo.js';
+import type { Calculation, QuantityLineRow, WorkPackage } from './repo.js';
 
 const FONT = 'Times New Roman';
 const MONEY = '#,##0';
@@ -105,7 +105,173 @@ function excelQuantity(formula: string | null | undefined, value: number): Cell 
   return { formula: f, result: value };
 }
 
-export async function buildWorkbook(calc: Calculation, author: string, legalDocs: LegalDocument[]): Promise<ExcelJS.Workbook> {
+/** Unique, ≤31-char worksheet names (Excel's hard limit) for a list of work packages. */
+function sheetNames(packages: { name: string }[]): string[] {
+  const used = new Set<string>();
+  return packages.map((p) => {
+    const clean = p.name.replace(/[\\/?*[\]:]/g, ' ').trim() || 'Hạng mục';
+    let base = clean.slice(0, 31);
+    let name = base;
+    for (let n = 2; used.has(name.toLowerCase()); n++) {
+      const suffix = ` (${n})`;
+      name = base.slice(0, 31 - suffix.length) + suffix;
+    }
+    used.add(name.toLowerCase());
+    return name;
+  });
+}
+
+/**
+ * Update 6 D: one worksheet per hạng mục công trình (work package) – its own grid exactly as the app applies it
+ * (breakdown/diễn giải lines un-numbered and indented under their item, STT continuous inside each Phần), a
+ * composite "Đơn giá tổng hợp" column when the file only gave one combined price, Nguồn giá and Ghi chú.
+ */
+function buildPackageSheet(ws: ExcelJS.Worksheet, wp: WorkPackage, calc: Calculation, linesOf: (itemId: number) => QuantityLineRow[]) {
+  setupSheet(ws, [6, 13, 38, 8, 26, 11, 13, 13, 11, 13, 14, 14, 12, 15, 26, 22], true);
+  title(ws, 1, wp.nameZh ? `${wp.name.toUpperCase()} / ${wp.nameZh}` : wp.name.toUpperCase(), 16);
+  info(ws, 2, wp.note ? `Ghi chú: ${wp.note}` : wp.sourceSheet ? `Nguồn: ${wp.sourceFile ?? ''} / sheet ${wp.sourceSheet}` : '', 16);
+  header(ws, 4, ['STT', 'Mã hiệu', 'Tên công tác', 'Đơn vị', 'Diễn giải khối lượng', 'Khối lượng', 'Đơn giá Vật liệu', 'Đơn giá Nhân công', 'Đơn giá Máy', 'Đơn giá tổng hợp', 'Thành tiền Vật liệu', 'Thành tiền Nhân công', 'Thành tiền Máy', 'Thành tiền', 'Nguồn giá', 'Ghi chú']);
+  let r = 5;
+  const catTotalRows: number[] = [];
+  calc.categories.forEach((cat, ci) => {
+    const catRow = r++;
+    catTotalRows.push(catRow);
+    const firstItem = r;
+    let stt = 0;
+    for (const it of cat.items) {
+      stt++;
+      const itemRow = r;
+      const fp = it.source?.filePrices;
+      // Composite price (file gave only "Tổng cộng", no separate VL/NC/M – section C.4): show it ONLY in "Đơn giá
+      // tổng hợp", VL/NC/M stay blank (never the internal vl-only split `amountModeCustom` uses for the total), and
+      // Thành tiền is computed from it directly once – never shown twice.
+      const compositeOnly = fp && fp.vl === null && fp.nc === null && fp.m === null && fp.unit !== null;
+      row(
+        ws,
+        r,
+        [
+          stt,
+          it.normCode,
+          it.name,
+          it.unit,
+          it.quantityFormula ?? '',
+          excelQuantity(it.quantityFormula, it.quantity),
+          compositeOnly ? null : it.unitCost.vl,
+          compositeOnly ? null : it.unitCost.nc,
+          compositeOnly ? null : it.unitCost.m,
+          compositeOnly ? fp!.unit : null,
+          compositeOnly ? null : { formula: `F${r}*G${r}`, result: it.amount.vl },
+          compositeOnly ? null : { formula: `F${r}*H${r}`, result: it.amount.nc },
+          compositeOnly ? null : { formula: `F${r}*I${r}`, result: it.amount.m },
+          compositeOnly ? { formula: `F${r}*J${r}`, result: it.amount.total } : { formula: `SUM(K${r}:M${r})`, result: it.amount.total },
+          it.priceSource ?? '',
+          it.note ?? '',
+        ],
+        { numFmts: { 6: QTY, 7: MONEY, 8: MONEY, 9: MONEY, 10: MONEY, 11: MONEY, 12: MONEY, 13: MONEY, 14: MONEY } },
+      );
+      r++;
+      // Breakdown ("diễn giải") lines: un-numbered, indented, their own partial quantity – never counted as a công việc.
+      for (const line of linesOf(it.id)) {
+        const rr = row(
+          ws,
+          r,
+          ['', '', `    ${line.description || ''}`, '', line.expression, line.sign < 0 ? -(line.result ?? 0) : line.result ?? null, '', '', '', '', '', '', '', '', '', ''],
+          { italic: true, numFmts: { 6: QTY } },
+        );
+        rr.getCell(3).font = { name: FONT, size: 10, italic: true, color: { argb: 'FF667085' } };
+        r++;
+      }
+      void itemRow;
+    }
+    const lastItem = r - 1;
+    const sum = (col: string, result: number): Cell => (lastItem >= firstItem ? { formula: `SUM(${col}${firstItem}:${col}${lastItem})`, result } : 0);
+    row(
+      ws,
+      catRow,
+      [roman(ci + 1), '', cat.name.toUpperCase(), '', '', '', '', '', '', '', sum('K', cat.total.vl), sum('L', cat.total.nc), sum('M', cat.total.m), sum('N', cat.total.total), '', ''],
+      { bold: true, numFmts: { 11: MONEY, 12: MONEY, 13: MONEY, 14: MONEY } },
+    );
+  });
+  const totalRow = r;
+  const totalOf = (col: string, result: number): Cell => (catTotalRows.length ? { formula: catTotalRows.map((x) => `${col}${x}`).join('+'), result } : 0);
+  row(
+    ws,
+    totalRow,
+    ['', '', 'CỘNG TRƯỚC THUẾ', '', '', '', '', '', '', '', totalOf('K', calc.total.vl), totalOf('L', calc.total.nc), totalOf('M', calc.total.m), totalOf('N', calc.total.total), '', ''],
+    { bold: true, numFmts: { 11: MONEY, 12: MONEY, 13: MONEY, 14: MONEY } },
+  );
+  ws.views = [{ state: 'frozen', ySplit: 4 }];
+  return totalRow;
+}
+
+/** "Tổng hợp dự án": per-package totals + project-level lines (chi phí quản lý, VAT…) + grand total, linked to each package sheet. */
+function buildTongHopSheet(
+  ws: ExcelJS.Worksheet,
+  projectName: string,
+  packages: { wp: WorkPackage; sheetName: string; totalRow: number; total: number }[],
+  summaryLines: { label: string; kind: 'rate' | 'amount'; value: number; amount: number }[],
+) {
+  setupSheet(ws, [6, 40, 12, 14, 20, 30], false);
+  title(ws, 1, 'TỔNG HỢP DỰ ÁN', 6);
+  info(ws, 2, `Dự án: ${projectName}`, 6);
+  header(ws, 4, ['STT', 'Hạng mục công trình', 'Diện tích (m²)', 'Giá trị (đ)', 'Đơn giá / m² (đ)', 'Ghi chú']);
+  let r = 5;
+  const pkgRows: number[] = [];
+  for (const [i, p] of packages.entries()) {
+    pkgRows.push(r);
+    const area = p.wp.areaM2;
+    row(
+      ws,
+      r,
+      [
+        i + 1,
+        p.wp.name,
+        area ?? '',
+        { formula: `'${p.sheetName}'!N${p.totalRow}`, result: p.total },
+        area ? { formula: `D${r}/C${r}`, result: p.total / area } : '',
+        p.wp.note ?? '',
+      ],
+      { numFmts: { 3: QTY, 4: MONEY, 5: MONEY } },
+    );
+    r++;
+  }
+  const packagesTotal = packages.reduce((a, x) => a + x.total, 0);
+  const packagesTotalRow = r;
+  row(ws, r, ['', 'CỘNG HẠNG MỤC CÔNG TRÌNH', '', { formula: pkgRows.length ? pkgRows.map((x) => `D${x}`).join('+') : '0', result: packagesTotal }, '', ''], {
+    bold: true,
+    numFmts: { 4: MONEY },
+  });
+  r++;
+  const lineRows: number[] = [];
+  for (const l of summaryLines) {
+    lineRows.push(r);
+    row(ws, r, ['', l.label, l.kind === 'rate' ? `${l.value}%` : '', l.kind === 'rate' ? { formula: `D${packagesTotalRow}*${l.value}/100`, result: l.amount } : l.amount, '', ''], {
+      numFmts: { 4: MONEY },
+    });
+    r++;
+  }
+  const grandTotal = packagesTotal + summaryLines.reduce((a, l) => a + l.amount, 0);
+  row(
+    ws,
+    r,
+    ['', 'TỔNG CỘNG DỰ ÁN', '', { formula: [`D${packagesTotalRow}`, ...lineRows.map((x) => `D${x}`)].join('+'), result: grandTotal }, '', ''],
+    { bold: true, numFmts: { 4: MONEY } },
+  );
+}
+
+export interface WorkbookPackageData {
+  workPackage: WorkPackage;
+  calc: Calculation;
+}
+
+export async function buildWorkbook(
+  calc: Calculation,
+  author: string,
+  legalDocs: LegalDocument[],
+  packages: WorkbookPackageData[] = [],
+  quantityLinesByItem: Map<number, QuantityLineRow[]> = new Map(),
+  summaryLines: { label: string; kind: 'rate' | 'amount'; value: number; amount: number }[] = [],
+): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
   wb.creator = author;
   wb.created = new Date();
@@ -118,6 +284,17 @@ export async function buildWorkbook(calc: Calculation, author: string, legalDocs
     `Loại công trình: ${BUILDING_TYPE_LABELS[p.buildingType] ?? p.buildingType}`,
     p.priceBaseDate || p.priceDate ? `Thời điểm lập giá: ${[p.priceBaseDate, p.priceDate].filter(Boolean).join(' – ')}` : '',
   ].filter(Boolean);
+
+  // Update 6 D: "TỔNG HỢP" (first) + one worksheet per hạng mục công trình, exactly as the app applies each package's
+  // own grid – before the whole-project TH/DTCT/PTVT/THVT/CLVT/TDT sheets (unchanged, still project-wide for now).
+  const names = sheetNames(packages.map((x) => x.workPackage));
+  const wsTongHop = wb.addWorksheet('TỔNG HỢP');
+  const pkgSheetInfo = packages.map((pkg, i) => {
+    const ws = wb.addWorksheet(names[i]);
+    const totalRow = buildPackageSheet(ws, pkg.workPackage, pkg.calc, (itemId) => quantityLinesByItem.get(itemId) ?? []);
+    return { wp: pkg.workPackage, sheetName: names[i], totalRow, total: pkg.calc.total.total };
+  });
+  buildTongHopSheet(wsTongHop, p.name, pkgSheetInfo, summaryLines);
 
   // Sheet creation order = tab order.
   const wsTH = wb.addWorksheet('TH');
@@ -251,7 +428,10 @@ export async function buildWorkbook(calc: Calculation, author: string, legalDocs
     for (const it of cat.items) {
       stt++;
       const hdr = itemHeaderRow.get(it.id)!;
-      const ref = (col: string, result: number): Cell => (it.analysis.length ? { formula: `PTVT!${col}${hdr}`, result } : 0);
+      // Update 6 D fix: an item with no norm analysis (CUSTOM_GTT/MARKET_QUOTE, or an unresolved norm code) has no
+      // PTVT breakdown to link to – its own unit cost (already correctly computed either way) must still be WRITTEN,
+      // never hard-coded to 0 (problem #4: "Excel export writes 0 for every unit price although the grid shows file prices").
+      const ref = (col: string, result: number): Cell => (it.analysis.length ? { formula: `PTVT!${col}${hdr}`, result } : result);
       row(
         wsDT,
         r,

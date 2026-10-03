@@ -1,0 +1,116 @@
+{
+  "sheet_building_1": "CT01_厂房 (test)",
+  "sheet_building_2": "CT02_厂房 (test)",
+  "sheet_office": "A1. VP (test)",
+  "sheet_mep": "01-Điện trung thế",
+  "sheet_summary": "TONGHOP 总",
+  "sheet_aux": "thong ke thep",
+  "sheet_hidden": "Bang gia noi bo",
+  "ct1": {
+    "fileCategories": [
+      {
+        "name": "PHẦN MÓNG",
+        "items": 3
+      },
+      {
+        "name": "PHẦN KẾT CẤU",
+        "items": 2
+      }
+    ],
+    "items": [
+      {
+        "name": "Ép cọc BTCT 300x300",
+        "unit": "m",
+        "qty": 86,
+        "details": 2,
+        "composite": null
+      },
+      {
+        "name": "Đào móng băng bằng máy",
+        "unit": "m3",
+        "qty": 40,
+        "details": 0,
+        "composite": 25000
+      },
+      {
+        "name": "Đà kiềng",
+        "unit": "m3",
+        "qty": 26.631,
+        "details": 2,
+        "composite": null
+      },
+      {
+        "name": "Cột C1",
+        "unit": "m3",
+        "qty": 20,
+        "details": 2,
+        "composite": null
+      },
+      {
+        "name": "Sơn chống thấm sàn mái",
+        "unit": "m2",
+        "qty": 55,
+        "details": 0,
+        "composite": null
+      }
+    ],
+    "itemCount": 5,
+    "total": 96274840,
+    "breakdown_texts": [
+      "CT1(1 tim)",
+      "CT2(2 tim)",
+      "DK1: Nhịp 1",
+      "DK1: Nhịp 2",
+      "TRỤC 1,9(8.4+11.6): Dầm D1",
+      "TRỤC 1,9(8.4+11.6): Dầm D2"
+    ],
+    "never_items": [
+      "CT1(1 tim)",
+      "CT2(2 tim)",
+      "Nhịp 1",
+      "Nhịp 2",
+      "Dầm D1",
+      "Dầm D2",
+      "DK1",
+      "TRỤC 1,9(8.4+11.6)"
+    ],
+    "never_sections": [
+      "DK1",
+      "TRỤC 1,9(8.4+11.6)"
+    ],
+    "composite_item": {
+      "name": "Đào móng băng bằng máy",
+      "composite": 25000,
+      "amount": 1000000
+    },
+    "broken_cell_item": {
+      "name": "Sơn chống thấm sàn mái",
+      "appliedVl": 0,
+      "appliedNc": 80000,
+      "amount": 4400000
+    },
+    "dims_never_priced": {
+      "item": "Đà kiềng",
+      "forbiddenPrices": [
+        4,
+        22,
+        0.3,
+        3.5,
+        0.22
+      ]
+    }
+  },
+  "ct2": {
+    "itemCount": 2,
+    "total": 8700000
+  },
+  "a1": {
+    "itemCount": 1,
+    "total": 30000000
+  },
+  "dien": {
+    "itemCount": 2,
+    "total": 278000000
+  },
+  "project_total": 412974840
+}
