@@ -324,6 +324,8 @@ b.up { color: var(--up); } b.down { color: var(--down); }
 .pm { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #f7ece0; color: #8a4b0f; white-space: nowrap; }
 .qty-cell { display: flex; align-items: center; }
 .sigma { font-size: 11px; color: var(--brand); margin-right: 2px; }
+.qty-breakdown { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 2px 4px; border: 0; background: none; font: inherit; font-size: 11px; line-height: 1.3; color: var(--muted); text-align: left; cursor: pointer; white-space: normal; }
+.qty-breakdown:hover { background: var(--brand-soft); }
 td.nowrap { white-space: nowrap; }
 button.pm { border: none; cursor: pointer; }
 
@@ -368,6 +370,13 @@ button.pm { border: none; cursor: pointer; }
 .push-plan tr.conflict td { background: #fff6d6; }
 .takeoff-tab .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
 .takeoff-tab .row label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 2px; }
+.takeoff-tab .row.params label { width: 170px; }
+.takeoff-tab .row.params label.param-flag { justify-content: flex-end; }
+.takeoff-tab .param-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.decimal-input { width: 100%; max-width: 140px; }
+.decimal-input.invalid { border-color: #d92d20; background: rgba(217, 45, 32, 0.08); outline-color: #d92d20; }
+.norm-suggest { white-space: nowrap; }
+.norm-suggest.weak b { font-weight: 500; color: var(--muted); }
 .takeoff-tab .row input, .takeoff-tab .row select { padding: 4px 6px; }
 .element-editor .params { gap: 14px; }
 .element-editor .params label { width: 110px; }

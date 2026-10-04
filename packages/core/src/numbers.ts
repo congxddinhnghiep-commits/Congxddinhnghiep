@@ -65,3 +65,31 @@ export function convertPrice(price: number, fromUnit: string, toUnit: string): n
   const factor = UNIT_FACTORS[f]?.[t];
   return factor === undefined ? null : price * factor;
 }
+
+/**
+ * Parse a number TYPED by the user in a take-off input (dimensions, counts, Ø, …). Both the Vietnamese decimal comma
+ * and the dot are accepted: "1,8" = "1.8" = 1.8, ",5" = 0.5. A single separator is ALWAYS a decimal separator here
+ * (dimensions in m – "1,800" means 1.8, never 1800); thousands grouping is only recognised when it is unambiguous
+ * ("1.650.000", "1.234,5", "1,234.5"). Anything else ("1,8,2", "1.8.", "abc", "") → null, so the UI can flag the
+ * input as invalid instead of silently dropping the comma (type="number" turned "1,8" into 18).
+ */
+export function parseDecimalInput(raw: string | number | null | undefined): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (raw === null || raw === undefined) return null;
+  const s = String(raw).replace(/[\s ]/g, '');
+  if (!s) return null;
+  let t: string | null = null;
+  if (/^[-+]?(\d+([.,]\d*)?|[.,]\d+)$/.test(s)) t = s.replace(',', '.');
+  else if (/^[-+]?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) t = s.replace(/\./g, '').replace(',', '.');
+  else if (/^[-+]?\d{1,3}(,\d{3})+\.\d+$/.test(s)) t = s.replace(/,/g, '');
+  if (t === null) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Show a take-off number the Vietnamese way for editing: 1.8 → "1,8" (no grouping, up to 6 decimals, no float noise). */
+export function formatDecimalInput(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return '';
+  const r = Math.round(n * 1e6) / 1e6;
+  return String(r).replace('.', ',');
+}

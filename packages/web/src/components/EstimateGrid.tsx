@@ -370,7 +370,23 @@ export function EstimateGrid({
                           <Cell value={it.unit} r={r} col="unit" className="center" onCommit={(v) => upd({ unit: v })} />
                         </td>
                         <td>
-                          <Cell value={it.quantityFormula ?? ''} r={r} col="formula" onCommit={(v) => upd({ quantityFormula: v })} placeholder="công thức" />
+                          {!it.quantityFormula && it.quantityBreakdown?.length ? (
+                            <button
+                              type="button"
+                              className="qty-breakdown"
+                              data-testid="item-breakdown"
+                              tabIndex={-1}
+                              title={`${it.quantityBreakdown.join('\n')}\n\nBấm để xem / sửa các dòng diễn giải`}
+                              onClick={() => setDialogItem(it.id)}
+                            >
+                              {it.quantityBreakdown.slice(0, 3).map((l, i) => (
+                                <span key={i}>{l}</span>
+                              ))}
+                              {it.quantityBreakdown.length > 3 && <span className="muted">… (+{it.quantityBreakdown.length - 3} dòng)</span>}
+                            </button>
+                          ) : (
+                            <Cell value={it.quantityFormula ?? ''} r={r} col="formula" onCommit={(v) => upd({ quantityFormula: v })} placeholder="công thức" />
+                          )}
                         </td>
                         <td>
                           <span className="qty-cell" title={it.quantitySource === 'LINES' ? 'Khối lượng = tổng các dòng bóc tách' : undefined}>

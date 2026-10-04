@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ElementParams, ElementType } from '@dutoan/core';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ELEMENT_PARAM_META, type ElementParams, type ElementType } from '@dutoan/core';
+import { DecimalInput } from './DecimalInput';
 import {
   api,
   type GeneratedTaskDTO,
@@ -17,6 +18,16 @@ const SUB_TABS: [SubTab, string][] = [
   ['rebar', 'Thống kê thép'],
   ['settings', 'Thiết lập'],
 ];
+
+/** True (and an error is shown) when a take-off input of the panel still holds text that is not a valid number. */
+const hasInvalidInput = (el: HTMLElement | null, setError: (e: string) => void): boolean => {
+  const bad = el?.querySelector<HTMLInputElement>('.decimal-input.invalid');
+  if (bad) {
+    setError(`Có ô số chưa hợp lệ: ${bad.title}`);
+    bad.focus();
+  }
+  return !!bad;
+};
 
 const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toLocaleString('vi-VN', { maximumFractionDigits: 3 }));
 
@@ -269,7 +280,16 @@ function ElementEditor({
   const [name, setName] = useState(element.name);
   const [count, setCount] = useState(element.count);
   const [params, setParams] = useState<ElementParams>({ ...defaults, ...element.params });
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
   const paramKeys = useMemo(() => Object.keys(defaults), [defaults]);
+  const meta = ELEMENT_PARAM_META[element.type] ?? {};
+  const setParam = (k: string, v: number, save: boolean) => {
+    const next = { ...paramsRef.current, [k]: v };
+    paramsRef.current = next;
+    setParams(next);
+    if (save) onSave({ params: next });
+  };
 
   useEffect(() => {
     setName(element.name);
@@ -286,14 +306,7 @@ function ElementEditor({
         </label>
         <label>
           Số lượng{' '}
-          <input
-            data-testid="element-count"
-            type="number"
-            min={1}
-            value={count}
-            onChange={(e) => setCount(Number(e.target.value) || 1)}
-            onBlur={() => onSave({ count })}
-          />
+          <DecimalInput testId="element-count" integer min={1} value={count} onChange={setCount} onCommit={(n) => onSave({ count: n })} title="Số cấu kiện giống nhau" />
         </label>
         <label>
           Hạng mục{' '}
@@ -319,19 +332,23 @@ function ElementEditor({
         </label>
       </div>
       <div className="row params">
-        {paramKeys.map((k) => (
-          <label key={k} title={k}>
-            {k}
-            <input
-              data-testid={`param-${k}`}
-              type="number"
-              step="any"
-              value={params[k]}
-              onChange={(e) => setParams({ ...params, [k]: Number(e.target.value) })}
-              onBlur={() => onSave({ params })}
-            />
-          </label>
-        ))}
+        {paramKeys.map((k) => {
+          const m = meta[k];
+          const text = m ? `${k} – ${m.label}${m.unit ? ` (${m.unit})` : ''}` : k;
+          const tip = m ? `${text}\n${m.hint}` : k;
+          return m?.flag ? (
+            <label key={k} className="param-flag" title={tip} data-testid={`param-label-${k}`}>
+              <span>
+                <input data-testid={`param-${k}`} type="checkbox" checked={!!params[k]} onChange={(e) => setParam(k, e.target.checked ? 1 : 0, true)} /> {text}
+              </span>
+            </label>
+          ) : (
+            <label key={k} title={tip} data-testid={`param-label-${k}`}>
+              <span className="param-label">{text}</span>
+              <DecimalInput testId={`param-${k}`} value={params[k]} title={tip} onChange={(n) => setParam(k, n, false)} onCommit={(n) => setParam(k, n, true)} />
+            </label>
+          );
+        })}
       </div>
       <h4>Công tác sinh ra</h4>
       <table className="table compact" data-testid="generated-tasks">
@@ -359,7 +376,9 @@ function ElementEditor({
                   num(t.value)
                 )}
               </td>
-              <td>{t.normCode ? <span title={`Độ tin cậy ${Math.round((t.confidence ?? 0) * 100)}%`}>{t.normCode}</span> : <span className="hint">chưa có mã</span>}</td>
+              <td data-testid={`task-code-${t.key}`}>
+                <NormCodeCell task={t} />
+              </td>
             </tr>
           ))}
           {tasks.length === 0 && (
@@ -372,6 +391,20 @@ function ElementEditor({
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** "Mã gợi ý": best candidate + confidence (auto-assigned when ≥ 80 %), the other top-3 in the tooltip. */
+function NormCodeCell({ task }: { task: GeneratedTaskDTO }) {
+  const best = task.candidates?.[0];
+  if (!best) return <span className="hint">chưa có mã</span>;
+  const pct = (c: number) => `${Math.round(c * 100)}%`;
+  const tip = task.candidates.map((c, i) => `${i + 1}. ${c.code} (${pct(c.confidence)}) ${c.name}${c.why ? `\n   ${c.why}` : ''}`).join('\n');
+  const auto = task.codeStatus === 'auto';
+  return (
+    <span className={`norm-suggest ${auto ? 'auto' : 'weak'}`} title={`${auto ? 'Tự gắn khi đẩy sang dự toán' : 'Chỉ là gợi ý – xác nhận trong lưới dự toán'}\n${tip}`}>
+      <b>{best.code}</b> <span className="hint">{pct(best.confidence)}</span>
+    </span>
   );
 }
 
@@ -406,7 +439,11 @@ function ManualSheetPanel({ projectId, rows, onChanged }: { projectId: number; r
     }
   };
 
+  const quickRef = useRef<HTMLElement>(null);
+
   const evalQuick = async () => {
+    setError('');
+    if (hasInvalidInput(quickRef.current, setError)) return;
     try {
       const r = await api.evalManual(projectId, { mode: 'quick', quick });
       setQuickResult(r.quick);
@@ -416,6 +453,8 @@ function ManualSheetPanel({ projectId, rows, onChanged }: { projectId: number; r
   };
 
   const saveQuick = async () => {
+    setError('');
+    if (hasInvalidInput(quickRef.current, setError)) return;
     try {
       await api.saveManual(projectId, { mode: 'quick', quick, drawingName: name });
       onChanged();
@@ -446,20 +485,20 @@ function ManualSheetPanel({ projectId, rows, onChanged }: { projectId: number; r
           </p>
         )}
       </section>
-      <section>
+      <section ref={quickRef}>
         <h4>Bảng tính nhanh</h4>
         <div className="row">
           <label>
-            Số lượng n <input type="number" value={quick.n} onChange={(e) => setQuick({ ...quick, n: Number(e.target.value) })} />
+            Số lượng n <DecimalInput testId="quick-n" value={quick.n} onChange={(v) => setQuick((q) => ({ ...q, n: v }))} />
           </label>
           <label>
-            Diện tích A (m²) <input type="number" value={quick.a} onChange={(e) => setQuick({ ...quick, a: Number(e.target.value) })} />
+            Diện tích A (m²) <DecimalInput testId="quick-a" value={quick.a} onChange={(v) => setQuick((q) => ({ ...q, a: v }))} />
           </label>
           <label>
-            Chiều dài L (m) <input type="number" value={quick.l} onChange={(e) => setQuick({ ...quick, l: Number(e.target.value) })} />
+            Chiều dài L (m) <DecimalInput testId="quick-l" value={quick.l} onChange={(v) => setQuick((q) => ({ ...q, l: v }))} />
           </label>
           <label>
-            Chiều cao H (m) <input type="number" value={quick.h} onChange={(e) => setQuick({ ...quick, h: Number(e.target.value) })} />
+            Chiều cao H (m) <DecimalInput testId="quick-h" value={quick.h} onChange={(v) => setQuick((q) => ({ ...q, h: v }))} />
           </label>
           <button onClick={evalQuick}>Tính</button>
           <button onClick={saveQuick}>Lưu dòng</button>
@@ -502,9 +541,11 @@ function ManualSheetPanel({ projectId, rows, onChanged }: { projectId: number; r
 function RebarPanel({ projectId, rows, groups, onChanged }: { projectId: number; rows: RebarScheduleRowDTO[]; groups: { type: string; groups: Record<string, number> }[]; onChanged: () => void }) {
   const [form, setForm] = useState({ cauKien: '', diaMm: 16, chieuDai1ThanhMm: 0, soCauKien: 1, soThanh1CauKien: 1 });
   const [error, setError] = useState('');
+  const panel = useRef<HTMLDivElement>(null);
 
   const add = async () => {
     setError('');
+    if (hasInvalidInput(panel.current, setError)) return;
     try {
       await api.saveRebarRow(projectId, form);
       setForm({ cauKien: '', diaMm: 16, chieuDai1ThanhMm: 0, soCauKien: 1, soThanh1CauKien: 1 });
@@ -515,21 +556,21 @@ function RebarPanel({ projectId, rows, groups, onChanged }: { projectId: number;
   };
 
   return (
-    <div className="rebar-panel">
+    <div className="rebar-panel" ref={panel}>
       {error && <div className="error">{error}</div>}
       <div className="row">
         <input placeholder="Cấu kiện" value={form.cauKien} onChange={(e) => setForm({ ...form, cauKien: e.target.value })} />
         <label>
-          Ø (mm) <input type="number" value={form.diaMm} onChange={(e) => setForm({ ...form, diaMm: Number(e.target.value) })} />
+          Ø (mm) <DecimalInput testId="rebar-dia" value={form.diaMm} min={0} onChange={(v) => setForm((f) => ({ ...f, diaMm: v }))} />
         </label>
         <label>
-          Chiều dài 1 thanh (mm) <input type="number" value={form.chieuDai1ThanhMm} onChange={(e) => setForm({ ...form, chieuDai1ThanhMm: Number(e.target.value) })} />
+          Chiều dài 1 thanh (mm) <DecimalInput testId="rebar-length" value={form.chieuDai1ThanhMm} min={0} onChange={(v) => setForm((f) => ({ ...f, chieuDai1ThanhMm: v }))} />
         </label>
         <label>
-          Số thanh/cấu kiện <input type="number" value={form.soThanh1CauKien} onChange={(e) => setForm({ ...form, soThanh1CauKien: Number(e.target.value) })} />
+          Số thanh/cấu kiện <DecimalInput testId="rebar-bars" integer min={0} value={form.soThanh1CauKien} onChange={(v) => setForm((f) => ({ ...f, soThanh1CauKien: v }))} />
         </label>
         <label>
-          Số cấu kiện <input type="number" value={form.soCauKien} onChange={(e) => setForm({ ...form, soCauKien: Number(e.target.value) })} />
+          Số cấu kiện <DecimalInput testId="rebar-count" integer min={0} value={form.soCauKien} onChange={(v) => setForm((f) => ({ ...f, soCauKien: v }))} />
         </label>
         <button data-testid="rebar-add-btn" onClick={add}>
           Thêm dòng
@@ -600,8 +641,11 @@ function StoriesPanel({ projectId, stories, onChanged }: { projectId: number; st
   const [height, setHeight] = useState(3.3);
   const [error, setError] = useState('');
 
+  const panel = useRef<HTMLDivElement>(null);
+
   const add = async () => {
     setError('');
+    if (hasInvalidInput(panel.current, setError)) return;
     try {
       await api.createStory(projectId, { name, heightM: height });
       setName('');
@@ -612,13 +656,13 @@ function StoriesPanel({ projectId, stories, onChanged }: { projectId: number; st
   };
 
   return (
-    <div className="stories-panel">
+    <div className="stories-panel" ref={panel}>
       {error && <div className="error">{error}</div>}
       <p className="hint">Khai báo các tầng để nhóm cấu kiện và (tùy chọn) tách công tác theo tầng khi đẩy sang dự toán.</p>
       <div className="row">
         <input data-testid="story-name" placeholder="Tên tầng (vd. Trệt, Tầng 1)" value={name} onChange={(e) => setName(e.target.value)} />
         <label>
-          Chiều cao (m) <input type="number" step="0.1" value={height} onChange={(e) => setHeight(Number(e.target.value))} />
+          Chiều cao (m) <DecimalInput testId="story-height" value={height} min={0} onChange={setHeight} />
         </label>
         <button data-testid="story-add-btn" onClick={add} disabled={!name.trim()}>
           Thêm tầng

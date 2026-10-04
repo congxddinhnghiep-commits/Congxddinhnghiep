@@ -1,12 +1,26 @@
+import ExcelJS from 'exceljs';
 import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { openDb } from '../src/db.js';
 import { seedAdmin } from '../src/seed.js';
+import { normalizeText } from '@dutoan/core';
 
 // Update 5 — element-based quantity take-off: server wiring (sections A-F) and acceptance test I.10.
 const db = openDb(':memory:');
 seedAdmin(db, 'admin', 'admin123');
+// A slice of the real TT38 PL2 concrete tables (names as imported) – the "Mã gợi ý" tests rank within them.
+{
+  const ins = db.prepare(`INSERT INTO norms (dataset, code, name, unit, grp, name_search, is_sample) VALUES ('TT38_2026', ?, ?, '1m3', 'AF', ?, 0)`);
+  for (const [code, name] of [
+    ['AF.11110', 'Bê tông lót móng – Chiều rộng (cm) – ≤250'],
+    ['AF.11120', 'Bê tông lót móng – Chiều rộng (cm) – >250'],
+    ['AF.11210', 'Bê tông móng – Chiều rộng (cm) – ≤250'],
+    ['AF.11220', 'Bê tông móng – Chiều rộng (cm) – >250'],
+    ['AF.21110', 'Bê tông lót móng Bê tông móng – Lót móng'],
+  ])
+    ins.run(code, name, normalizeText(`${code} ${name}`));
+}
 const app = createApp(db, { serveWeb: false });
 let token = '';
 const A = () => ({ Authorization: `Bearer ${token}` });
@@ -151,5 +165,61 @@ describe('Update 5 I.10 — push to estimate, re-push, override, undo', () => {
     await request(app).post(`/api/projects/${pid}/takeoff/push/${rev1}/undo`).set(A());
     const est4 = (await request(app).get(`/api/projects/${pid}/estimate`).set(A())).body;
     expect(est4.categories.find((c: { id: number }) => c.id === catId).items).toHaveLength(0);
+  });
+});
+
+describe('Take-off fixes — Mã gợi ý and Diễn giải KL after "Đẩy sang dự toán"', () => {
+  it('shows top-3 norm candidates per task; "Bê tông lót móng" comes from the TT38 PL2 AF.111 table', async () => {
+    const { pid, catId } = await newProject('Bóc KL – mã gợi ý');
+    const res = (await request(app).post(`/api/projects/${pid}/takeoff/elements`).set(A()).send({ type: 'mong_don', name: 'M1', count: 10, categoryId: catId, params: MONG_DON_M1 })).body;
+    const tasks = res.tasks as { key: string; normCode: string; codeStatus: string; confidence: number; candidates: { code: string; confidence: number }[] }[];
+    for (const t of tasks.filter((x) => x.candidates.length)) expect(t.confidence).toBe(t.candidates[0].confidence);
+    const lot = tasks.find((t) => t.key === 'bt_lot')!;
+    expect(lot.candidates[0].code).toBe('AF.11110'); // lót rộng 1,4 m ≤ 250 cm
+    expect(lot.normCode).toBe('AF.11110');
+    expect(lot.codeStatus).toBe('auto');
+    expect(lot.candidates.map((c) => c.code)).not.toContain('AF.21110');
+    const mong = tasks.find((t) => t.key === 'bt_mong')!;
+    expect(mong.candidates[0].code).toBe('AF.11210');
+  });
+
+  it('pushed items carry their breakdown lines in the grid data and in the Excel export', async () => {
+    const { pid, catId } = await newProject('Bóc KL – diễn giải');
+    await request(app).post(`/api/projects/${pid}/takeoff/elements`).set(A()).send({ type: 'mong_don', name: 'M1', count: 10, categoryId: catId, params: MONG_DON_M1 });
+    await request(app).post(`/api/projects/${pid}/takeoff/push/apply`).set(A()).send({});
+    const est = (await request(app).get(`/api/projects/${pid}/estimate`).set(A())).body;
+    const items = est.categories.find((c: { id: number }) => c.id === catId).items as { name: string; quantityFormula: string | null; quantityBreakdown?: string[] }[];
+    const btMong = items.find((i) => i.name === 'Bê tông móng')!;
+    expect(btMong.quantityFormula ?? '').toBe('');
+    expect(btMong.quantityBreakdown).toEqual(['M1 × 10: 1,8×1,2×0,5 = 10,8']);
+    for (const it of items) expect(it.quantityBreakdown?.length, it.name).toBeGreaterThan(0);
+    expect(items.find((i) => i.name === 'Đào móng')!.quantityBreakdown).toEqual(['M1 × 10: 2,6×2×1,5 = 78']);
+
+    const r = await request(app)
+      .get(`/api/projects/${pid}/export.xlsx`)
+      .set(A())
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      });
+    expect(r.status).toBe(200);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(r.body);
+    const findRow = (ws: ExcelJS.Worksheet, pred: (row: ExcelJS.Row) => boolean) => {
+      for (let i = 1; i <= ws.rowCount; i++) if (pred(ws.getRow(i))) return ws.getRow(i);
+      return null;
+    };
+    // DTCT: the item's own "Diễn giải khối lượng" cell
+    const dt = wb.getWorksheet('DTCT')!;
+    const dtRow = findRow(dt, (row) => row.getCell(3).value === 'Bê tông móng')!;
+    expect(dtRow.getCell(5).value).toBe('M1 × 10: 1,8×1,2×0,5 = 10,8');
+    // per-package sheet: the breakdown line under the item – element in "Tên công tác", formula in "Diễn giải khối lượng"
+    const pkg = wb.worksheets[1];
+    const line = findRow(pkg, (row) => row.getCell(3).value === '    M1 × 10')!;
+    expect(line).not.toBeNull();
+    expect(line.getCell(5).value).toBe('1,8×1,2×0,5 = 10,8');
+    expect(line.getCell(6).value).toBeCloseTo(10.8, 3);
   });
 });

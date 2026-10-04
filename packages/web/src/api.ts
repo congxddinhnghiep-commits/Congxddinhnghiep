@@ -145,6 +145,8 @@ export interface GeneratedTaskDTO {
   normCode: string;
   codeStatus: '' | 'auto';
   confidence: number | null;
+  /** Top-3 norm candidates, best first (same engine as the estimate grid, ranked within the TT38 table first). */
+  candidates: { code: string; name: string; unit: string; confidence: number; why: string }[];
 }
 
 export interface TakeoffElementDTO {

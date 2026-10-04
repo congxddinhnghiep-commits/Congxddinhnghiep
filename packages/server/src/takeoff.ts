@@ -4,8 +4,10 @@ import {
   computeRebarRow,
   evaluateManualFormula,
   formatNumber,
+  rankFamilyNorms,
   rebarGroup,
   summarizeRebarByGroup,
+  taskNormHint,
   type ElementParams,
   type ElementType,
   type GeneratedTask,
@@ -55,6 +57,16 @@ export interface GeneratedTaskRow extends GeneratedTask {
   normCode: string;
   codeStatus: '' | 'auto';
   confidence: number | null;
+  /** Top-3 norm candidates (best first) – shown in the "Mã gợi ý" column even below the auto-assign threshold. */
+  candidates: NormCandidate[];
+}
+
+export interface NormCandidate {
+  code: string;
+  name: string;
+  unit: string;
+  confidence: number;
+  why: string;
 }
 
 export interface ManualSheetRow {
@@ -353,24 +365,54 @@ export class TakeoffService {
     this.db.prepare('DELETE FROM takeoff_elements WHERE id = ?').run(id);
   }
 
+  /** Codes of one TT38 table (code prefix) in a dataset – sample rows only when the dataset has no real ones there. */
+  private familyNorms(dataset: string, family: string): { code: string; name: string; unit: string }[] {
+    const rows = this.db.prepare(`SELECT code, name, unit, is_sample FROM norms WHERE dataset = ? AND code LIKE ? ORDER BY code`).all(dataset, `${family}%`) as { code: string; name: string; unit: string; is_sample: number }[];
+    const real = rows.filter((r) => !r.is_sample);
+    return (real.length ? real : rows).map(({ code, name, unit }) => ({ code, name, unit }));
+  }
+
+  /**
+   * Norm candidates for one generated task (section C): codes of the task's TT38 table ranked by the element's
+   * parameters (taskNormHint), else the generic suggestion engine used by the estimate grid.
+   */
+  private normCandidates(projectId: number, element: TakeoffElementRow, task: GeneratedTask, topElevationM: number | null): NormCandidate[] {
+    const dataset = this.repo.datasetOf(projectId);
+    const out: NormCandidate[] = [];
+    const hint = taskNormHint(element.type, task.key, element.params, { topElevationM });
+    if (hint) {
+      for (const c of rankFamilyNorms(this.familyNorms(dataset, hint.family), hint).slice(0, 3)) out.push({ code: c.norm.code, name: c.norm.name, unit: c.norm.unit, confidence: c.confidence, why: c.why });
+    }
+    // The generic engine only when the task has no TT38 table, or the dataset lacks it: a hinted task never lists an
+    // off-table code (e.g. AF.21110 "đổ bằng cần cẩu" for "Bê tông lót móng").
+    if (!out.length) {
+      for (const sgg of this.repo.normIndex(dataset).suggest(task.name, task.unit, 3)) {
+        out.push({ code: sgg.norm.code, name: sgg.norm.name, unit: sgg.norm.unit, confidence: Math.round(sgg.confidence * 100) / 100, why: sgg.why });
+      }
+    }
+    return out;
+  }
+
   /** Generated tasks for one element, with overrides and a norm-code suggestion applied (section C, E.3). */
   tasksFor(projectId: number, element: TakeoffElementRow): GeneratedTaskRow[] {
-    const dataset = this.repo.datasetOf(projectId);
-    const idx = this.repo.normIndex(dataset);
     const raw = computeElementTasks(element.type, element.params, element.count, { enabled: element.enabled, elementName: element.name });
+    const story = element.storyId ? this.listStories(projectId).find((x) => x.id === element.storyId) : undefined;
+    const topElevationM = story && story.heightM > 0 ? story.elevationM + story.heightM : null;
     return raw.map((t): GeneratedTaskRow => {
       const override = element.overrides[t.key];
-      const suggestion = idx.suggest(t.name, t.unit, 1)[0];
-      const auto = suggestion && suggestion.confidence >= 0.8 ? suggestion : null;
+      const candidates = this.normCandidates(projectId, element, t, topElevationM);
+      const best = candidates[0];
+      const auto = best && best.confidence >= 0.8 ? best : null;
       return {
         ...t,
         value: override ? override.value : t.value,
         computedValue: t.value,
         overrideValue: override?.value ?? null,
         overrideReason: override?.reason ?? null,
-        normCode: auto?.norm.code ?? '',
+        normCode: auto?.code ?? '',
         codeStatus: auto ? 'auto' : '',
-        confidence: suggestion?.confidence ?? null,
+        confidence: best?.confidence ?? null,
+        candidates,
       };
     });
   }

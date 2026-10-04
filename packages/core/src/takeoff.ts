@@ -64,7 +64,8 @@ interface TaskTemplate {
 }
 
 const round3 = (x: number): number => Math.round((x + Number.EPSILON) * 1000) / 1000;
-const n = (x: number): string => (Number.isInteger(x) ? String(x) : String(round3(x)));
+/** Number inside a human-readable formula, Vietnamese style: 1.8 → "1,8" (the formulas end up in "Diễn giải khối lượng"). */
+const n = (x: number): string => (Number.isInteger(x) ? String(x) : String(round3(x)).replace('.', ','));
 
 /**
  * Excavation of a rectangular pit (hố móng/đài): straight sides when `m` (hệ số mái dốc) is 0,
@@ -102,6 +103,138 @@ export const ELEMENT_DEFAULTS: Record<ElementType, ElementParams> = {
   nen: { S: 1, t_bt: 0.1, t_lot: 0.05, t_da: 0, nilon: 0 },
   hoan_thien: { S: 1, L: 0 },
 };
+
+/** One element parameter as shown in the form: Vietnamese label, unit and a tooltip (Update 5 fix: no cryptic keys). */
+export interface ElementParamMeta {
+  label: string;
+  /** '' for dimensionless values (hệ số, số cọc…). */
+  unit: string;
+  hint: string;
+  /** 0/1 switch rendered as a checkbox. */
+  flag?: boolean;
+}
+
+const P = (label: string, unit: string, hint: string, flag?: boolean): ElementParamMeta => (flag ? { label, unit, hint, flag } : { label, unit, hint });
+
+const LOT_DAO: Record<string, ElementParamMeta> = {
+  t_l: P('chiều dày bê tông lót', 'm', 'Chiều dày lớp bê tông lót dưới đáy (thường 0,1 m). Nhập 0 nếu không có lót.'),
+  e_l: P('mở rộng lót mỗi bên', 'm', 'Bê tông lót rộng hơn đáy kết cấu mỗi bên một đoạn e_l (thường 0,1 m).'),
+  H_d: P('chiều sâu đào', 'm', 'Chiều sâu hố đào tính từ cốt mặt đất tự nhiên đến đáy lớp lót.'),
+  e_tc: P('mở rộng thi công mỗi bên', 'm', 'Khoảng mở rộng đáy hố đào mỗi bên ngoài mép lót để thi công (thường 0,3 m).'),
+  m: P('hệ số mái dốc', '', 'm = 0: vách đào thẳng đứng; m = 0,5: mái dốc 1:0,5 (mỗi mét sâu mở rộng thêm 0,5 m mỗi bên).'),
+};
+
+/** Labels/units/tooltips for every parameter of every element type (same keys as ELEMENT_DEFAULTS). */
+export const ELEMENT_PARAM_META: Record<ElementType, Record<string, ElementParamMeta>> = {
+  mong_don: {
+    a: P('cạnh dài móng', 'm', 'Kích thước cạnh dài của bản đế móng.'),
+    b: P('cạnh ngắn móng', 'm', 'Kích thước cạnh ngắn của bản đế móng (chiều rộng móng để chọn mã ≤250 / >250 cm).'),
+    h: P('chiều cao bản móng', 'm', 'Chiều dày (chiều cao) bản đế móng.'),
+    ...LOT_DAO,
+    bc: P('cạnh b tiết diện cổ móng', 'm', 'Kích thước tiết diện cổ móng theo phương b. Nhập 0 nếu không có cổ móng.'),
+    hc: P('cạnh h tiết diện cổ móng', 'm', 'Kích thước tiết diện cổ móng theo phương h.'),
+    Hc: P('chiều cao cổ móng', 'm', 'Chiều cao cổ móng (từ mặt bản móng đến đáy giằng / chân cột).'),
+    h_ngam: P('chiều cao cổ móng nằm trong đất', 'm', 'Phần cổ móng chôn trong đất, được trừ khi tính đắp đất.'),
+  },
+  mong_bang: {
+    b: P('bề rộng đáy móng băng', 'm', 'Bề rộng bản đáy móng băng.'),
+    h: P('chiều cao bản móng', 'm', 'Chiều dày bản đáy móng băng.'),
+    L: P('chiều dài móng băng', 'm', 'Chiều dài tính toán của đoạn móng băng.'),
+    bs: P('bề rộng sườn móng', 'm', 'Bề rộng sườn (dầm) móng băng. Nhập 0 nếu không có sườn.'),
+    hs: P('chiều cao sườn móng', 'm', 'Chiều cao sườn tính từ mặt bản móng.'),
+    ...LOT_DAO,
+  },
+  dai_coc: {
+    a: P('cạnh dài đài', 'm', 'Kích thước cạnh dài của đài cọc.'),
+    b: P('cạnh ngắn đài', 'm', 'Kích thước cạnh ngắn của đài cọc.'),
+    h: P('chiều cao đài', 'm', 'Chiều cao (chiều dày) đài cọc.'),
+    n: P('số cọc trong đài', 'cọc', 'Số cọc của một đài.'),
+    D: P('đường kính / cạnh cọc', 'm', 'Đường kính cọc tròn, hoặc cạnh cọc vuông khi bật “cọc vuông”.'),
+    L: P('chiều dài cọc', 'm', 'Chiều dài một cọc (ép/đóng).'),
+    dap_dau: P('đoạn đập đầu cọc', 'm', 'Chiều dài đoạn đầu cọc phải đập bỏ.'),
+    pile_shape: P('cọc vuông', '', 'Bật: cọc vuông cạnh D (tiết diện D²). Tắt: cọc tròn đường kính D (π·D²/4).', true),
+    ...LOT_DAO,
+  },
+  giang_mong: {
+    b: P('bề rộng giằng', 'm', 'Bề rộng tiết diện giằng móng / đà kiềng.'),
+    h: P('chiều cao giằng', 'm', 'Chiều cao tiết diện giằng móng.'),
+    L: P('chiều dài giằng', 'm', 'Chiều dài thông thủy giữa các móng/cột.'),
+    t_l: LOT_DAO.t_l,
+    e_l: LOT_DAO.e_l,
+  },
+  tuong_mong: {
+    b: P('bề dày tường móng', 'm', 'Chiều dày tường móng bê tông.'),
+    h: P('chiều cao tường móng', 'm', 'Chiều cao tường móng.'),
+    L: P('chiều dài tường móng', 'm', 'Chiều dài tường móng.'),
+    t_l: LOT_DAO.t_l,
+    e_l: LOT_DAO.e_l,
+  },
+  cot: {
+    b: P('cạnh b tiết diện cột', 'm', 'Kích thước tiết diện cột chữ nhật theo phương b.'),
+    h: P('cạnh h tiết diện cột', 'm', 'Kích thước tiết diện cột chữ nhật theo phương h.'),
+    D: P('đường kính cột tròn', 'm', 'Chỉ dùng cho cột tròn; để 0 với cột chữ nhật.'),
+    H: P('chiều cao tầng', 'm', 'Chiều cao cột tính từ mặt sàn/móng đến mặt sàn trên.'),
+    h_dam: P('chiều cao dầm (trừ)', 'm', 'Chiều cao dầm đỡ sàn trên – được trừ khi tính cột đến đáy dầm.'),
+    cot_den_day_dam: P('cột tính đến đáy dầm', '', 'Bật: chiều cao cột = H − h_dầm (quy tắc Cột > Dầm > Sàn). Tắt: dùng cả H.', true),
+    trat: P('có trát cột', '', 'Bật để sinh công tác trát cột (chu vi × chiều cao).', true),
+  },
+  dam: {
+    b: P('bề rộng dầm', 'm', 'Bề rộng tiết diện dầm.'),
+    h: P('chiều cao dầm', 'm', 'Chiều cao tiết diện dầm (kể cả phần trong sàn).'),
+    L: P('chiều dài thông thủy', 'm', 'Chiều dài dầm giữa hai mép cột.'),
+    h_san: P('chiều dày sàn (trừ ván khuôn)', 'm', 'Chiều dày sàn – phần thành dầm nằm trong sàn không tính ván khuôn.'),
+  },
+  san: {
+    S: P('diện tích sàn', 'm²', 'Diện tích sàn thông thủy (dùng khi a, b = 0).'),
+    a: P('cạnh a ô sàn', 'm', 'Nếu nhập a và b > 0 thì diện tích = a × b (thay cho S).'),
+    b: P('cạnh b ô sàn', 'm', 'Nếu nhập a và b > 0 thì diện tích = a × b (thay cho S).'),
+    t: P('chiều dày sàn', 'm', 'Chiều dày bản sàn.'),
+    S_lo: P('diện tích lỗ mở', 'm²', 'Tổng diện tích lỗ mở được trừ.'),
+  },
+  vach: {
+    L: P('chiều dài vách', 'm', 'Chiều dài vách bê tông cốt thép.'),
+    H: P('chiều cao vách', 'm', 'Chiều cao vách.'),
+    t: P('chiều dày vách', 'm', 'Chiều dày vách.'),
+    S_lo: P('diện tích lỗ mở', 'm²', 'Tổng diện tích lỗ cửa/lỗ mở được trừ.'),
+  },
+  cau_thang: {
+    w: P('bề rộng bản thang', 'm', 'Bề rộng vế thang.'),
+    Ln: P('chiều dài nghiêng bản thang', 'm', 'Chiều dài theo phương nghiêng của bản thang.'),
+    t: P('chiều dày bản thang', 'm', 'Chiều dày bản thang và chiếu nghỉ.'),
+    S_cn: P('diện tích chiếu nghỉ', 'm²', 'Diện tích chiếu nghỉ / chiếu tới.'),
+  },
+  tuong_xay: {
+    L: P('chiều dài tường', 'm', 'Chiều dài tường xây.'),
+    H: P('chiều cao tường', 'm', 'Chiều cao tường xây.'),
+    day: P('chiều dày tường', 'm', 'Chiều dày tường (ví dụ 0,1 hoặc 0,2 m).'),
+    S_cua: P('diện tích lỗ cửa', 'm²', 'Tổng diện tích cửa/lỗ mở được trừ.'),
+    ba_son: P('có bả, sơn', '', 'Bật để sinh công tác bả, sơn 2 mặt tường.', true),
+    op_chan: P('chiều dài ốp chân tường', 'm', 'Chiều dài ốp chân tường; 0 = không ốp.'),
+  },
+  lanh_to: {
+    b: P('bề rộng lanh tô', 'm', 'Bề rộng tiết diện lanh tô.'),
+    h: P('chiều cao lanh tô', 'm', 'Chiều cao tiết diện lanh tô.'),
+    L: P('chiều dài lanh tô', 'm', 'Chiều dài lanh tô (kể cả phần gác lên tường).'),
+  },
+  nen: {
+    S: P('diện tích nền', 'm²', 'Diện tích nền.'),
+    t_bt: P('chiều dày bê tông nền', 'm', 'Chiều dày lớp bê tông nền.'),
+    t_lot: P('chiều dày lớp lót', 'm', 'Chiều dày lớp bê tông lót nền; 0 = không có.'),
+    t_da: P('chiều dày lớp đá', 'm', 'Chiều dày lớp đá 4x6 / 0x4 lót nền; 0 = không có.'),
+    nilon: P('có lót nilon', '', 'Bật để sinh công tác lót nilon (m²).', true),
+  },
+  hoan_thien: {
+    S: P('diện tích', 'm²', 'Diện tích lát / ốp / trần / sơn.'),
+    L: P('chiều dài', 'm', 'Nhập chiều dài > 0 nếu công tác tính theo m (khi đó bỏ qua S).'),
+  },
+};
+
+/** "a – cạnh dài móng (m)": key, Vietnamese label and unit, for forms and tooltips. */
+export function elementParamLabel(type: ElementType, key: string): string {
+  const m = ELEMENT_PARAM_META[type]?.[key];
+  if (!m) return key;
+  return `${key} – ${m.label}${m.unit ? ` (${m.unit})` : ''}`;
+}
 
 const sanArea = (p: ElementParams): number => (p.a > 0 && p.b > 0 ? p.a * p.b : p.S);
 
@@ -362,6 +495,133 @@ export function computeElementTasks(type: ElementType, rawParams: ElementParams,
     out.push({ key: t.key, name, unit, formula, perUnit: round3(value), value: round3(value * count) });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// C. Norm-code family hints (TT 38/2026 Phụ lục II)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which TT38 PL2 table ("họ mã") a generated concrete task belongs to, and which column of that table its parameters
+ * select (chiều rộng ≤250/>250 cm, tiết diện cột ≤0,1/>0,1 m², chiều cao ≤6/≤28/≤100 m, chiều dày tường ≤45/>45 cm).
+ * Only a code-PREFIX of a table is named here – the actual codes always come from the project's norm dataset. Family
+ * AF.1xxxx = vữa bê tông sản xuất bằng máy trộn, đổ bằng thủ công (the default for small buildings, e.g. "Bê tông lót
+ * móng" → AF.111xx, never AF.211xx which is the "đổ bằng cần cẩu" table that merely repeats the words "lót móng").
+ * Tasks without a hint (ván khuôn, đào, xây, trát…) fall back to the generic suggestion engine.
+ */
+export interface NormVariant {
+  label: string;
+  /** Tested against the norm name normalised by `normFamilyText`. */
+  re: RegExp;
+  /** The parameter was not known and a default was assumed (e.g. chiều cao ≤ 6 m when no tầng is set). */
+  assumed?: boolean;
+}
+
+export interface NormHint {
+  /** Code prefix of the TT38 table, e.g. "AF.111". */
+  family: string;
+  familyLabel: string;
+  variants: NormVariant[];
+}
+
+export interface NormHintContext {
+  /** Cao độ đỉnh of the element's tầng (elevation + height, m), when the element is placed on a tầng. */
+  topElevationM?: number | null;
+}
+
+const widthVariant = (wm: number): NormVariant =>
+  wm <= 2.5 ? { label: 'chiều rộng ≤ 250 cm', re: /\bchieu rong (cm )?le 250\b/ } : { label: 'chiều rộng > 250 cm', re: /\bchieu rong (cm )?gt 250\b/ };
+
+const heightVariant = (h: number | null | undefined): NormVariant => {
+  const assumed = h === null || h === undefined || !(h > 0);
+  const v = assumed ? 6 : h <= 6 ? 6 : h <= 28 ? 28 : 100;
+  return { label: `chiều cao ≤ ${v} m${assumed ? ' (giả định)' : ''}`, re: new RegExp(`\\bchieu cao (m )?le ${v}\\b`), assumed };
+};
+
+const sectionVariant = (area: number): NormVariant =>
+  area <= 0.1 ? { label: 'tiết diện ≤ 0,1 m²', re: /\btiet dien cot (m2 )?le 0\.1\b/ } : { label: 'tiết diện > 0,1 m²', re: /\btiet dien cot (m2 )?gt 0\.1\b/ };
+
+const thickVariant = (tm: number): NormVariant =>
+  tm <= 0.45 ? { label: 'chiều dày ≤ 45 cm', re: /\bchieu day (cm )?le 45\b/ } : { label: 'chiều dày > 45 cm', re: /\bchieu day (cm )?gt 45\b/ };
+
+const LOT = { family: 'AF.111', familyLabel: 'Bê tông lót móng (TT38 PL2 – AF.111)' };
+const MONG = { family: 'AF.112', familyLabel: 'Bê tông móng (TT38 PL2 – AF.112)' };
+const TUONG = { family: 'AF.121', familyLabel: 'Bê tông tường (TT38 PL2 – AF.121)' };
+const COT = { family: 'AF.122', familyLabel: 'Bê tông cột (TT38 PL2 – AF.122)' };
+const DAM = { family: 'AF.123', familyLabel: 'Bê tông xà dầm, giằng (TT38 PL2 – AF.123)' };
+
+type HintFn = (p: ElementParams, ctx: NormHintContext) => NormHint;
+
+const NORM_HINTS: Record<string, HintFn> = {
+  bt_lot: (p) => ({ ...LOT, variants: [widthVariant(Math.min(p.a, p.b) + 2 * p.e_l)] }),
+  bt_lot_dai: (p) => ({ ...LOT, variants: [widthVariant(Math.min(p.a, p.b) + 2 * p.e_l)] }),
+  bt_lot_bang: (p) => ({ ...LOT, variants: [widthVariant(p.b + 2 * p.e_l)] }),
+  lot_giang: (p) => ({ ...LOT, variants: [widthVariant(p.b + 2 * p.e_l)] }),
+  lot_tuong_mong: (p) => ({ ...LOT, variants: [widthVariant(p.b + 2 * p.e_l)] }),
+  bt_mong: (p) => ({ ...MONG, variants: [widthVariant(Math.min(p.a, p.b))] }),
+  bt_dai: (p) => ({ ...MONG, variants: [widthVariant(Math.min(p.a, p.b))] }),
+  bt_mong_bang: (p) => ({ ...MONG, variants: [widthVariant(p.b)] }),
+  bt_suon: (p) => ({ ...MONG, variants: [widthVariant(p.b)] }),
+  bt_co_mong: (p, ctx) => ({ ...COT, variants: [sectionVariant(p.bc * p.hc), heightVariant(ctx.topElevationM ?? p.Hc)] }),
+  bt_cot: (p, ctx) => ({ ...COT, variants: [sectionVariant(p.D > 0 ? (Math.PI * p.D * p.D) / 4 : p.b * p.h), heightVariant(ctx.topElevationM ?? p.H)] }),
+  bt_dam: (_p, ctx) => ({ ...DAM, variants: [heightVariant(ctx.topElevationM)] }),
+  bt_giang: (_p, ctx) => ({ ...DAM, variants: [heightVariant(ctx.topElevationM)] }),
+  bt_tuong_mong: (p, ctx) => ({ ...TUONG, variants: [thickVariant(p.b), heightVariant(ctx.topElevationM)] }),
+  bt_vach: (p, ctx) => ({ ...TUONG, variants: [thickVariant(p.t), heightVariant(ctx.topElevationM ?? p.H)] }),
+  bt_san: () => ({ family: 'AF.1241', familyLabel: 'Bê tông sàn mái (TT38 PL2 – AF.124)', variants: [] }),
+  bt_lt: () => ({ family: 'AF.1251', familyLabel: 'Bê tông lanh tô, ô văng (TT38 PL2 – AF.125)', variants: [] }),
+  bt_thang: () => ({ family: 'AF.1261', familyLabel: 'Bê tông cầu thang thường (TT38 PL2 – AF.126)', variants: [] }),
+  bt_nen: () => ({ family: 'AF.1131', familyLabel: 'Bê tông nền (TT38 PL2 – AF.113)', variants: [] }),
+};
+
+/** Norm-family hint for one generated task of an element, or null (→ generic suggestion engine). */
+export function taskNormHint(type: ElementType, taskKey: string, rawParams: ElementParams, ctx: NormHintContext = {}): NormHint | null {
+  const fn = NORM_HINTS[taskKey];
+  return fn ? fn({ ...ELEMENT_DEFAULTS[type], ...rawParams }, ctx) : null;
+}
+
+/** Norm name → plain comparable text: "Chiều rộng (cm) – ≤250" → "chieu rong cm le 250". */
+export function normFamilyText(name: string): string {
+  return name
+    .replace(/≤|<=/g, ' le ')
+    .replace(/≥|>=/g, ' ge ')
+    .replace(/>/g, ' gt ')
+    .replace(/</g, ' le ')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/gi, 'd')
+    .toLowerCase()
+    .replace(/(\d),(\d)/g, '$1.$2')
+    .replace(/[^a-z0-9. ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export interface FamilyCandidate<T extends { code: string; name: string }> {
+  norm: T;
+  confidence: number;
+  why: string;
+}
+
+/**
+ * Rank the codes of a hint's family by how many of its parameter columns they match. Confidence: 0,65 for being in the
+ * right table + 0,3 × (share of matched columns); an assumed (defaulted) parameter costs 0,1, so it is shown as a
+ * suggestion but never auto-assigned (auto ≥ 0,8). Codes outside the family are never returned.
+ */
+export function rankFamilyNorms<T extends { code: string; name: string }>(norms: T[], hint: NormHint): FamilyCandidate<T>[] {
+  const fam = norms.filter((n) => n.code.toUpperCase().startsWith(hint.family.toUpperCase()));
+  const total = hint.variants.length;
+  return fam
+    .map((norm) => {
+      const text = normFamilyText(norm.name);
+      const hit = hint.variants.filter((v) => v.re.test(text));
+      const assumedHit = hit.some((v) => v.assumed);
+      const confidence = total ? 0.65 + (0.3 * hit.length) / total - (assumedHit ? 0.1 : 0) : 0.9;
+      const why = [hint.familyLabel, ...hit.map((v) => v.label)].join(' · ');
+      return { norm, confidence: Math.round(confidence * 100) / 100, why, hits: hit.length };
+    })
+    .sort((x, y) => y.hits - x.hits || y.confidence - x.confidence || x.norm.code.localeCompare(y.norm.code))
+    .map(({ norm, confidence, why }) => ({ norm, confidence, why }));
 }
 
 // ---------------------------------------------------------------------------

@@ -486,3 +486,24 @@ Nguồn: `docs/LEGAL-UPDATE-2026.md` (đã xác minh metadata ngày 2026-09-27).
 145. **Phạm vi bỏ qua trong đợt này** (ghi lại thay vì giấu đi): không có bộ lọc "Nguồn giá" tương tác trên lưới dự toán (`EstimateGrid` đã có logic bàn
     phím/điều hướng theo chỉ số dòng liên tục khá phức tạp – thêm ẩn/hiện dòng theo bộ lọc rủi ro vỡ điều hướng đó mà không kiểm chứng kỹ được); thay vào đó
     mỗi công việc có huy hiệu nguồn giá ngay trên lưới (bấm mở tab "Nguồn giá"), và bộ lọc/tổng hợp đầy đủ nằm ở tab "Kiểm tra" + file xuất Excel.
+146. **Ô số của tab "Bóc khối lượng" là ô văn bản, không phải `type="number"`** (sửa lỗi kiểm thử tay: gõ `1,8` thành `18`): mọi ô số (tham số cấu kiện,
+    số lượng, bảng tính nhanh, thống kê thép, chiều cao tầng) dùng `DecimalInput` + `parseDecimalInput` (core). Một dấu phân cách – `,` hay `.` – LUÔN là
+    dấu thập phân (kích thước tính bằng m: `1,800` = 1,8, không phải 1800); chỉ nhận nhóm hàng nghìn khi không mơ hồ (`1.650.000`, `1.234,5`). Chuỗi không
+    hợp lệ (`1,2,5`, `abc`) KHÔNG bị bỏ/đoán: giữ nguyên trong ô, viền đỏ + tooltip giải thích, không lưu; nút "Thêm dòng"/"Tính"/"Thêm tầng" từ chối khi
+    còn ô đỏ. Giá trị hiển thị lại luôn với dấu phẩy (`formatDecimalInput`), và công thức sinh ra cũng viết số kiểu Việt Nam (`1,8×1,2×0,5`).
+147. **Nhãn tham số cấu kiện nằm trong core (`ELEMENT_PARAM_META`)**, cùng khóa với `ELEMENT_DEFAULTS` – test bắt buộc mọi tham số của mọi loại cấu kiện có
+    nhãn tiếng Việt, đơn vị và tooltip; ô hiển thị "a – cạnh dài móng (m)". Tham số 0/1 (`cot_den_day_dam`, `trat`, `ba_son`, `nilon`, `pile_shape`) hiển
+    thị bằng ô đánh dấu thay vì bắt người dùng gõ 0/1.
+148. **Mã gợi ý của công tác sinh ra: xếp hạng TRONG bảng định mức TT38 PL2 trước, bộ máy gợi ý chung sau**: `taskNormHint` gắn mỗi công tác bê tông với
+    một TIỀN TỐ bảng (không bao giờ một mã cụ thể) + các cột tham số của bảng (chiều rộng ≤250/>250 cm, tiết diện cột ≤0,1/>0,1 m², chiều cao ≤6/≤28/≤100 m,
+    chiều dày tường ≤45/>45 cm); mã thật đọc từ bộ định mức của công trình. "Bê tông lót móng" → bảng AF.111 (AF.11110/AF.11120 theo bề rộng lớp lót) – trước
+    đây bộ máy chung chọn AF.21110 (68 %) chỉ vì tên bảng AF.21 lặp lại chữ "lót móng". Mặc định họ AF.1 (máy trộn, đổ thủ công); chưa có thiết lập "bê
+    tông thương phẩm/bơm" nên không tự chuyển sang AF.2/AF.3. Độ tin cậy = 0,65 (đúng bảng) + 0,3 × tỷ lệ cột khớp; tham số phải GIẢ ĐỊNH (chiều cao khi
+    cấu kiện chưa gán tầng) trừ 0,1 để chỉ là gợi ý, không tự gắn (ngưỡng tự gắn 0,8 giữ nguyên). Công tác có bảng thì KHÔNG trộn mã ngoài bảng vào top-3;
+    công tác chưa có bảng (ván khuôn, đào, đắp, xây, trát…) dùng đúng `NormIndex.suggest` như lưới dự toán. Cột "Mã gợi ý" hiện mã tốt nhất + % ngay cả dưới
+    ngưỡng (chữ nhạt = chỉ gợi ý), top-3 trong tooltip.
+149. **"Diễn giải KL" của công việc đẩy từ bóc khối lượng = các dòng diễn giải, chỉ đọc**: `Repo.calculate` gắn `quantityBreakdown` (văn bản các dòng
+    `quantity_lines`) cho mọi công việc có dòng; lưới hiển thị khi công việc không có công thức (bấm để mở hộp thoại sửa dòng), sheet DTCT ghi vào cột "Diễn
+    giải khối lượng" (xuống dòng), sheet theo hạng mục tách dòng "M1 × 10: 1,8×1,2×0,5 = 10,8" thành "M1 × 10" (cột tên) + "1,8×1,2×0,5 = 10,8" (cột diễn
+    giải) thay vì ghi lại con số kết quả "10.8". Không chuyển dòng thành công thức tính được vì nhiều công thức sinh ra là văn bản ("Đào móng − (BT móng + BT
+    lót)") – khối lượng vẫn lấy từ kết quả từng dòng như trước.
