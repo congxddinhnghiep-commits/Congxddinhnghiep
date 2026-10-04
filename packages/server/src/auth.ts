@@ -37,6 +37,22 @@ declare module 'express-serve-static-core' {
 
 export const MIN_PASSWORD = 8;
 
+/** The app's password hashing (bcrypt, cost 10) – used for every stored password. */
+export function hashPassword(password: string): string {
+  return bcrypt.hashSync(password, 10);
+}
+
+/**
+ * Reset ONE existing user's password (forgotten-password recovery by the server operator) and force a change at the
+ * next login. Touches only `password_hash` and `must_change_password` of that row; never creates a user.
+ */
+export function resetUserPassword(db: DB, username: string, newPassword: string): AuthUser {
+  if (newPassword.length < MIN_PASSWORD) throw new Error(`Mật khẩu mới tối thiểu ${MIN_PASSWORD} ký tự`);
+  const info = db.prepare('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE username = ?').run(hashPassword(newPassword), username.trim());
+  if (info.changes !== 1) throw new Error(`Không tìm thấy tài khoản "${username}"`);
+  return toUser(db.prepare('SELECT * FROM users WHERE username = ?').get(username.trim()) as UserRow);
+}
+
 export class AuthService {
   constructor(
     private db: DB,
@@ -71,7 +87,7 @@ export class AuthService {
     if (exists) throw new HttpError(409, 'Tên đăng nhập đã tồn tại');
     const info = this.db
       .prepare('INSERT INTO users (username, password_hash, full_name, role, must_change_password) VALUES (?, ?, ?, ?, 1)')
-      .run(username, bcrypt.hashSync(password, 10), fullName, role);
+      .run(username, hashPassword(password), fullName, role);
     return this.getUser(Number(info.lastInsertRowid))!;
   }
 
@@ -80,7 +96,7 @@ export class AuthService {
     if (!bcrypt.compareSync(oldPassword, r.password_hash)) throw new HttpError(400, 'Mật khẩu hiện tại không đúng');
     if (newPassword.length < MIN_PASSWORD) throw new HttpError(400, `Mật khẩu mới tối thiểu ${MIN_PASSWORD} ký tự`);
     if (newPassword === oldPassword) throw new HttpError(400, 'Mật khẩu mới phải khác mật khẩu cũ');
-    this.db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(bcrypt.hashSync(newPassword, 10), userId);
+    this.db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hashPassword(newPassword), userId);
     return this.getUser(userId)!;
   }
 

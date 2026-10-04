@@ -250,6 +250,11 @@ desktop/         Khung Electron (Phase 2)
 Đăng nhập lần đầu: **admin / admin123** (chỉ ở môi trường phát triển) → hệ thống yêu cầu đổi mật khẩu ngay.
 Có thể đặt tài khoản khác bằng biến môi trường `ADMIN_USER`, `ADMIN_PASS` (xem `.env.example`) trước lần chạy đầu tiên.
 
+**Quên mật khẩu quản trị**: sao lưu `data/dutoan.db` (vào `data/backups/`) rồi chạy trên máy chủ
+`RESET_PASSWORD='<mật khẩu mới>' npm run reset:admin-password` (hoặc `-- --password '<mật khẩu mới>'`; không truyền gì thì dùng `ADMIN_PASS`,
+mặc định theo `.env.example`; tài khoản khác: `-- --user <tên>`). Script chỉ đổi mật khẩu của đúng tài khoản đó (không tạo/xóa tài khoản, không đụng dữ
+liệu), bật cờ bắt buộc đổi mật khẩu ở lần đăng nhập tới và không in mật khẩu/hash. Biến `DB_PATH` chọn CSDL khác.
+
 ## 1. Chạy trên GitHub Codespaces
 1. Trên GitHub, bấm **Code → Codespaces → Create codespace on main**.
 2. Codespace tự chạy `npm install && npm run build` (cấu hình trong `.devcontainer/devcontainer.json`).
